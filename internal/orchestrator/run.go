@@ -89,6 +89,10 @@ func RunExercise(cfg config.Config, ex exercise.Exercise) error {
 
 // RunSandbox mounts a persistent volume (survives across runs) and starts
 // an ungraded, untimed session. See interview_prep_mvp_spec.md Section 3.6.
+//
+// Reset is manual by design (no scripted "reset to base" for MVP): wipe
+// the volume with `docker volume rm practice-sandbox` — the next
+// `practice run --sandbox` recreates it empty.
 func RunSandbox(cfg config.Config) error {
 	args := []string{
 		"run", "-it", "--rm",
