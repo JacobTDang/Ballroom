@@ -1,0 +1,11 @@
+# Go
+/practice
+*.test
+*.out
+
+# SQLite tracker (local practice data, not shared)
+data/*.db
+data/*.db-journal
+
+# OS
+.DS_Store

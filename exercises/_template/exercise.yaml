@@ -1,0 +1,15 @@
+# Template exercise definition. Copy this directory to exercises/<id>/ and
+# fill in a real exercise. Fields per interview_prep_mvp_spec.md Section 3.2.
+#
+# Hidden tests do NOT live under this directory. They live at
+# tests/<id>/ (sibling top-level tree) and are only mounted into the
+# container read-only when the `practice submit` command runs.
+
+id: _template
+title: ""
+category: "" # pattern | debug | concurrency | implementation | ai-assisted
+language: "" # go | cpp | python
+time_limit_min: 0
+tutor_mode: "" # syntax-only | hints-first | full-assist
+repo_path: "./repo" # relative to this file; mounted into the container
+test_command: "" # shell command run against tests/<id>/ at submit time
