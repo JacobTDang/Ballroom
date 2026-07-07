@@ -1,0 +1,99 @@
+// Package orchestrator drives the exercise/sandbox lifecycle: mounting the
+// exercise repo into the unified Docker image, starting/stopping the timer,
+// and revealing the hidden test suite only on submit.
+package orchestrator
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"time"
+
+	"github.com/JacobTDang/Ballroom/internal/config"
+	"github.com/JacobTDang/Ballroom/internal/exercise"
+)
+
+const revealPollInterval = 200 * time.Millisecond
+
+const sandboxVolume = "practice-sandbox"
+
+// RunExercise mounts ex's repo into the unified image, starts a graded,
+// timed session, and blocks until the container exits. Hidden tests are
+// not mounted here — see WaitAndReveal, which watches for the in-container
+// `practice submit` request and reveals them into ex.RepoPath at that
+// point (the same directory is bind-mounted as /workspace).
+func RunExercise(cfg config.Config, ex exercise.Exercise) error {
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		return fmt.Errorf("orchestrator: create data dir: %w", err)
+	}
+
+	controlDir, err := os.MkdirTemp("", "practice-control-")
+	if err != nil {
+		return fmt.Errorf("orchestrator: create control dir: %w", err)
+	}
+	defer os.RemoveAll(controlDir)
+
+	startedAt := time.Now()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	revealErr := make(chan error, 1)
+	go func() {
+		revealErr <- WaitAndReveal(ctx, controlDir, cfg.TestsPath(ex.ID), ex.RepoPath, revealPollInterval)
+	}()
+
+	args := []string{
+		"run", "-it", "--rm",
+		"-v", ex.RepoPath + ":/workspace",
+		"-v", cfg.DataDir + ":/data",
+		"-v", controlDir + ":/control",
+		"-e", "PRACTICE_CONTROL_DIR=/control",
+		"-e", "PRACTICE_WORKSPACE_DIR=/workspace",
+		"-e", "PRACTICE_TEST_COMMAND=" + ex.TestCommand,
+		"-e", "PRACTICE_EXERCISE_ID=" + ex.ID,
+		"-e", "PRACTICE_CATEGORY=" + ex.Category,
+		"-e", "PRACTICE_LANGUAGE=" + ex.Language,
+		"-e", "PRACTICE_STARTED_AT=" + startedAt.Format(time.RFC3339),
+		"-e", "PRACTICE_DB_PATH=/data/tracker.db",
+		cfg.DockerImage,
+	}
+
+	cmd := exec.Command("docker", args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	runErr := cmd.Run()
+
+	cancel()
+	if err := <-revealErr; err != nil && ctx.Err() == nil {
+		// Only surface reveal-side errors that happened for a reason other
+		// than us cancelling the context on normal container exit.
+		fmt.Fprintf(os.Stderr, "orchestrator: reveal watcher: %v\n", err)
+	}
+
+	if runErr != nil {
+		return fmt.Errorf("orchestrator: docker run: %w", runErr)
+	}
+	return nil
+}
+
+// RunSandbox mounts a persistent volume (survives across runs) and starts
+// an ungraded, untimed session. See interview_prep_mvp_spec.md Section 3.6.
+func RunSandbox(cfg config.Config) error {
+	args := []string{
+		"run", "-it", "--rm",
+		"-v", sandboxVolume + ":/workspace",
+		cfg.DockerImage,
+	}
+
+	cmd := exec.Command("docker", args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("orchestrator: docker run --sandbox: %w", err)
+	}
+	return nil
+}
