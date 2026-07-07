@@ -1,0 +1,10 @@
+{
+  "id": "_template",
+  "title": "",
+  "category": "",
+  "language": "",
+  "time_limit_min": 0,
+  "tutor_mode": "",
+  "repo_path": "./repo",
+  "test_command": ""
+}
