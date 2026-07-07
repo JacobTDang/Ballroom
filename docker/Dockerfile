@@ -1,18 +1,44 @@
 # Unified practice environment image (Go + C++ + Python toolchains, nvim, tmux).
-# See interview_prep_mvp_spec.md Section 3.1. Not yet buildable — M0 work.
+# See interview_prep_mvp_spec.md Section 3.1.
+#
+# Build from the repo root (paths below assume that build context):
+#   docker build -f docker/Dockerfile -t ballroom-practice .
 
 FROM ubuntu:24.04
 
-# TODO(M0): Go toolchain + delve
-# TODO(M0): clang + cmake + gdb/lldb + sanitizers (TSan/ASan/UBSan)
-# TODO(M0): Python + pdb/debugpy + pytest
-# TODO(M0): neovim (minimum viable config, see spec Section 6 risk)
-# TODO(M0): tmux
-# TODO(M0): tutor chat CLI (see tutor/chat.sh) + its runtime deps
-# TODO(M0): non-root user, /workspace convention
+ENV DEBIAN_FRONTEND=noninteractive \
+    GOBIN=/usr/local/bin \
+    PATH=/usr/local/go/bin:/opt/pyenv/bin:/usr/local/bin:${PATH}
 
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY tmux.conf /etc/practice/tmux.conf
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl git jq \
+      build-essential clang cmake gdb lldb libclang-rt-18-dev llvm-18 \
+      python3 python3-venv python3-pip \
+      neovim tmux \
+      golang-go \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/llvm-symbolizer-18 /usr/local/bin/llvm-symbolizer
+
+# delve (Go debugger); race detector ships with the toolchain (-race flag), no extra install.
+RUN go install github.com/go-delve/delve/cmd/dlv@latest
+
+# Python venv (Ubuntu 24.04 is PEP 668 externally-managed, so no system-wide pip installs).
+# pdb/faulthandler are stdlib; only debugpy + pytest need installing.
+RUN python3 -m venv /opt/pyenv \
+    && /opt/pyenv/bin/pip install --no-cache-dir pytest debugpy
+
+RUN useradd -m -s /bin/bash practice \
+    && mkdir -p /workspace \
+    && chown -R practice:practice /workspace /home/practice
+
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/tmux.conf /etc/practice/tmux.conf
+COPY docker/nvim/init.lua /home/practice/.config/nvim/init.lua
+COPY tutor/chat.sh /usr/local/bin/tutor-chat.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/tutor-chat.sh \
+    && chown -R practice:practice /home/practice/.config
+
+USER practice
+WORKDIR /workspace
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
