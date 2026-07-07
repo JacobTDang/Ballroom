@@ -18,15 +18,22 @@ const revealPollInterval = 200 * time.Millisecond
 
 const sandboxVolume = "practice-sandbox"
 
-// RunExercise mounts ex's repo into the unified image, starts a graded,
-// timed session, and blocks until the container exits. Hidden tests are
-// not mounted here — see WaitAndReveal, which watches for the in-container
-// `practice submit` request and reveals them into ex.RepoPath at that
-// point (the same directory is bind-mounted as /workspace).
+// RunExercise starts a graded, timed session and blocks until the
+// container exits. ex.RepoPath (the permanent exercise source) is never
+// mounted directly — PrepareWorkspace copies it into a disposable temp
+// dir that gets mounted as /workspace and deleted on exit, so nothing
+// written during the session (edits, or hidden tests revealed on submit
+// — see WaitAndReveal) can leak back into the source repo.
 func RunExercise(cfg config.Config, ex exercise.Exercise) error {
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return fmt.Errorf("orchestrator: create data dir: %w", err)
 	}
+
+	workspaceDir, cleanupWorkspace, err := PrepareWorkspace(ex.RepoPath)
+	if err != nil {
+		return err
+	}
+	defer cleanupWorkspace()
 
 	controlDir, err := os.MkdirTemp("", "practice-control-")
 	if err != nil {
@@ -41,12 +48,12 @@ func RunExercise(cfg config.Config, ex exercise.Exercise) error {
 
 	revealErr := make(chan error, 1)
 	go func() {
-		revealErr <- WaitAndReveal(ctx, controlDir, cfg.TestsPath(ex.ID), ex.RepoPath, revealPollInterval)
+		revealErr <- WaitAndReveal(ctx, controlDir, cfg.TestsPath(ex.ID), workspaceDir, revealPollInterval)
 	}()
 
 	args := []string{
 		"run", "-it", "--rm",
-		"-v", ex.RepoPath + ":/workspace",
+		"-v", workspaceDir + ":/workspace",
 		"-v", cfg.DataDir + ":/data",
 		"-v", controlDir + ":/control",
 		"-e", "PRACTICE_CONTROL_DIR=/control",
