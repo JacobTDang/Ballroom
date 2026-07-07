@@ -62,6 +62,7 @@ func RunExercise(cfg config.Config, ex exercise.Exercise) error {
 		"-e", "PRACTICE_EXERCISE_ID=" + ex.ID,
 		"-e", "PRACTICE_CATEGORY=" + ex.Category,
 		"-e", "PRACTICE_LANGUAGE=" + ex.Language,
+		"-e", "PRACTICE_TUTOR_MODE=" + ex.TutorMode,
 		"-e", "PRACTICE_STARTED_AT=" + startedAt.Format(time.RFC3339),
 		"-e", "PRACTICE_DB_PATH=/data/tracker.db",
 		cfg.DockerImage,
