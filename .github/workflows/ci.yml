@@ -13,6 +13,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: false # no go.sum yet (stdlib-only); re-enable once real deps land
       - name: gofmt
         run: |
           fmt_out="$(gofmt -l .)"
