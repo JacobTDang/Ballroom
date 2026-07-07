@@ -1,0 +1,10 @@
+{
+  "id": "py-implementation-01",
+  "title": "Fixed-window rate limiter",
+  "category": "implementation",
+  "language": "python",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}
