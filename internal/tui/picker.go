@@ -140,7 +140,7 @@ func truncateTitle(s string, n int) string {
 // RunPicker shows the exercise picker and blocks until the user selects
 // something (ok=true) or quits (ok=false).
 func RunPicker(statuses []catalog.ExerciseStatus) (sel Selection, ok bool, err error) {
-	final, err := tea.NewProgram(newPickerModel(statuses)).Run()
+	final, err := tea.NewProgram(newPickerModel(statuses), tea.WithAltScreen()).Run()
 	if err != nil {
 		return Selection{}, false, err
 	}

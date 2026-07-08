@@ -88,7 +88,7 @@ func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // RunBoot shows the boot screen and blocks until the user presses Enter
 // (proceed=true) or quits (proceed=false).
 func RunBoot(cfg config.Config) (proceed bool, err error) {
-	final, err := tea.NewProgram(newBootModel(cfg)).Run()
+	final, err := tea.NewProgram(newBootModel(cfg), tea.WithAltScreen()).Run()
 	if err != nil {
 		return false, err
 	}
