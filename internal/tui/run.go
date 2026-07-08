@@ -13,6 +13,11 @@ import (
 // runs the chosen exercise or sandbox (blocking, full terminal control,
 // same as the CLI's direct commands), and the picker reopens afterward
 // with refreshed status until the user quits.
+//
+// The practice image itself is ensured (built if missing, stale builds
+// cleaned up) inside orchestrator.RunExercise/RunSandbox, not here — that
+// way `ballroom practice <id>` and `ballroom sandbox` get the same
+// behavior whether or not they go through this TUI.
 func Run(cfg config.Config) error {
 	proceed, err := RunBoot(cfg)
 	if err != nil {
