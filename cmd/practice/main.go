@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/JacobTDang/Ballroom/internal/catalog"
 	"github.com/JacobTDang/Ballroom/internal/config"
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 	"github.com/JacobTDang/Ballroom/internal/orchestrator"
@@ -13,20 +17,21 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(1)
-	}
-
 	var err error
-	switch os.Args[1] {
-	case "run":
-		err = runCmd(os.Args[2:])
-	case "submit":
-		err = submitCmd()
-	default:
-		usage()
-		os.Exit(1)
+	if len(os.Args) < 2 {
+		err = homeCmd()
+	} else {
+		switch os.Args[1] {
+		case "home":
+			err = homeCmd()
+		case "run":
+			err = runCmd(os.Args[2:])
+		case "submit":
+			err = submitCmd()
+		default:
+			usage()
+			os.Exit(1)
+		}
 	}
 
 	if err != nil {
@@ -36,7 +41,62 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: practice run --exercise <id> | practice run --sandbox | practice submit")
+	fmt.Fprintln(os.Stderr, "usage: practice [home] | practice run --exercise <id> | practice run --sandbox | practice submit")
+}
+
+// homeCmd shows the exercise catalog with practice status, prompts for a
+// choice, launches it, and loops back until the user quits — the "home
+// base" you return to between sessions rather than having to remember
+// exercise ids.
+func homeCmd() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+		statuses, err := catalog.List(cfg)
+		if err != nil {
+			return err
+		}
+		sandboxChoice := len(statuses) + 1
+
+		fmt.Println()
+		fmt.Println("  Ballroom — Interview Prep")
+		fmt.Println()
+		fmt.Print(catalog.FormatTable(statuses))
+		fmt.Printf("  %-3d %s\n", sandboxChoice, "sandbox — free practice, no grading")
+		fmt.Println()
+		fmt.Println("  " + catalog.FormatSummary(statuses))
+		fmt.Println()
+		fmt.Print("Type a number to practice, or 'q' to quit: ")
+
+		if !scanner.Scan() {
+			fmt.Println()
+			return nil
+		}
+		choice := strings.TrimSpace(scanner.Text())
+		if choice == "q" || choice == "quit" {
+			return nil
+		}
+
+		n, convErr := strconv.Atoi(choice)
+		if convErr != nil || n < 1 || n > sandboxChoice {
+			fmt.Println("invalid choice")
+			continue
+		}
+
+		var runErr error
+		if n == sandboxChoice {
+			runErr = orchestrator.RunSandbox(cfg)
+		} else {
+			runErr = orchestrator.RunExercise(cfg, statuses[n-1].Exercise)
+		}
+		if runErr != nil {
+			fmt.Fprintf(os.Stderr, "practice: %v\n", runErr)
+		}
+	}
 }
 
 func runCmd(args []string) error {
