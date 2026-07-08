@@ -5,191 +5,14 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/JacobTDang/Ballroom/internal/catalog"
 	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
 
-// treeRow is one visible line in the tree — either a category header or,
-// when its category is expanded, one of its exercises.
-type treeRow struct {
-	isCategory bool
-	isLast     bool // exercise rows only: last child in its category (picks the tree connector)
-	category   string
-	status     catalog.ExerciseStatus
-}
-
-// treeModel is the NeetCode-roadmap-style practice picker: categories as
-// collapsible branches, exercises as leaves underneath.
-type treeModel struct {
-	statuses []catalog.ExerciseStatus
-	expanded map[string]bool
-	cursor   int
-	selected *catalog.ExerciseStatus
-	back     bool
-}
-
-func newTreeModel(statuses []catalog.ExerciseStatus) treeModel {
-	return treeModel{
-		statuses: statuses,
-		expanded: make(map[string]bool),
-	}
-}
-
-// visibleRows groups statuses (already category-sorted by catalog.List)
-// into category headers, each followed by its exercises only if that
-// category is currently expanded.
-func (m treeModel) visibleRows() []treeRow {
-	type group struct {
-		category string
-		items    []catalog.ExerciseStatus
-	}
-	var groups []group
-	for _, s := range m.statuses {
-		if len(groups) == 0 || groups[len(groups)-1].category != s.Exercise.Category {
-			groups = append(groups, group{category: s.Exercise.Category})
-		}
-		groups[len(groups)-1].items = append(groups[len(groups)-1].items, s)
-	}
-
-	var rows []treeRow
-	for _, g := range groups {
-		rows = append(rows, treeRow{isCategory: true, category: g.category})
-		if m.expanded[g.category] {
-			for i, s := range g.items {
-				rows = append(rows, treeRow{status: s, isLast: i == len(g.items)-1})
-			}
-		}
-	}
-	return rows
-}
-
-func (m treeModel) rowCategory(row treeRow) string {
-	if row.isCategory {
-		return row.category
-	}
-	return row.status.Exercise.Category
-}
-
-func (m treeModel) categoryRowIndex(rows []treeRow, category string) int {
-	for i, r := range rows {
-		if r.isCategory && r.category == category {
-			return i
-		}
-	}
-	return 0
-}
-
-func (m treeModel) Init() tea.Cmd { return nil }
-
-func (m treeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
-	}
-
-	rows := m.visibleRows()
-
-	switch keyMsg.String() {
-	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "down", "j":
-		if m.cursor < len(rows)-1 {
-			m.cursor++
-		}
-	case "right", "l":
-		if m.cursor < len(rows) && rows[m.cursor].isCategory {
-			m.expanded[rows[m.cursor].category] = true
-		}
-	case "left", "h":
-		if m.cursor < len(rows) {
-			cat := m.rowCategory(rows[m.cursor])
-			m.expanded[cat] = false
-			m.cursor = m.categoryRowIndex(m.visibleRows(), cat)
-		}
-	case "enter":
-		if m.cursor < len(rows) {
-			row := rows[m.cursor]
-			if row.isCategory {
-				m.expanded[row.category] = !m.expanded[row.category]
-			} else {
-				sel := row.status
-				m.selected = &sel
-				return m, tea.Quit
-			}
-		}
-	case "q", "esc", "ctrl+c":
-		m.back = true
-		return m, tea.Quit
-	}
-	return m, nil
-}
-
-func (m treeModel) View() string {
-	var b strings.Builder
-	b.WriteString(catalog.CompactBanner())
-	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("  Practice — pick a pattern"))
-	b.WriteString("\n\n")
-
-	rows := m.visibleRows()
-	for i, row := range rows {
-		highlighted := i == m.cursor
-		if row.isCategory {
-			solved, total := m.categoryCounts(row.category)
-			b.WriteString(formatCategoryRow(row.category, m.expanded[row.category], highlighted, solved, total))
-		} else {
-			b.WriteString(formatTreeExerciseRow(row.status, row.isLast, highlighted))
-		}
-		b.WriteString("\n")
-	}
-
-	b.WriteString("\n")
-	b.WriteString(checkDimStyle.Render("  ↑/↓ move · →/enter expand · ← collapse · enter (exercise) select · q back"))
-	b.WriteString("\n")
-	return b.String()
-}
-
-func (m treeModel) categoryCounts(category string) (solved, total int) {
-	for _, s := range m.statuses {
-		if s.Exercise.Category == category {
-			total++
-			if s.LastResult == tracker.ResultPass {
-				solved++
-			}
-		}
-	}
-	return solved, total
-}
-
 // pixelBarWidth is how many blocks wide a category's mini progress bar is.
 const pixelBarWidth = 5
-
-// pixelProgressBar renders a small block-character meter (like a retro
-// game health/XP bar) showing solved/total for a category.
-func pixelProgressBar(solved, total int) string {
-	filled := 0
-	if total > 0 {
-		filled = solved * pixelBarWidth / total
-		if filled == 0 && solved > 0 {
-			filled = 1
-		}
-		if filled > pixelBarWidth {
-			filled = pixelBarWidth
-		}
-	}
-	var b strings.Builder
-	for i := 0; i < pixelBarWidth; i++ {
-		if i < filled {
-			b.WriteString(passStyle.Render("▓"))
-		} else {
-			b.WriteString(checkDimStyle.Render("░"))
-		}
-	}
-	return b.String()
-}
 
 // pixelStatusIcon renders a small "sprite" per exercise that lights up as
 // you make progress on it: dim/hollow when untouched, half-lit in the
@@ -206,27 +29,183 @@ func pixelStatusIcon(result string) string {
 	}
 }
 
-func formatCategoryRow(category string, expanded, highlighted bool, solved, total int) string {
-	disclosure := "▸"
-	if expanded {
-		disclosure = "▾"
-	}
-	bar := pixelProgressBar(solved, total)
-	label := fmt.Sprintf("%s %-15s", disclosure, category)
-	fraction := fmt.Sprintf("(%d/%d)", solved, total)
-	if highlighted {
-		return cursorRowStyle.Render("❯ "+label) + " " + bar + " " + cursorRowStyle.Render(fraction)
-	}
-	return "  " + categoryStyle.Render(label) + " " + bar + " " + checkDimStyle.Render(fraction)
+// treeModel is the NeetCode-roadmap-style practice picker: a real node
+// graph — one root node branching to the 5 categories, and (one at a
+// time, to keep the layout width-bounded) a category branching down to
+// its exercises when you drill into it.
+type treeModel struct {
+	statuses      []catalog.ExerciseStatus
+	categories    []string
+	catCursor     int
+	inExerciseRow bool
+	exCursor      int
+	selected      *catalog.ExerciseStatus
+	back          bool
 }
 
-func formatTreeExerciseRow(s catalog.ExerciseStatus, isLast, highlighted bool) string {
-	connector := "├──"
-	if isLast {
-		connector = "└──"
+func newTreeModel(statuses []catalog.ExerciseStatus) treeModel {
+	var categories []string
+	seen := make(map[string]bool)
+	for _, s := range statuses {
+		if !seen[s.Exercise.Category] {
+			seen[s.Exercise.Category] = true
+			categories = append(categories, s.Exercise.Category)
+		}
 	}
-	icon := pixelStatusIcon(s.LastResult)
+	return treeModel{statuses: statuses, categories: categories}
+}
 
+func (m treeModel) exercisesFor(category string) []catalog.ExerciseStatus {
+	var out []catalog.ExerciseStatus
+	for _, s := range m.statuses {
+		if s.Exercise.Category == category {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func (m treeModel) categoryCounts(category string) (solved, total int) {
+	for _, s := range m.statuses {
+		if s.Exercise.Category == category {
+			total++
+			if s.LastResult == tracker.ResultPass {
+				solved++
+			}
+		}
+	}
+	return solved, total
+}
+
+func (m treeModel) Init() tea.Cmd { return nil }
+
+func (m treeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	switch keyMsg.String() {
+	case "q", "esc", "ctrl+c":
+		m.back = true
+		return m, tea.Quit
+	}
+
+	if m.inExerciseRow {
+		exs := m.exercisesFor(m.categories[m.catCursor])
+		switch keyMsg.String() {
+		case "left", "h":
+			if m.exCursor > 0 {
+				m.exCursor--
+			}
+		case "right", "l":
+			if m.exCursor < len(exs)-1 {
+				m.exCursor++
+			}
+		case "up", "k":
+			m.inExerciseRow = false
+		case "enter":
+			sel := exs[m.exCursor]
+			m.selected = &sel
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+
+	switch keyMsg.String() {
+	case "left", "h":
+		if m.catCursor > 0 {
+			m.catCursor--
+		}
+	case "right", "l":
+		if m.catCursor < len(m.categories)-1 {
+			m.catCursor++
+		}
+	case "down", "j", "enter":
+		m.inExerciseRow = true
+		m.exCursor = 0
+	}
+	return m, nil
+}
+
+func (m treeModel) View() string {
+	var b strings.Builder
+	b.WriteString(catalog.CompactBanner())
+	b.WriteString("\n")
+	b.WriteString(hintStyle.Render("  Practice — pick a pattern"))
+	b.WriteString("\n\n")
+
+	catBoxes := make([]string, len(m.categories))
+	catWidths := make([]int, len(m.categories))
+	for i, cat := range m.categories {
+		solved, total := m.categoryCounts(cat)
+		catBoxes[i] = renderCategoryBox(cat, solved, total, !m.inExerciseRow && i == m.catCursor)
+		catWidths[i] = lipgloss.Width(catBoxes[i])
+	}
+	catRow := joinBoxesHorizontal(catBoxes, boxGap)
+	catCenters := boxCenters(catWidths, boxGap)
+	totalWidth := lipgloss.Width(catRow)
+
+	rootBox := renderRootBox()
+	rootWidth := lipgloss.Width(rootBox)
+	rootPad := centerOffset(rootWidth, spanAnchor(catCenters))
+	rootRow := padLeft(rootBox, rootPad)
+	if w := lipgloss.Width(rootRow); w > totalWidth {
+		totalWidth = w
+	}
+
+	var exRowPadded string
+	var exConn []string
+	var exs []catalog.ExerciseStatus
+	if m.inExerciseRow {
+		exs = m.exercisesFor(m.categories[m.catCursor])
+		exBoxes := make([]string, len(exs))
+		exWidths := make([]int, len(exs))
+		for i, s := range exs {
+			exBoxes[i] = renderExerciseBox(s, i == m.exCursor)
+			exWidths[i] = lipgloss.Width(exBoxes[i])
+		}
+		exRow := joinBoxesHorizontal(exBoxes, boxGap)
+		exCenters := boxCenters(exWidths, boxGap)
+		parentCenter := catCenters[m.catCursor]
+		exPad := parentCenter - spanAnchor(exCenters)
+		if exPad < 0 {
+			exPad = 0
+		}
+		exRowPadded = padLeft(exRow, exPad)
+		if w := lipgloss.Width(exRowPadded); w > totalWidth {
+			totalWidth = w
+		}
+		shifted := make([]int, len(exCenters))
+		for i, c := range exCenters {
+			shifted[i] = c + exPad
+		}
+		exConn = connectorLines(totalWidth, parentCenter, shifted)
+	}
+
+	b.WriteString(rootRow + "\n")
+	for _, l := range connectorLines(totalWidth, rootPad+rootWidth/2, catCenters) {
+		b.WriteString(l + "\n")
+	}
+	b.WriteString(catRow + "\n")
+
+	if m.inExerciseRow {
+		for _, l := range exConn {
+			b.WriteString(l + "\n")
+		}
+		b.WriteString(exRowPadded + "\n\n")
+		b.WriteString(exerciseDetailLine(exs[m.exCursor]))
+		b.WriteString("\n\n")
+		b.WriteString(checkDimStyle.Render("  ←/→ move · ↑ back to categories · enter select · q back"))
+	} else {
+		b.WriteString("\n\n")
+		b.WriteString(checkDimStyle.Render("  ←/→ move · ↓/enter expand · q back"))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+func exerciseDetailLine(s catalog.ExerciseStatus) string {
 	status := "not attempted"
 	statusStyle := checkDimStyle
 	if s.LastResult != "" {
@@ -240,15 +219,8 @@ func formatTreeExerciseRow(s catalog.ExerciseStatus, isLast, highlighted bool) s
 			statusStyle = passStyle
 		}
 	}
-
-	lang := fmt.Sprintf("%-8s", s.Exercise.Language)
-	title := fmt.Sprintf("%-36s", truncateTitle(s.Exercise.Title, 36))
-
-	if highlighted {
-		plain := fmt.Sprintf("%s %s %s %s", connector, lang, title, status)
-		return cursorRowStyle.Render("❯ ") + icon + " " + cursorRowStyle.Render(plain)
-	}
-	return "    " + icon + " " + connector + " " + langStyle.Render(lang) + " " + title + " " + statusStyle.Render(status)
+	title := truncateTitle(s.Exercise.Title, 50)
+	return fmt.Sprintf("  %s %s — %s", pixelStatusIcon(s.LastResult), hintStyle.Render(title), statusStyle.Render(status))
 }
 
 // RunTree shows the practice tree and blocks until the user selects an

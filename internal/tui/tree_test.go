@@ -39,96 +39,113 @@ func fakeStatusIn(category, id string) catalog.ExerciseStatus {
 	return s
 }
 
-func TestTreeModel_StartsAllCollapsedShowingOnlyCategories(t *testing.T) {
+func TestTreeModel_StartsOnCategoryRow(t *testing.T) {
 	m := newTreeModel(treeFixture())
-	rows := m.visibleRows()
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 visible rows (pattern, debug categories only), got %d", len(rows))
+	if m.inExerciseRow {
+		t.Error("expected to start on the category row, not the exercise row")
 	}
-	for _, r := range rows {
-		if !r.isCategory {
-			t.Errorf("expected only category rows while collapsed, got exercise row %+v", r)
-		}
+	if m.catCursor != 0 {
+		t.Errorf("catCursor = %d, want 0", m.catCursor)
+	}
+	if len(m.categories) != 2 {
+		t.Fatalf("expected 2 categories (pattern, debug), got %v", m.categories)
 	}
 }
 
-func TestTreeModel_RightExpandsCategoryRevealingChildren(t *testing.T) {
+func TestTreeModel_RightMovesCatCursorAndStopsAtEnd(t *testing.T) {
 	m := newTreeModel(treeFixture())
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	for i := 0; i < 5; i++ {
+		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+		m = newM.(treeModel)
+	}
+	if m.catCursor != 1 { // only 2 categories: indices 0,1
+		t.Errorf("catCursor = %d, want 1 (last category)", m.catCursor)
+	}
+}
+
+func TestTreeModel_LeftStaysAtZero(t *testing.T) {
+	m := newTreeModel(treeFixture())
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	if newM.(treeModel).catCursor != 0 {
+		t.Error("catCursor should stay at 0 when already at the first category")
+	}
+}
+
+func TestTreeModel_DownEntersExerciseRow(t *testing.T) {
+	m := newTreeModel(treeFixture())
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if cmd != nil {
+		t.Fatal("entering the exercise row should not quit the program")
+	}
 	tm := newM.(treeModel)
-
-	rows := tm.visibleRows()
-	if len(rows) != 4 { // pattern (expanded, 2 children) + debug (collapsed)
-		t.Fatalf("expected 4 visible rows after expanding pattern, got %d: %+v", len(rows), rows)
+	if !tm.inExerciseRow {
+		t.Fatal("expected down to move focus into the exercise row")
 	}
-	if !rows[0].isCategory || rows[0].category != "pattern" {
-		t.Fatalf("row 0 should be the pattern category, got %+v", rows[0])
-	}
-	if rows[1].isCategory || rows[1].status.Exercise.Category != "pattern" {
-		t.Fatalf("row 1 should be a pattern exercise, got %+v", rows[1])
+	if tm.exCursor != 0 {
+		t.Errorf("exCursor = %d, want 0", tm.exCursor)
 	}
 }
 
-func TestTreeModel_EnterOnCategoryTogglesExpandWithoutQuitting(t *testing.T) {
+func TestTreeModel_EnterOnCategoryAlsoEntersExerciseRow(t *testing.T) {
 	m := newTreeModel(treeFixture())
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil {
-		t.Fatal("enter on a category row should not quit the program")
+		t.Fatal("entering the exercise row should not quit the program")
 	}
-	tm := newM.(treeModel)
-	if len(tm.visibleRows()) != 4 {
-		t.Fatal("expected enter on category to expand it")
-	}
-}
-
-func TestTreeModel_DownMovesIntoExpandedChildren(t *testing.T) {
-	m := newTreeModel(treeFixture())
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight}) // expand pattern
-	tm := newM.(treeModel)
-
-	newM2, _ := tm.Update(tea.KeyMsg{Type: tea.KeyDown})
-	tm2 := newM2.(treeModel)
-	if tm2.cursor != 1 {
-		t.Fatalf("cursor = %d, want 1 (first child of pattern)", tm2.cursor)
+	if !newM.(treeModel).inExerciseRow {
+		t.Fatal("expected enter on a category to also enter its exercise row")
 	}
 }
 
-func TestTreeModel_LeftCollapsesAndMovesCursorToParent(t *testing.T) {
+func TestTreeModel_LeftRightMoveWithinExerciseRow(t *testing.T) {
 	m := newTreeModel(treeFixture())
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight}) // expand pattern
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown}) // pattern has 2 exercises
 	tm := newM.(treeModel)
-	newM2, _ := tm.Update(tea.KeyMsg{Type: tea.KeyDown}) // move to first child
+
+	newM2, _ := tm.Update(tea.KeyMsg{Type: tea.KeyRight})
 	tm2 := newM2.(treeModel)
-
-	newM3, _ := tm2.Update(tea.KeyMsg{Type: tea.KeyLeft}) // collapse from child
-	tm3 := newM3.(treeModel)
-
-	if len(tm3.visibleRows()) != 2 {
-		t.Fatalf("expected collapse to hide children again, got %d rows", len(tm3.visibleRows()))
+	if tm2.exCursor != 1 {
+		t.Fatalf("exCursor = %d, want 1", tm2.exCursor)
 	}
-	if tm3.cursor != 0 {
-		t.Fatalf("cursor = %d, want 0 (back on the pattern category row)", tm3.cursor)
+
+	// stops at the last exercise (pattern has 2: index 0,1)
+	newM3, _ := tm2.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if newM3.(treeModel).exCursor != 1 {
+		t.Error("exCursor should stop at the last exercise in the category")
+	}
+}
+
+func TestTreeModel_UpFromExerciseRowReturnsToCategoryRow(t *testing.T) {
+	m := newTreeModel(treeFixture())
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	tm := newM.(treeModel)
+
+	newM2, _ := tm.Update(tea.KeyMsg{Type: tea.KeyUp})
+	tm2 := newM2.(treeModel)
+	if tm2.inExerciseRow {
+		t.Fatal("expected up to return focus to the category row")
+	}
+	if tm2.catCursor != 0 {
+		t.Errorf("catCursor should be preserved as 0, got %d", tm2.catCursor)
 	}
 }
 
 func TestTreeModel_EnterOnExerciseSelectsAndQuits(t *testing.T) {
 	m := newTreeModel(treeFixture())
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight}) // expand pattern
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown}) // enter pattern's exercise row
 	tm := newM.(treeModel)
-	newM2, _ := tm.Update(tea.KeyMsg{Type: tea.KeyDown}) // move to first child
-	tm2 := newM2.(treeModel)
 
-	newM3, cmd := tm2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newM2, cmd := tm.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("expected enter on an exercise row to return a quit command")
+		t.Fatal("expected enter on an exercise to return a quit command")
 	}
-	tm3 := newM3.(treeModel)
-	if tm3.selected == nil || tm3.selected.Exercise.ID != "two-pointers-01" {
-		t.Errorf("expected two-pointers-01 selected, got %+v", tm3.selected)
+	tm2 := newM2.(treeModel)
+	if tm2.selected == nil || tm2.selected.Exercise.ID != "two-pointers-01" {
+		t.Errorf("expected two-pointers-01 selected, got %+v", tm2.selected)
 	}
 }
 
-func TestTreeModel_QRequestsBack(t *testing.T) {
+func TestTreeModel_QRequestsBackFromEitherRow(t *testing.T) {
 	m := newTreeModel(treeFixture())
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if cmd == nil {
@@ -136,6 +153,15 @@ func TestTreeModel_QRequestsBack(t *testing.T) {
 	}
 	if !newM.(treeModel).back {
 		t.Error("expected back=true")
+	}
+
+	inExercise, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	newM2, cmd2 := inExercise.(treeModel).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd2 == nil {
+		t.Fatal("expected q to quit even from the exercise row")
+	}
+	if !newM2.(treeModel).back {
+		t.Error("expected back=true from the exercise row too")
 	}
 }
 
@@ -149,33 +175,5 @@ func TestPixelStatusIcon_DiffersByStatus(t *testing.T) {
 	}
 	if !strings.Contains(pass, "✦") {
 		t.Errorf("expected a sparkle in the solved icon, got %q", pass)
-	}
-}
-
-func TestPixelProgressBar_ReflectsFraction(t *testing.T) {
-	empty := stripAnsiTUI(pixelProgressBar(0, 4))
-	full := stripAnsiTUI(pixelProgressBar(4, 4))
-	half := stripAnsiTUI(pixelProgressBar(2, 4))
-
-	if empty == full {
-		t.Error("expected an empty and full progress bar to render differently")
-	}
-	if len([]rune(empty)) != len([]rune(full)) || len([]rune(half)) != len([]rune(full)) {
-		t.Errorf("expected bars of equal width regardless of fraction: empty=%q half=%q full=%q", empty, half, full)
-	}
-}
-
-func TestPixelProgressBar_ZeroTotalDoesNotPanic(t *testing.T) {
-	_ = pixelProgressBar(0, 0)
-}
-
-func TestTreeModel_DownStopsAtLastVisibleRow(t *testing.T) {
-	m := newTreeModel(treeFixture())
-	for i := 0; i < 10; i++ {
-		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
-		m = newM.(treeModel)
-	}
-	if m.cursor != 1 { // only 2 rows while collapsed: indices 0,1
-		t.Errorf("cursor = %d, want 1 (last category while collapsed)", m.cursor)
 	}
 }
