@@ -18,6 +18,7 @@ const (
 	colorWhite2 = "\x1b[38;5;189m" // pale lavender-white
 	colorPurple = "\x1b[38;5;141m" // medium purple
 	colorPink   = "\x1b[38;5;213m" // pink/magenta
+	colorPink2  = "\x1b[38;5;207m" // deeper magenta, gradient's last stop
 
 	colorPass = "\x1b[38;5;120m" // soft green
 	colorFail = "\x1b[38;5;210m" // soft red/salmon — still reads as "fail" but stays in-palette
@@ -42,16 +43,19 @@ func styled(codes, s string) string {
 	return codes + s + ansiReset
 }
 
+// Solid block-letter art (figlet "banner3", # swapped for a solid Unicode
+// block) — filled in completely, not an outline font.
 var bannerArt = []string{
-	`______  ___   _      _     ______ _____  ________  ___ `,
-	`| ___ \/ _ \ | |    | |    | ___ \  _  ||  _  |  \/  |`,
-	`| |_/ / /_\ \| |    | |    | |_/ / | | || | | | .  . |`,
-	`| ___ \  _  || |    | |    |    /| | | || | | | |\/| |`,
-	`| |_/ / | | || |____| |____| |\ \\ \_/ /\ \_/ / |  | |`,
-	`\____/\_| |_/\_____/\_____/\_| \_|\___/  \___/\_|  |_/`,
+	`████████     ███    ██       ██       ████████   ███████   ███████  ██     ██ `,
+	`██     ██   ██ ██   ██       ██       ██     ██ ██     ██ ██     ██ ███   ███ `,
+	`██     ██  ██   ██  ██       ██       ██     ██ ██     ██ ██     ██ ████ ████ `,
+	`████████  ██     ██ ██       ██       ████████  ██     ██ ██     ██ ██ ███ ██ `,
+	`██     ██ █████████ ██       ██       ██   ██   ██     ██ ██     ██ ██     ██ `,
+	`██     ██ ██     ██ ██       ██       ██    ██  ██     ██ ██     ██ ██     ██ `,
+	`████████  ██     ██ ████████ ████████ ██     ██  ███████   ███████  ██     ██ `,
 }
 
-var bannerGradient = []string{colorTeal1, colorTeal2, colorWhite1, colorWhite2, colorPurple, colorPink}
+var bannerGradient = []string{colorTeal1, colorTeal2, colorWhite1, colorWhite2, colorPurple, colorPink, colorPink2}
 
 // Banner renders the "BALLROOM" title art in a teal -> white -> purple/pink
 // gradient, disco-ball style, with a tagline underneath.
