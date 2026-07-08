@@ -1,18 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
 	"time"
 
-	"github.com/JacobTDang/Ballroom/internal/catalog"
 	"github.com/JacobTDang/Ballroom/internal/config"
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 	"github.com/JacobTDang/Ballroom/internal/orchestrator"
 	"github.com/JacobTDang/Ballroom/internal/session"
+	"github.com/JacobTDang/Ballroom/internal/tui"
 )
 
 func main() {
@@ -69,59 +66,15 @@ Reset the sandbox volume:
 `)
 }
 
-// homeCmd shows the exercise catalog with practice status, prompts for a
-// choice, launches it, and loops back until the user quits — the "home
-// base" you return to between sessions rather than having to remember
-// exercise ids.
+// homeCmd shows the full-screen boot check + exercise picker (see
+// internal/tui) — the "home base" you return to between sessions rather
+// than having to remember exercise ids.
 func homeCmd() error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
-
-	scanner := bufio.NewScanner(os.Stdin)
-	for {
-		statuses, err := catalog.List(cfg)
-		if err != nil {
-			return err
-		}
-		sandboxChoice := len(statuses) + 1
-
-		fmt.Println()
-		fmt.Println("  Ballroom — Interview Prep")
-		fmt.Println()
-		fmt.Print(catalog.FormatTable(statuses))
-		fmt.Printf("  %-3d %s\n", sandboxChoice, "sandbox — free practice, no grading")
-		fmt.Println()
-		fmt.Println("  " + catalog.FormatSummary(statuses))
-		fmt.Println()
-		fmt.Print("Type a number to practice, or 'q' to quit: ")
-
-		if !scanner.Scan() {
-			fmt.Println()
-			return nil
-		}
-		choice := strings.TrimSpace(scanner.Text())
-		if choice == "q" || choice == "quit" {
-			return nil
-		}
-
-		n, convErr := strconv.Atoi(choice)
-		if convErr != nil || n < 1 || n > sandboxChoice {
-			fmt.Println("invalid choice")
-			continue
-		}
-
-		var runErr error
-		if n == sandboxChoice {
-			runErr = orchestrator.RunSandbox(cfg)
-		} else {
-			runErr = orchestrator.RunExercise(cfg, statuses[n-1].Exercise)
-		}
-		if runErr != nil {
-			fmt.Fprintf(os.Stderr, "ballroom: %v\n", runErr)
-		}
-	}
+	return tui.Run(cfg)
 }
 
 func practiceCmd(args []string) error {
