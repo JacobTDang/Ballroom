@@ -16,7 +16,7 @@ import (
 
 const revealPollInterval = 200 * time.Millisecond
 
-const sandboxVolume = "practice-sandbox"
+const sandboxVolume = "ballroom-sandbox"
 
 // RunExercise starts a graded, timed session and blocks until the
 // container exits. ex.RepoPath (the permanent exercise source) is never
@@ -25,6 +25,10 @@ const sandboxVolume = "practice-sandbox"
 // written during the session (edits, or hidden tests revealed on submit
 // — see WaitAndReveal) can leak back into the source repo.
 func RunExercise(cfg config.Config, ex exercise.Exercise) error {
+	if err := EnsureImage(cfg); err != nil {
+		return err
+	}
+
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return fmt.Errorf("orchestrator: create data dir: %w", err)
 	}
@@ -91,9 +95,13 @@ func RunExercise(cfg config.Config, ex exercise.Exercise) error {
 // an ungraded, untimed session. See interview_prep_mvp_spec.md Section 3.6.
 //
 // Reset is manual by design (no scripted "reset to base" for MVP): wipe
-// the volume with `docker volume rm practice-sandbox` — the next
-// `practice run --sandbox` recreates it empty.
+// the volume with `docker volume rm ballroom-sandbox` — the next
+// `ballroom sandbox` recreates it empty.
 func RunSandbox(cfg config.Config) error {
+	if err := EnsureImage(cfg); err != nil {
+		return err
+	}
+
 	args := []string{
 		"run", "-it", "--rm",
 		"-v", sandboxVolume + ":/workspace",
