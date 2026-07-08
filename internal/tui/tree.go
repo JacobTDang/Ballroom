@@ -164,16 +164,60 @@ func (m treeModel) categoryCounts(category string) (solved, total int) {
 	return solved, total
 }
 
+// pixelBarWidth is how many blocks wide a category's mini progress bar is.
+const pixelBarWidth = 5
+
+// pixelProgressBar renders a small block-character meter (like a retro
+// game health/XP bar) showing solved/total for a category.
+func pixelProgressBar(solved, total int) string {
+	filled := 0
+	if total > 0 {
+		filled = solved * pixelBarWidth / total
+		if filled == 0 && solved > 0 {
+			filled = 1
+		}
+		if filled > pixelBarWidth {
+			filled = pixelBarWidth
+		}
+	}
+	var b strings.Builder
+	for i := 0; i < pixelBarWidth; i++ {
+		if i < filled {
+			b.WriteString(passStyle.Render("▓"))
+		} else {
+			b.WriteString(checkDimStyle.Render("░"))
+		}
+	}
+	return b.String()
+}
+
+// pixelStatusIcon renders a small "sprite" per exercise that lights up as
+// you make progress on it: dim/hollow when untouched, half-lit in the
+// fail color after a failed attempt, fully lit with a sparkle once
+// solved. Always 3 runes wide (before styling) so rows stay aligned.
+func pixelStatusIcon(result string) string {
+	switch result {
+	case tracker.ResultPass:
+		return passStyle.Render("▓▓") + sparkleStyle.Render("✦")
+	case tracker.ResultFail:
+		return failStyle.Render("▓░") + " "
+	default:
+		return checkDimStyle.Render("░░") + " "
+	}
+}
+
 func formatCategoryRow(category string, expanded, highlighted bool, solved, total int) string {
 	disclosure := "▸"
 	if expanded {
 		disclosure = "▾"
 	}
-	text := fmt.Sprintf("%s %-15s (%d/%d)", disclosure, category, solved, total)
+	bar := pixelProgressBar(solved, total)
+	label := fmt.Sprintf("%s %-15s", disclosure, category)
+	fraction := fmt.Sprintf("(%d/%d)", solved, total)
 	if highlighted {
-		return cursorRowStyle.Render("❯ " + text)
+		return cursorRowStyle.Render("❯ "+label) + " " + bar + " " + cursorRowStyle.Render(fraction)
 	}
-	return "  " + categoryStyle.Render(text)
+	return "  " + categoryStyle.Render(label) + " " + bar + " " + checkDimStyle.Render(fraction)
 }
 
 func formatTreeExerciseRow(s catalog.ExerciseStatus, isLast, highlighted bool) string {
@@ -181,6 +225,7 @@ func formatTreeExerciseRow(s catalog.ExerciseStatus, isLast, highlighted bool) s
 	if isLast {
 		connector = "└──"
 	}
+	icon := pixelStatusIcon(s.LastResult)
 
 	status := "not attempted"
 	statusStyle := checkDimStyle
@@ -201,9 +246,9 @@ func formatTreeExerciseRow(s catalog.ExerciseStatus, isLast, highlighted bool) s
 
 	if highlighted {
 		plain := fmt.Sprintf("%s %s %s %s", connector, lang, title, status)
-		return cursorRowStyle.Render("❯ " + plain)
+		return cursorRowStyle.Render("❯ ") + icon + " " + cursorRowStyle.Render(plain)
 	}
-	return "    " + connector + " " + langStyle.Render(lang) + " " + title + " " + statusStyle.Render(status)
+	return "    " + icon + " " + connector + " " + langStyle.Render(lang) + " " + title + " " + statusStyle.Render(status)
 }
 
 // RunTree shows the practice tree and blocks until the user selects an

@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/JacobTDang/Ballroom/internal/catalog"
 	"github.com/JacobTDang/Ballroom/internal/exercise"
+	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
 
 func treeFixture() []catalog.ExerciseStatus {
@@ -135,6 +137,36 @@ func TestTreeModel_QRequestsBack(t *testing.T) {
 	if !newM.(treeModel).back {
 		t.Error("expected back=true")
 	}
+}
+
+func TestPixelStatusIcon_DiffersByStatus(t *testing.T) {
+	notAttempted := stripAnsiTUI(pixelStatusIcon(""))
+	fail := stripAnsiTUI(pixelStatusIcon(tracker.ResultFail))
+	pass := stripAnsiTUI(pixelStatusIcon(tracker.ResultPass))
+
+	if notAttempted == fail || notAttempted == pass || fail == pass {
+		t.Errorf("expected 3 visually distinct icons, got %q / %q / %q", notAttempted, fail, pass)
+	}
+	if !strings.Contains(pass, "✦") {
+		t.Errorf("expected a sparkle in the solved icon, got %q", pass)
+	}
+}
+
+func TestPixelProgressBar_ReflectsFraction(t *testing.T) {
+	empty := stripAnsiTUI(pixelProgressBar(0, 4))
+	full := stripAnsiTUI(pixelProgressBar(4, 4))
+	half := stripAnsiTUI(pixelProgressBar(2, 4))
+
+	if empty == full {
+		t.Error("expected an empty and full progress bar to render differently")
+	}
+	if len([]rune(empty)) != len([]rune(full)) || len([]rune(half)) != len([]rune(full)) {
+		t.Errorf("expected bars of equal width regardless of fraction: empty=%q half=%q full=%q", empty, half, full)
+	}
+}
+
+func TestPixelProgressBar_ZeroTotalDoesNotPanic(t *testing.T) {
+	_ = pixelProgressBar(0, 0)
 }
 
 func TestTreeModel_DownStopsAtLastVisibleRow(t *testing.T) {

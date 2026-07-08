@@ -13,6 +13,7 @@ var (
 	langStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#9B5FB0"))
 	passStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#2FA6A6"))
 	failStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#F03C3C"))
+	sparkleStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8A93C")).Bold(true)
 )
 
 func truncateTitle(s string, n int) string {
