@@ -17,6 +17,12 @@ RUN CGO_ENABLED=0 go build -o /ballroom ./cmd/ballroom
 
 FROM ubuntu:24.04
 
+# Identifies images built by this Dockerfile so the launcher can find and
+# clean up its own stale/dangling images after a rebuild without ever
+# touching unrelated images from other projects (see
+# internal/orchestrator's ballroomImageLabel).
+LABEL com.ballroom.app=practice-image
+
 ENV DEBIAN_FRONTEND=noninteractive \
     GOBIN=/usr/local/bin \
     PATH=/usr/local/go/bin:/opt/pyenv/bin:/usr/local/bin:${PATH}
