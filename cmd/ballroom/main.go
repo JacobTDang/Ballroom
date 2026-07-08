@@ -87,15 +87,14 @@ func homeCmd() error {
 		}
 		sandboxChoice := len(statuses) + 1
 
-		fmt.Println()
-		fmt.Println("  Ballroom — Interview Prep")
+		fmt.Print(catalog.Banner())
 		fmt.Println()
 		fmt.Print(catalog.FormatTable(statuses))
-		fmt.Printf("  %-3d %s\n", sandboxChoice, "sandbox — free practice, no grading")
+		fmt.Print(catalog.FormatSandboxRow(sandboxChoice))
 		fmt.Println()
 		fmt.Println("  " + catalog.FormatSummary(statuses))
 		fmt.Println()
-		fmt.Print("Type a number to practice, or 'q' to quit: ")
+		fmt.Print(catalog.Prompt("Type a number to practice, or 'q' to quit: "))
 
 		if !scanner.Scan() {
 			fmt.Println()
