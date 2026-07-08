@@ -4,17 +4,24 @@
 # Build from the repo root (paths below assume that build context):
 #   docker build -f docker/Dockerfile -t ballroom-practice .
 
-# Builds the practice launcher CLI itself (used inside the container only
-# for `practice submit` — `practice run` is invoked from the host).
-FROM golang:1.25-bookworm AS practice-builder
+# Builds the ballroom launcher CLI itself (used inside the container for
+# `ballroom submit` — `ballroom practice`/`ballroom sandbox` are invoked
+# from the host).
+FROM golang:1.25-bookworm AS ballroom-builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 go build -o /practice ./cmd/practice
+RUN CGO_ENABLED=0 go build -o /ballroom ./cmd/ballroom
 
 FROM ubuntu:24.04
+
+# Identifies images built by this Dockerfile so the launcher can find and
+# clean up its own stale/dangling images after a rebuild without ever
+# touching unrelated images from other projects (see
+# internal/orchestrator's ballroomImageLabel).
+LABEL com.ballroom.app=practice-image
 
 ENV DEBIAN_FRONTEND=noninteractive \
     GOBIN=/usr/local/bin \
@@ -45,8 +52,8 @@ COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/tmux.conf /etc/practice/tmux.conf
 COPY docker/nvim/init.lua /home/practice/.config/nvim/init.lua
 COPY tutor/chat.sh /usr/local/bin/tutor-chat.sh
-COPY --from=practice-builder /practice /usr/local/bin/practice
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/tutor-chat.sh /usr/local/bin/practice \
+COPY --from=ballroom-builder /ballroom /usr/local/bin/ballroom
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/tutor-chat.sh /usr/local/bin/ballroom \
     && chown -R practice:practice /home/practice/.config
 
 USER practice

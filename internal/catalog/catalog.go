@@ -107,21 +107,37 @@ func lastResult(attempts []tracker.Attempt) string {
 }
 
 // FormatTable renders a numbered table of exercises for the homepage.
+//
+// Fields are padded to their column width BEFORE being wrapped in ANSI
+// color codes — styling first would make the invisible escape-code bytes
+// count toward the padding width and break column alignment.
 func FormatTable(statuses []ExerciseStatus) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "  %-3s %-15s %-8s %-36s %s\n", "#", "Category", "Lang", "Title", "Status")
+	header := fmt.Sprintf("  %-3s %-15s %-8s %-36s %s", "#", "Category", "Lang", "Title", "Status")
+	fmt.Fprintln(&b, styled(ansiBold+colorTeal1, header))
+
 	for i, s := range statuses {
 		status := "not attempted"
+		statusColor := colorDim
 		if s.LastResult != "" {
 			plural := "s"
 			if s.Attempts == 1 {
 				plural = ""
 			}
 			status = fmt.Sprintf("%s (%d attempt%s)", s.LastResult, s.Attempts, plural)
+			statusColor = colorFail
+			if s.LastResult == tracker.ResultPass {
+				statusColor = colorPass
+			}
 		}
-		fmt.Fprintf(&b, "  %-3d %-15s %-8s %-36s %s\n",
-			i+1, s.Exercise.Category, s.Exercise.Language, truncate(s.Exercise.Title, 36), status)
-		fmt.Fprintf(&b, "      %s\n", s.Exercise.ID)
+
+		num := fmt.Sprintf("%-3d", i+1)
+		category := styled(colorTeal2, fmt.Sprintf("%-15s", s.Exercise.Category))
+		lang := styled(colorPurple, fmt.Sprintf("%-8s", s.Exercise.Language))
+		title := fmt.Sprintf("%-36s", truncate(s.Exercise.Title, 36))
+
+		fmt.Fprintf(&b, "  %s %s %s %s %s\n", num, category, lang, title, styled(statusColor, status))
+		fmt.Fprintf(&b, "      %s\n", styled(colorDim, s.Exercise.ID))
 	}
 	return b.String()
 }
@@ -153,9 +169,22 @@ func FormatSummary(statuses []ExerciseStatus) string {
 	parts := make([]string, len(order))
 	for i, cat := range order {
 		c := byCategory[cat]
-		parts[i] = fmt.Sprintf("%s: %d/%d", cat, c.solved, c.total)
+		fraction := styled(colorWhite1, fmt.Sprintf("%d/%d", c.solved, c.total))
+		parts[i] = fmt.Sprintf("%s: %s", styled(colorTeal2, cat), fraction)
 	}
-	return strings.Join(parts, " · ")
+	return strings.Join(parts, styled(colorDim, " · "))
+}
+
+// FormatSandboxRow renders the sandbox menu option, styled consistently
+// with FormatTable's rows.
+func FormatSandboxRow(n int) string {
+	num := fmt.Sprintf("%-3d", n)
+	return fmt.Sprintf("  %s %s\n", num, styled(colorPink, "sandbox — free practice, no grading"))
+}
+
+// Prompt styles the input-prompt line shown at the bottom of the homepage.
+func Prompt(s string) string {
+	return styled(ansiBold+colorWhite1, s)
 }
 
 func truncate(s string, n int) string {

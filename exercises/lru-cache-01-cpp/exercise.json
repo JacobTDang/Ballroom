@@ -1,0 +1,10 @@
+{
+  "id": "lru-cache-01-cpp",
+  "title": "LRU cache (AI-assisted)",
+  "category": "ai-assisted",
+  "language": "cpp",
+  "time_limit_min": 30,
+  "tutor_mode": "full-assist",
+  "repo_path": "./repo",
+  "test_command": "clang++ -std=c++17 -O0 -g -o /tmp/t hidden_test.cpp && /tmp/t"
+}
