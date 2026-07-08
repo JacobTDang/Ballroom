@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -29,25 +28,22 @@ func main() {
 		printUsage(os.Stdout)
 	case "home":
 		exitOnErr(homeCmd())
-	case "run":
-		exitOnErr(runCmd(args[1:]))
+	case "practice":
+		exitOnErr(practiceCmd(args[1:]))
+	case "sandbox":
+		exitOnErr(sandboxCmd())
 	case "submit":
 		exitOnErr(submitCmd())
 	default:
-		if strings.HasPrefix(args[0], "-") {
-			fmt.Fprintf(os.Stderr, "practice: unknown flag %q\n\n", args[0])
-			printUsage(os.Stderr)
-			os.Exit(1)
-		}
-		// Shortcut: `practice <exercise-id>` runs that exercise directly,
-		// same as `practice run --exercise <exercise-id>`.
-		exitOnErr(runExerciseByArgID(args[0]))
+		fmt.Fprintf(os.Stderr, "ballroom: unknown command %q\n\n", args[0])
+		printUsage(os.Stderr)
+		os.Exit(1)
 	}
 }
 
 func exitOnErr(err error) {
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "practice: %v\n", err)
+		fmt.Fprintf(os.Stderr, "ballroom: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -56,21 +52,20 @@ func printUsage(w *os.File) {
 	fmt.Fprint(w, `Ballroom — interview practice CLI
 
 Usage:
-  practice                       Open the homepage (pick an exercise interactively)
-  practice home                  Same as above
-  practice <exercise-id>         Run a specific exercise directly
-  practice run --exercise <id>   Run a specific exercise (explicit form)
-  practice run --sandbox         Free practice, no grading, persists across sessions
-  practice submit                Submit your solution (run this inside an active session)
-  practice help | -h | --help    Show this help
+  ballroom                    Open the homepage (pick an exercise interactively)
+  ballroom home                Same as above
+  ballroom practice <id>       Practice a specific exercise by id
+  ballroom sandbox             Free practice, no grading, persists across sessions
+  ballroom submit              Submit your solution (run this inside an active session)
+  ballroom help | -h | --help  Show this help
 
 Examples:
-  practice
-  practice two-pointers-01-go
-  practice run --sandbox
+  ballroom
+  ballroom practice two-pointers-01-go
+  ballroom sandbox
 
 Reset the sandbox volume:
-  docker volume rm practice-sandbox
+  docker volume rm ballroom-sandbox
 `)
 }
 
@@ -124,58 +119,43 @@ func homeCmd() error {
 			runErr = orchestrator.RunExercise(cfg, statuses[n-1].Exercise)
 		}
 		if runErr != nil {
-			fmt.Fprintf(os.Stderr, "practice: %v\n", runErr)
+			fmt.Fprintf(os.Stderr, "ballroom: %v\n", runErr)
 		}
 	}
 }
 
-func runCmd(args []string) error {
-	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: practice run --exercise <id> | practice run --sandbox")
-		fs.PrintDefaults()
-	}
-	exerciseID := fs.String("exercise", "", "exercise id to run (mutually exclusive with --sandbox)")
-	sandbox := fs.Bool("sandbox", false, "run a persistent, untimed sandbox session")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	if (*exerciseID != "") == *sandbox {
-		return fmt.Errorf("exactly one of --exercise <id> or --sandbox is required")
+func practiceCmd(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: ballroom practice <exercise-id>")
 	}
 
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
-
-	if *sandbox {
-		return orchestrator.RunSandbox(cfg)
-	}
-	return runExercise(cfg, *exerciseID)
-}
-
-func runExerciseByArgID(id string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	return runExercise(cfg, id)
+	return runExercise(cfg, args[0])
 }
 
 func runExercise(cfg config.Config, id string) error {
 	ex, err := exercise.Load(cfg.ExercisePath(id))
 	if err != nil {
-		return fmt.Errorf("unknown exercise %q — run `practice help` for usage: %w", id, err)
+		return fmt.Errorf("unknown exercise %q — run `ballroom help` for usage: %w", id, err)
 	}
 	return orchestrator.RunExercise(cfg, ex)
+}
+
+func sandboxCmd() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	return orchestrator.RunSandbox(cfg)
 }
 
 func submitCmd() error {
 	startedAtRaw := os.Getenv("PRACTICE_STARTED_AT")
 	if startedAtRaw == "" {
-		return fmt.Errorf("submit: not running inside a graded exercise session (are you in --sandbox mode?)")
+		return fmt.Errorf("submit: not running inside a graded exercise session (did you mean to run `ballroom sandbox`?)")
 	}
 	startedAt, err := time.Parse(time.RFC3339, startedAtRaw)
 	if err != nil {
