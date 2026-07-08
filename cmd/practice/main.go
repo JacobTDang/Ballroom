@@ -17,31 +17,61 @@ import (
 )
 
 func main() {
-	var err error
-	if len(os.Args) < 2 {
-		err = homeCmd()
-	} else {
-		switch os.Args[1] {
-		case "home":
-			err = homeCmd()
-		case "run":
-			err = runCmd(os.Args[2:])
-		case "submit":
-			err = submitCmd()
-		default:
-			usage()
-			os.Exit(1)
-		}
+	args := os.Args[1:]
+
+	if len(args) == 0 {
+		exitOnErr(homeCmd())
+		return
 	}
 
+	switch args[0] {
+	case "-h", "--help", "help":
+		printUsage(os.Stdout)
+	case "home":
+		exitOnErr(homeCmd())
+	case "run":
+		exitOnErr(runCmd(args[1:]))
+	case "submit":
+		exitOnErr(submitCmd())
+	default:
+		if strings.HasPrefix(args[0], "-") {
+			fmt.Fprintf(os.Stderr, "practice: unknown flag %q\n\n", args[0])
+			printUsage(os.Stderr)
+			os.Exit(1)
+		}
+		// Shortcut: `practice <exercise-id>` runs that exercise directly,
+		// same as `practice run --exercise <exercise-id>`.
+		exitOnErr(runExerciseByArgID(args[0]))
+	}
+}
+
+func exitOnErr(err error) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "practice: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func usage() {
-	fmt.Fprintln(os.Stderr, "usage: practice [home] | practice run --exercise <id> | practice run --sandbox | practice submit")
+func printUsage(w *os.File) {
+	fmt.Fprint(w, `Ballroom — interview practice CLI
+
+Usage:
+  practice                       Open the homepage (pick an exercise interactively)
+  practice home                  Same as above
+  practice <exercise-id>         Run a specific exercise directly
+  practice run --exercise <id>   Run a specific exercise (explicit form)
+  practice run --sandbox         Free practice, no grading, persists across sessions
+  practice submit                Submit your solution (run this inside an active session)
+  practice help | -h | --help    Show this help
+
+Examples:
+  practice
+  practice two-pointers-01-go
+  practice run --sandbox
+
+Reset the sandbox volume:
+  docker volume rm practice-sandbox
+`)
 }
 
 // homeCmd shows the exercise catalog with practice status, prompts for a
@@ -101,13 +131,17 @@ func homeCmd() error {
 
 func runCmd(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: practice run --exercise <id> | practice run --sandbox")
+		fs.PrintDefaults()
+	}
 	exerciseID := fs.String("exercise", "", "exercise id to run (mutually exclusive with --sandbox)")
 	sandbox := fs.Bool("sandbox", false, "run a persistent, untimed sandbox session")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	if (*exerciseID == "") == !*sandbox {
+	if (*exerciseID != "") == *sandbox {
 		return fmt.Errorf("exactly one of --exercise <id> or --sandbox is required")
 	}
 
@@ -119,10 +153,21 @@ func runCmd(args []string) error {
 	if *sandbox {
 		return orchestrator.RunSandbox(cfg)
 	}
+	return runExercise(cfg, *exerciseID)
+}
 
-	ex, err := exercise.Load(cfg.ExercisePath(*exerciseID))
+func runExerciseByArgID(id string) error {
+	cfg, err := config.Load()
 	if err != nil {
 		return err
+	}
+	return runExercise(cfg, id)
+}
+
+func runExercise(cfg config.Config, id string) error {
+	ex, err := exercise.Load(cfg.ExercisePath(id))
+	if err != nil {
+		return fmt.Errorf("unknown exercise %q — run `practice help` for usage: %w", id, err)
 	}
 	return orchestrator.RunExercise(cfg, ex)
 }
