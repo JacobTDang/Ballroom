@@ -57,22 +57,53 @@ var bannerArt = []string{
 
 var bannerGradient = []string{colorTeal1, colorTeal2, colorWhite1, colorWhite2, colorPurple, colorPink, colorPink2}
 
-// Banner renders the "BALLROOM" title art in a teal -> white -> purple/pink
-// gradient, disco-ball style, with a tagline underneath.
-func Banner() string {
+// mosaicWidth is how many columns share a color before the mosaic shifts
+// to the next one — small facets, like a disco ball's mirror tiles,
+// rather than one smooth gradient band per row.
+const mosaicWidth = 3
+
+// MosaicBanner renders the BALLROOM title art as a scattered multi-color
+// mosaic (each small block of characters gets its own color from the
+// palette, diagonally offset per row) instead of a smooth per-row
+// gradient — closer to light scattering off a disco ball than a sunset
+// gradient. phase shifts the pattern; incrementing it on a timer (see
+// internal/tui's tick handling) animates a shimmer across the letters.
+// Pass phase=0 for a static render.
+func MosaicBanner(phase int) string {
 	var b strings.Builder
 	b.WriteString("\n")
-	for i, line := range bannerArt {
+	for row, line := range bannerArt {
 		b.WriteString("  ")
-		b.WriteString(styled(bannerGradient[i%len(bannerGradient)], line))
+		col := 0
+		for _, ch := range line {
+			if ch == ' ' {
+				b.WriteRune(ch)
+				col++
+				continue
+			}
+			idx := (row + col/mosaicWidth + phase) % len(bannerGradient)
+			b.WriteString(styled(bannerGradient[idx], string(ch)))
+			col++
+		}
 		b.WriteString("\n")
 	}
-	b.WriteString("  ")
-	b.WriteString(styled(colorPink, "✦"))
-	b.WriteString(" ")
-	b.WriteString(styled(ansiBold+colorWhite1, "I N T E R V I E W   P R E P"))
-	b.WriteString(" ")
-	b.WriteString(styled(colorTeal1, "✦"))
-	b.WriteString("\n")
+	b.WriteString(tagline())
 	return b.String()
+}
+
+// CompactBanner is a single-line wordmark for screens that need the
+// vertical space back (the tree picker, stats) — full art stays reserved
+// for the boot screen and the main menu's title moment.
+func CompactBanner() string {
+	return "  " + styled(colorPink, "✦") + " " + styled(ansiBold+colorWhite1, "BALLROOM — INTERVIEW PREP") + " " + styled(colorTeal1, "✦") + "\n"
+}
+
+func tagline() string {
+	return "  " + styled(colorPink, "✦") + " " + styled(ansiBold+colorWhite1, "I N T E R V I E W   P R E P") + " " + styled(colorTeal1, "✦") + "\n"
+}
+
+// Banner is the static (non-animated) full title art, used on the boot
+// screen where it's shown only briefly.
+func Banner() string {
+	return MosaicBanner(0)
 }
