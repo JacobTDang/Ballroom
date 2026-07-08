@@ -29,7 +29,7 @@ func captureUsage(t *testing.T) string {
 func TestPrintUsage_MentionsEverySubcommand(t *testing.T) {
 	out := captureUsage(t)
 	for _, want := range []string{
-		"practice", "home", "<exercise-id>", "run --exercise", "run --sandbox", "submit", "help",
+		"ballroom", "home", "practice <id>", "sandbox", "submit", "help",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("usage output missing %q:\n%s", want, out)
@@ -49,36 +49,17 @@ func TestRunExercise_UnknownIDReturnsClearError(t *testing.T) {
 	}
 }
 
-func TestRunExerciseByArgID_UnknownIDReturnsClearError(t *testing.T) {
+func TestPracticeCmd_RequiresAnID(t *testing.T) {
+	err := practiceCmd(nil)
+	if err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Errorf("practiceCmd(nil) error = %v, want a usage error", err)
+	}
+}
+
+func TestPracticeCmd_UnknownIDReturnsClearError(t *testing.T) {
 	t.Setenv("PRACTICE_ROOT", t.TempDir())
 
-	err := runExerciseByArgID("does-not-exist")
-	if err == nil {
-		t.Fatal("expected an error for an unknown exercise id, got nil")
-	}
-	if !strings.Contains(err.Error(), "unknown exercise") {
-		t.Errorf("error = %v, want it to mention \"unknown exercise\"", err)
-	}
-}
-
-func TestRunCmd_RequiresExerciseOrSandbox(t *testing.T) {
-	err := runCmd(nil)
-	if err == nil || !strings.Contains(err.Error(), "exactly one of") {
-		t.Errorf("runCmd(nil) error = %v, want a mutual-exclusion error", err)
-	}
-}
-
-func TestRunCmd_RejectsBothExerciseAndSandbox(t *testing.T) {
-	err := runCmd([]string{"--exercise", "foo", "--sandbox"})
-	if err == nil || !strings.Contains(err.Error(), "exactly one of") {
-		t.Errorf("runCmd with both flags set, error = %v, want a mutual-exclusion error", err)
-	}
-}
-
-func TestRunCmd_UnknownExerciseIDErrorsCleanly(t *testing.T) {
-	t.Setenv("PRACTICE_ROOT", t.TempDir())
-
-	err := runCmd([]string{"--exercise", "does-not-exist"})
+	err := practiceCmd([]string{"does-not-exist"})
 	if err == nil || !strings.Contains(err.Error(), "unknown exercise") {
 		t.Errorf("error = %v, want it to mention \"unknown exercise\"", err)
 	}
