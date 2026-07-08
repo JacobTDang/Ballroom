@@ -11,14 +11,17 @@ TMUX_CONF="${TMUX_CONF:-/etc/practice/tmux.conf}"
 tmux -f "$TMUX_CONF" new-session -d -s "$SESSION" -n main -c "$WORKDIR"
 
 # pane 0: editor (left, full height)
+tmux select-pane -t "${SESSION}:main.0" -T "EDITOR"
 tmux send-keys -t "${SESSION}:main.0" "nvim ." C-m
 
 # pane 1: terminal (top right)
 tmux split-window -h -t "${SESSION}:main.0" -c "$WORKDIR"
+tmux select-pane -t "${SESSION}:main.1" -T "TERMINAL"
 tmux send-keys -t "${SESSION}:main.1" "/bin/bash" C-m
 
 # pane 2: tutor chat (bottom right)
 tmux split-window -v -t "${SESSION}:main.1" -c "$WORKDIR"
+tmux select-pane -t "${SESSION}:main.2" -T "TUTOR CHAT"
 tmux send-keys -t "${SESSION}:main.2" "/usr/local/bin/tutor-chat.sh" C-m
 
 tmux select-pane -t "${SESSION}:main.0"

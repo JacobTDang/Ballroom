@@ -1,5 +1,7 @@
 -- Minimum viable nvim config for the practice image (spec Section 6 risk item).
--- Deliberately no plugin manager / LSP for MVP — bare editor with sane defaults.
+-- Deliberately no plugin manager / LSP for MVP — bare editor with sane defaults,
+-- but not an unstyled one: a built-in colorscheme and a real statusline so it
+-- doesn't feel like a blank terminal you got dropped into.
 vim.opt.number = true
 vim.opt.relativenumber = true
 vim.opt.expandtab = true
@@ -13,3 +15,9 @@ vim.opt.termguicolors = true
 vim.opt.scrolloff = 4
 vim.opt.signcolumn = "yes"
 vim.opt.clipboard = "unnamedplus"
+
+vim.opt.cursorline = true
+vim.cmd.colorscheme("habamax")
+
+vim.opt.laststatus = 3
+vim.opt.statusline = " %{toupper(mode())} │ %f %m%r%h%w%=%y  ln %l/%L col %c "
