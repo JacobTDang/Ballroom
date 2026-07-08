@@ -1,0 +1,10 @@
+{
+  "id": "lru-cache-01-python",
+  "title": "LRU cache (AI-assisted)",
+  "category": "ai-assisted",
+  "language": "python",
+  "time_limit_min": 30,
+  "tutor_mode": "full-assist",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}
