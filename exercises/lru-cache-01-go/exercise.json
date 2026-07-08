@@ -1,10 +1,10 @@
 {
-  "id": "cpp-ai-assisted-01",
+  "id": "lru-cache-01-go",
   "title": "LRU cache (AI-assisted)",
   "category": "ai-assisted",
-  "language": "cpp",
+  "language": "go",
   "time_limit_min": 30,
   "tutor_mode": "full-assist",
   "repo_path": "./repo",
-  "test_command": "clang++ -std=c++17 -O0 -g -o /tmp/t hidden_test.cpp && /tmp/t"
+  "test_command": "go test ./..."
 }
