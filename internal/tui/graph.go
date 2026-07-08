@@ -14,44 +14,41 @@ import (
 // in a row.
 const boxGap = 3
 
+// Solid-filled boxes (background color + bold light text), matching
+// NeetCode's roadmap look — colored "buttons", not just outlined frames.
 var (
 	rootBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#F2EBDD")).
+			Background(lipgloss.Color("#4A4A4A")).
 			Foreground(lipgloss.Color("#F2EBDD")).
 			Bold(true).
 			Padding(0, 2)
 
 	categoryBoxStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#3C7DC4")).
-				Foreground(lipgloss.Color("#3C7DC4")).
+				Background(lipgloss.Color("#3C7DC4")).
+				Foreground(lipgloss.Color("#F2EBDD")).
+				Bold(true).
 				Padding(0, 1)
 
 	categorySolvedBoxStyle = categoryBoxStyle.
-				BorderForeground(lipgloss.Color("#2FA6A6")).
-				Foreground(lipgloss.Color("#2FA6A6"))
+				Background(lipgloss.Color("#2FA6A6"))
 
 	highlightedBoxStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#9B5FB0")).
+				Background(lipgloss.Color("#9B5FB0")).
 				Foreground(lipgloss.Color("#F2EBDD")).
 				Bold(true).
 				Padding(0, 1)
 
 	exerciseNotAttemptedBoxStyle = lipgloss.NewStyle().
-					Border(lipgloss.RoundedBorder()).
-					BorderForeground(lipgloss.Color("#D9D3C4")).
-					Foreground(lipgloss.Color("#D9D3C4")).
+					Background(lipgloss.Color("#6B6B6B")).
+					Foreground(lipgloss.Color("#F2EBDD")).
+					Bold(true).
 					Padding(0, 1)
 
 	exerciseFailBoxStyle = exerciseNotAttemptedBoxStyle.
-				BorderForeground(lipgloss.Color("#F03C3C")).
-				Foreground(lipgloss.Color("#F03C3C"))
+				Background(lipgloss.Color("#F03C3C"))
 
 	exercisePassBoxStyle = exerciseNotAttemptedBoxStyle.
-				BorderForeground(lipgloss.Color("#2FA6A6")).
-				Foreground(lipgloss.Color("#2FA6A6"))
+				Background(lipgloss.Color("#2FA6A6"))
 )
 
 // plainProgressBar is pixelProgressBar without per-block coloring, for

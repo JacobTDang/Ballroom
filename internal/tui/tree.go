@@ -41,6 +41,7 @@ type treeModel struct {
 	exCursor      int
 	selected      *catalog.ExerciseStatus
 	back          bool
+	width, height int
 }
 
 func newTreeModel(statuses []catalog.ExerciseStatus) treeModel {
@@ -80,6 +81,11 @@ func (m treeModel) categoryCounts(category string) (solved, total int) {
 func (m treeModel) Init() tea.Cmd { return nil }
 
 func (m treeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if sizeMsg, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width, m.height = sizeMsg.Width, sizeMsg.Height
+		return m, nil
+	}
+
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
@@ -201,8 +207,11 @@ func (m treeModel) View() string {
 		b.WriteString("\n\n")
 		b.WriteString(checkDimStyle.Render("  ←/→ move · ↓/enter expand · q back"))
 	}
-	b.WriteString("\n")
-	return b.String()
+	content := b.String()
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	}
+	return content
 }
 
 func exerciseDetailLine(s catalog.ExerciseStatus) string {

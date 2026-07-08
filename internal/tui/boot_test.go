@@ -1,12 +1,24 @@
 package tui
 
 import (
+	"errors"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/JacobTDang/Ballroom/internal/config"
 	"github.com/JacobTDang/Ballroom/internal/preflight"
 )
+
+// fakeBuildImage substitutes buildImageFn in tests so triggering a live
+// build doesn't shell out to real docker. Returns a restore func to defer.
+func fakeBuildImage(lineCh <-chan string, errCh <-chan error) func() {
+	orig := buildImageFn
+	buildImageFn = func(config.Config) (<-chan string, <-chan error) {
+		return lineCh, errCh
+	}
+	return func() { buildImageFn = orig }
+}
 
 func TestBootModel_ChecksRunSequentiallyThenReady(t *testing.T) {
 	var order []string
@@ -108,6 +120,141 @@ func TestBootModel_TickAdvancesPhaseAndReschedules(t *testing.T) {
 	}
 	if newM.(bootModel).phase != 1 {
 		t.Errorf("phase = %d, want 1", newM.(bootModel).phase)
+	}
+}
+
+func TestBootModel_ImageNotOkTriggersLiveBuildInsteadOfFailing(t *testing.T) {
+	lineCh := make(chan string)
+	errCh := make(chan error)
+	defer fakeBuildImage(lineCh, errCh)()
+
+	m := bootModel{
+		pending: []func() preflight.Check{
+			func() preflight.Check { return preflight.Check{Name: "Docker", OK: true} },
+			func() preflight.Check { return preflight.Check{Name: "Image", OK: false, Detail: "not built"} },
+		},
+		checks: []preflight.Check{{Name: "Docker", OK: true}},
+	}
+
+	newM, cmd := m.Update(checkDoneMsg(preflight.Check{Name: "Image", OK: false, Detail: "not built"}))
+	if cmd == nil {
+		t.Fatal("expected a command to wait for build output")
+	}
+	bm := newM.(bootModel)
+	if !bm.building {
+		t.Fatal("expected building=true")
+	}
+	if len(bm.checks) != 1 {
+		t.Errorf("image check should not be appended yet while building, got %+v", bm.checks)
+	}
+	if bm.ready {
+		t.Error("should not be ready while the image is still building")
+	}
+}
+
+func TestBootModel_ImageOkDoesNotTriggerBuild(t *testing.T) {
+	m := bootModel{
+		pending: []func() preflight.Check{
+			func() preflight.Check { return preflight.Check{Name: "Docker", OK: true} },
+			func() preflight.Check { return preflight.Check{Name: "Image", OK: true} },
+		},
+		checks: []preflight.Check{{Name: "Docker", OK: true}},
+	}
+	newM, _ := m.Update(checkDoneMsg(preflight.Check{Name: "Image", OK: true, Detail: "built"}))
+	bm := newM.(bootModel)
+	if bm.building {
+		t.Error("should not start a build when the image check already passed")
+	}
+	if len(bm.checks) != 2 {
+		t.Errorf("expected the image check to be appended normally, got %+v", bm.checks)
+	}
+}
+
+func TestBootModel_DockerNotReachableSkipsBuildAttempt(t *testing.T) {
+	m := bootModel{
+		pending: []func() preflight.Check{
+			func() preflight.Check { return preflight.Check{Name: "Docker", OK: false} },
+			func() preflight.Check { return preflight.Check{Name: "Image", OK: false} },
+		},
+		checks: []preflight.Check{{Name: "Docker", OK: false}},
+	}
+	newM, _ := m.Update(checkDoneMsg(preflight.Check{Name: "Image", OK: false, Detail: "not built"}))
+	bm := newM.(bootModel)
+	if bm.building {
+		t.Error("should not attempt a build when Docker itself isn't reachable")
+	}
+	if len(bm.checks) != 2 {
+		t.Errorf("expected the image check to be appended as a plain failure, got %+v", bm.checks)
+	}
+}
+
+func TestBootModel_BuildLineAppendsAndCapsLogAndKeepsWaiting(t *testing.T) {
+	lineCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	m := bootModel{building: true, buildLineCh: lineCh, buildErrCh: errCh}
+
+	for i := 0; i < maxBuildLogLines+3; i++ {
+		newM, cmd := m.Update(buildLineMsg("line"))
+		if cmd == nil {
+			t.Fatal("expected buildLineMsg to keep listening for more output")
+		}
+		m = newM.(bootModel)
+	}
+	if len(m.buildLines) != maxBuildLogLines {
+		t.Errorf("buildLines len = %d, want capped at %d", len(m.buildLines), maxBuildLogLines)
+	}
+}
+
+func TestBootModel_BuildDoneSuccessAdvancesAsPassingImageCheck(t *testing.T) {
+	m := bootModel{
+		pending: []func() preflight.Check{
+			func() preflight.Check { return preflight.Check{Name: "Docker", OK: true} },
+			func() preflight.Check { return preflight.Check{Name: "Image", OK: true} },
+		},
+		checks:     []preflight.Check{{Name: "Docker", OK: true}},
+		building:   true,
+		buildLines: []string{"some output"},
+	}
+
+	newM, cmd := m.Update(buildDoneMsg{err: nil})
+	if cmd != nil {
+		t.Fatal("expected no further pending checks after the last one resolves")
+	}
+	bm := newM.(bootModel)
+	if bm.building {
+		t.Error("expected building=false once the build resolves")
+	}
+	if len(bm.buildLines) != 0 {
+		t.Error("expected the build log to clear once resolved (panel collapses)")
+	}
+	if len(bm.checks) != 2 || !bm.checks[1].OK {
+		t.Fatalf("expected a passing Image check appended, got %+v", bm.checks)
+	}
+	if !bm.ready {
+		t.Error("expected ready=true once the (now only) remaining check resolves")
+	}
+}
+
+func TestBootModel_BuildDoneFailureAdvancesAsFailingImageCheck(t *testing.T) {
+	m := bootModel{
+		pending: []func() preflight.Check{
+			func() preflight.Check { return preflight.Check{Name: "Docker", OK: true} },
+			func() preflight.Check { return preflight.Check{Name: "Image", OK: true} },
+		},
+		checks:   []preflight.Check{{Name: "Docker", OK: true}},
+		building: true,
+	}
+
+	newM, _ := m.Update(buildDoneMsg{err: errors.New("boom")})
+	bm := newM.(bootModel)
+	if bm.building {
+		t.Error("expected building=false once the build resolves, even on failure")
+	}
+	if len(bm.checks) != 2 || bm.checks[1].OK {
+		t.Fatalf("expected a failing Image check appended, got %+v", bm.checks)
+	}
+	if !bm.ready {
+		t.Error("expected ready=true so the user isn't stuck — they can see the failure and quit")
 	}
 }
 

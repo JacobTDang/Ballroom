@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/JacobTDang/Ballroom/internal/catalog"
 )
@@ -32,11 +33,12 @@ var menuDescriptions = []string{
 // animation doesn't compete with reading a list, so it gets the full
 // shimmer treatment).
 type menuModel struct {
-	cursor int
-	phase  int
-	choice menuChoice
-	chosen bool
-	quit   bool
+	cursor        int
+	phase         int
+	choice        menuChoice
+	chosen        bool
+	quit          bool
+	width, height int
 }
 
 func newMenuModel() menuModel {
@@ -49,6 +51,10 @@ func (m menuModel) Init() tea.Cmd {
 
 func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+
 	case tickMsg:
 		m.phase++
 		return m, tickCmd()
@@ -97,7 +103,12 @@ func (m menuModel) View() string {
 
 	b.WriteString(checkDimStyle.Render("  ↑/↓ or j/k move · 1/2/3 jump · enter select · q quit"))
 	b.WriteString("\n")
-	return b.String()
+
+	content := b.String()
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	}
+	return content
 }
 
 // RunMenu shows the main menu and blocks until the user picks an option
