@@ -150,6 +150,38 @@ func (m treeModel) View() string {
 	}
 	catRow := joinBoxesHorizontal(catBoxes, boxGap)
 	catCenters := boxCenters(catWidths, boxGap)
+
+	// If the exercise row's own natural anchor sits further right than
+	// the focused category's center, the category (and everything above
+	// it) needs to shift right to meet it — clamping the exercise row's
+	// pad at 0 instead would leave connector lines correctly pointing at
+	// the category's true position while the boxes they connect to end
+	// up somewhere else entirely (e.g. under a different category).
+	// Shifting the whole layout together keeps parent and child aligned
+	// no matter which side the mismatch falls on.
+	var exCenters []int
+	var exRow string
+	var exs []catalog.ExerciseStatus
+	catShift := 0
+	if m.inExerciseRow {
+		exs = m.exercisesFor(m.categories[m.catCursor])
+		exBoxes := make([]string, len(exs))
+		exWidths := make([]int, len(exs))
+		for i, s := range exs {
+			exBoxes[i] = renderExerciseBox(s, i == m.exCursor)
+			exWidths[i] = lipgloss.Width(exBoxes[i])
+		}
+		exRow = joinBoxesHorizontal(exBoxes, boxGap)
+		exCenters = boxCenters(exWidths, boxGap)
+		catShift = spanAnchor(exCenters) - catCenters[m.catCursor]
+		if catShift < 0 {
+			catShift = 0
+		}
+	}
+	for i := range catCenters {
+		catCenters[i] += catShift
+	}
+	catRow = padLeft(catRow, catShift)
 	totalWidth := lipgloss.Width(catRow)
 
 	rootBox := renderRootBox()
@@ -162,17 +194,7 @@ func (m treeModel) View() string {
 
 	var exRowPadded string
 	var exConn []string
-	var exs []catalog.ExerciseStatus
 	if m.inExerciseRow {
-		exs = m.exercisesFor(m.categories[m.catCursor])
-		exBoxes := make([]string, len(exs))
-		exWidths := make([]int, len(exs))
-		for i, s := range exs {
-			exBoxes[i] = renderExerciseBox(s, i == m.exCursor)
-			exWidths[i] = lipgloss.Width(exBoxes[i])
-		}
-		exRow := joinBoxesHorizontal(exBoxes, boxGap)
-		exCenters := boxCenters(exWidths, boxGap)
 		parentCenter := catCenters[m.catCursor]
 		exPad := parentCenter - spanAnchor(exCenters)
 		if exPad < 0 {
@@ -209,7 +231,7 @@ func (m treeModel) View() string {
 	}
 	content := b.String()
 	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+		return placeBlock(m.width, m.height, content)
 	}
 	return content
 }

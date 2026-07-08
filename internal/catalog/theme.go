@@ -47,16 +47,18 @@ func styled(codes, s string) string {
 	return codes + s + ansiReset
 }
 
-// Solid block-letter art (figlet "banner3", # swapped for a solid Unicode
-// block) — filled in completely, not an outline font.
+// Two-tone block-letter art (figlet "banner4"): '#' is the letter
+// stroke, '.' is the negative space within each glyph's own bounding
+// box (true blanks stay blank) — gives the banner actual texture instead
+// of a flat solid silhouette.
 var bannerArt = []string{
-	`████████     ███    ██       ██       ████████   ███████   ███████  ██     ██ `,
-	`██     ██   ██ ██   ██       ██       ██     ██ ██     ██ ██     ██ ███   ███ `,
-	`██     ██  ██   ██  ██       ██       ██     ██ ██     ██ ██     ██ ████ ████ `,
-	`████████  ██     ██ ██       ██       ████████  ██     ██ ██     ██ ██ ███ ██ `,
-	`██     ██ █████████ ██       ██       ██   ██   ██     ██ ██     ██ ██     ██ `,
-	`██     ██ ██     ██ ██       ██       ██    ██  ██     ██ ██     ██ ██     ██ `,
-	`████████  ██     ██ ████████ ████████ ██     ██  ███████   ███████  ██     ██ `,
+	`.########.....###....##.......##.......########...#######...#######..##.....##`,
+	`.##.....##...##.##...##.......##.......##.....##.##.....##.##.....##.###...###`,
+	`.##.....##..##...##..##.......##.......##.....##.##.....##.##.....##.####.####`,
+	`.########..##.....##.##.......##.......########..##.....##.##.....##.##.###.##`,
+	`.##.....##.#########.##.......##.......##...##...##.....##.##.....##.##.....##`,
+	`.##.....##.##.....##.##.......##.......##....##..##.....##.##.....##.##.....##`,
+	`.########..##.....##.########.########.##.....##..#######...#######..##.....##`,
 }
 
 var bannerGradient = []string{colorRed, colorOrange, colorGold, colorPink, colorPurple, colorBlue, colorTeal}
@@ -66,13 +68,20 @@ var bannerGradient = []string{colorRed, colorOrange, colorGold, colorPink, color
 // rather than one smooth gradient band per row.
 const mosaicWidth = 3
 
+// bannerScale repeats each source column this many times — a nearest-
+// neighbor pixel-art scale-up (the same technique retro game sprites
+// use), so the banner reads as genuinely bigger, not just the same art
+// with more padding around it.
+const bannerScale = 2
+
 // MosaicBanner renders the BALLROOM title art as a scattered multi-color
 // mosaic (each small block of characters gets its own color from the
 // palette, diagonally offset per row) instead of a smooth per-row
 // gradient — closer to light scattering off a disco ball than a sunset
-// gradient. phase shifts the pattern; incrementing it on a timer (see
-// internal/tui's tick handling) animates a shimmer across the letters.
-// Pass phase=0 for a static render.
+// gradient. The glyphs' own negative space renders as a dim texture
+// rather than blank, and phase shifts the mosaic pattern; incrementing it
+// on a timer (see internal/tui's tick handling) animates a shimmer across
+// the letters. Pass phase=0 for a static render.
 func MosaicBanner(phase int) string {
 	var b strings.Builder
 	b.WriteString("\n")
@@ -81,13 +90,18 @@ func MosaicBanner(phase int) string {
 		col := 0
 		for _, ch := range line {
 			if ch == ' ' {
-				b.WriteRune(ch)
-				col++
+				b.WriteString(strings.Repeat(" ", bannerScale))
+				col += bannerScale
+				continue
+			}
+			if ch == '.' {
+				b.WriteString(styled(colorDim, strings.Repeat("░", bannerScale)))
+				col += bannerScale
 				continue
 			}
 			idx := (row + col/mosaicWidth + phase) % len(bannerGradient)
-			b.WriteString(styled(bannerGradient[idx], string(ch)))
-			col++
+			b.WriteString(styled(bannerGradient[idx], strings.Repeat("█", bannerScale)))
+			col += bannerScale
 		}
 		b.WriteString("\n")
 	}

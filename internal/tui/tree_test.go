@@ -115,6 +115,59 @@ func TestTreeModel_LeftRightMoveWithinExerciseRow(t *testing.T) {
 	}
 }
 
+func TestTreeModel_ExerciseRowStaysAlignedUnderLeftmostCategory(t *testing.T) {
+	statuses := treeFixture()
+	// pattern is leftmost; a 3rd exercise makes its exercise row wider
+	// than needed to align under pattern's own (further-left) center —
+	// exactly the reported bug scenario: the category ends up narrower/
+	// further left than its own exercise row wants to sit.
+	statuses = append(statuses, fakeStatusIn("pattern", "two-pointers-01-python"))
+	m := newTreeModel(statuses)
+
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown}) // expand pattern (leftmost)
+	view := stripAnsiTUI(newM.(treeModel).View())
+	lines := strings.Split(view, "\n")
+
+	rootLineIdx := -1
+	for i, l := range lines {
+		if strings.Contains(l, "PRACTICE") {
+			rootLineIdx = i
+			break
+		}
+	}
+	if rootLineIdx == -1 {
+		t.Fatal("could not find the PRACTICE root in the rendered view")
+	}
+
+	catLineIdx := -1
+	for i := rootLineIdx + 1; i < len(lines); i++ {
+		if strings.Contains(lines[i], "pattern") {
+			catLineIdx = i
+			break
+		}
+	}
+	if catLineIdx == -1 {
+		t.Fatal("could not find the pattern category row in the rendered view")
+	}
+	catStart := strings.Index(lines[catLineIdx], "pattern")
+	catEnd := catStart + len("pattern")
+
+	// category row -> exercise connector's single parent stem -> spine ->
+	// child stems -> exercise boxes.
+	stemLineIdx := catLineIdx + 2
+	if stemLineIdx >= len(lines) {
+		t.Fatal("expected an exercise connector stem row below the category")
+	}
+	stemCol := strings.IndexRune(lines[stemLineIdx], '│')
+	if stemCol == -1 {
+		t.Fatal("expected a '│' stem connecting the category down to its exercises")
+	}
+	if stemCol < catStart || stemCol > catEnd {
+		t.Errorf("exercise connector stem at col %d is outside the pattern box's own span [%d,%d) — misaligned, connects to boxes positioned elsewhere",
+			stemCol, catStart, catEnd)
+	}
+}
+
 func TestTreeModel_UpFromExerciseRowReturnsToCategoryRow(t *testing.T) {
 	m := newTreeModel(treeFixture())
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})

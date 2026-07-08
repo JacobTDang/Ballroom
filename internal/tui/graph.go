@@ -255,3 +255,34 @@ func padLeft(block string, n int) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// placeBlock centers content as a single rigid block within a
+// termWidth x termHeight viewport — unlike lipgloss.Place, which
+// centers each line of the content independently (measured against that
+// line's own width), silently destroying any deliberate relative
+// horizontal alignment between lines (exactly what graph/connector
+// rendering depends on: a box row must land under the exact column its
+// connector line points at). Every line gets the same left-pad, computed
+// once from the content's own widest line.
+func placeBlock(termWidth, termHeight int, content string) string {
+	lines := strings.Split(content, "\n")
+	contentWidth := 0
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > contentWidth {
+			contentWidth = w
+		}
+	}
+
+	leftPad := (termWidth - contentWidth) / 2
+	if leftPad > 0 {
+		content = padLeft(content, leftPad)
+		lines = strings.Split(content, "\n")
+	}
+
+	topPad := (termHeight - len(lines)) / 2
+	if topPad > 0 {
+		content = strings.Repeat("\n", topPad) + content
+	}
+
+	return content
+}

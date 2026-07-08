@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/JacobTDang/Ballroom/internal/catalog"
 )
@@ -106,7 +105,7 @@ func (m menuModel) View() string {
 
 	content := b.String()
 	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+		return placeBlock(m.width, m.height, content)
 	}
 	return content
 }
