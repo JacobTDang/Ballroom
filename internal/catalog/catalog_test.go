@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -11,6 +12,14 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
+
+var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// stripAnsi removes color escape codes so content assertions can check
+// substance without being coupled to exactly how something is styled.
+func stripAnsi(s string) string {
+	return ansiPattern.ReplaceAllString(s, "")
+}
 
 func writeExercise(t *testing.T, exercisesDir, id string, fields map[string]any) {
 	t.Helper()
@@ -198,7 +207,7 @@ func TestFormatTable_IncludesExerciseInfo(t *testing.T) {
 		{Exercise: fakeExercise("cpp-debug-01", "debug", "cpp", "Off-by-one"), Attempts: 0, LastResult: ""},
 	}
 
-	out := FormatTable(statuses)
+	out := stripAnsi(FormatTable(statuses))
 
 	for _, want := range []string{"two-pointers-01", "Two Sum II", "pattern", "go", "pass", "2 attempt"} {
 		if !strings.Contains(out, want) {
@@ -217,7 +226,7 @@ func TestFormatSummary_ShowsPerCategoryCounts(t *testing.T) {
 		{Exercise: fakeExercise("c", "debug", "cpp", "C"), LastResult: ""},
 	}
 
-	out := FormatSummary(statuses)
+	out := stripAnsi(FormatSummary(statuses))
 
 	if !strings.Contains(out, "pattern: 1/1") {
 		t.Errorf("summary missing pattern 1/1:\n%s", out)

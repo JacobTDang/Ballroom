@@ -1,0 +1,10 @@
+{
+  "id": "racy-counter-01-cpp",
+  "title": "Racy counter",
+  "category": "concurrency",
+  "language": "cpp",
+  "time_limit_min": 20,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "clang++ -std=c++17 -fsanitize=thread -g -O0 -o /tmp/t solution.cpp hidden_test.cpp && /tmp/t"
+}
