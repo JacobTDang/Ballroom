@@ -20,10 +20,10 @@ const (
 )
 
 var (
-	checkOKStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("120")).Bold(true)
-	checkFailStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("210")).Bold(true)
-	checkDimStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	hintStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("87")).Bold(true)
+	checkOKStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#2FA6A6")).Bold(true)
+	checkFailStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F03C3C")).Bold(true)
+	checkDimStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#D9D3C4"))
+	hintStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8A93C")).Bold(true)
 )
 
 type checkDoneMsg preflight.Check
@@ -35,6 +35,7 @@ type bootModel struct {
 	checks  []preflight.Check
 	ready   bool
 	quit    bool
+	phase   int
 }
 
 func newBootModel(cfg config.Config) bootModel {
@@ -50,7 +51,7 @@ func newBootModel(cfg config.Config) bootModel {
 }
 
 func (m bootModel) Init() tea.Cmd {
-	return m.runCheck(0)
+	return tea.Batch(m.runCheck(0), tickCmd())
 }
 
 func (m bootModel) runCheck(i int) tea.Cmd {
@@ -63,6 +64,10 @@ func (m bootModel) runCheck(i int) tea.Cmd {
 
 func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tickMsg:
+		m.phase++
+		return m, tickCmd()
+
 	case checkDoneMsg:
 		m.checks = append(m.checks, preflight.Check(msg))
 		if len(m.checks) < len(m.pending) {
@@ -97,7 +102,7 @@ func RunBoot(cfg config.Config) (proceed bool, err error) {
 
 func (m bootModel) View() string {
 	var b strings.Builder
-	b.WriteString(catalog.Banner())
+	b.WriteString(catalog.MosaicBanner(m.phase))
 	b.WriteString("\n")
 
 	for _, c := range m.checks {

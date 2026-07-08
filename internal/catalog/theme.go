@@ -5,24 +5,28 @@ import (
 	"strings"
 )
 
-// Retro/disco palette: teal/cyan through white to purple/pink, plus
-// semantic colors for pass/fail/not-attempted. 256-color ANSI codes —
-// broadly supported, no truecolor assumption needed.
+// Bold/saturated retro palette, truecolor (24-bit) ANSI so the exact hex
+// values render instead of the nearest 256-color approximation.
 const (
 	ansiReset = "\x1b[0m"
 	ansiBold  = "\x1b[1m"
 
-	colorTeal1  = "\x1b[38;5;51m"  // bright cyan
-	colorTeal2  = "\x1b[38;5;45m"  // turquoise
-	colorWhite1 = "\x1b[38;5;87m"  // pale cyan-white
-	colorWhite2 = "\x1b[38;5;189m" // pale lavender-white
-	colorPurple = "\x1b[38;5;141m" // medium purple
-	colorPink   = "\x1b[38;5;213m" // pink/magenta
-	colorPink2  = "\x1b[38;5;207m" // deeper magenta, gradient's last stop
+	colorRed    = "\x1b[38;2;240;60;60m"  // #F03C3C — dominant
+	colorOrange = "\x1b[38;2;240;134;46m" // #F0862E
+	colorGold   = "\x1b[38;2;232;169;60m" // #E8A93C
+	colorPink   = "\x1b[38;2;224;70;140m" // #E0468C
+	colorPurple = "\x1b[38;2;155;95;176m" // #9B5FB0
+	colorBlue   = "\x1b[38;2;60;125;196m" // #3C7DC4
+	colorTeal   = "\x1b[38;2;47;166;166m" // #2FA6A6
 
-	colorPass = "\x1b[38;5;120m" // soft green
-	colorFail = "\x1b[38;5;210m" // soft red/salmon — still reads as "fail" but stays in-palette
-	colorDim  = "\x1b[38;5;244m" // gray, for secondary text (ids, "not attempted")
+	colorCream    = "\x1b[38;2;242;235;221m" // #F2EBDD — warm off-white
+	colorPaleGray = "\x1b[38;2;217;211;196m" // #D9D3C4
+
+	// No green in this palette — teal reads as the "good" cool color,
+	// and red (the palette's dominant hue) is an unambiguous fail.
+	colorPass = colorTeal
+	colorFail = colorRed
+	colorDim  = colorPaleGray
 )
 
 // colorEnabled is re-checked on every call (not cached at package init) so
@@ -55,7 +59,7 @@ var bannerArt = []string{
 	`████████  ██     ██ ████████ ████████ ██     ██  ███████   ███████  ██     ██ `,
 }
 
-var bannerGradient = []string{colorTeal1, colorTeal2, colorWhite1, colorWhite2, colorPurple, colorPink, colorPink2}
+var bannerGradient = []string{colorRed, colorOrange, colorGold, colorPink, colorPurple, colorBlue, colorTeal}
 
 // mosaicWidth is how many columns share a color before the mosaic shifts
 // to the next one — small facets, like a disco ball's mirror tiles,
@@ -95,11 +99,11 @@ func MosaicBanner(phase int) string {
 // vertical space back (the tree picker, stats) — full art stays reserved
 // for the boot screen and the main menu's title moment.
 func CompactBanner() string {
-	return "  " + styled(colorPink, "✦") + " " + styled(ansiBold+colorWhite1, "BALLROOM — INTERVIEW PREP") + " " + styled(colorTeal1, "✦") + "\n"
+	return "  " + styled(colorPink, "✦") + " " + styled(ansiBold+colorCream, "BALLROOM — INTERVIEW PREP") + " " + styled(colorTeal, "✦") + "\n"
 }
 
 func tagline() string {
-	return "  " + styled(colorPink, "✦") + " " + styled(ansiBold+colorWhite1, "I N T E R V I E W   P R E P") + " " + styled(colorTeal1, "✦") + "\n"
+	return "  " + styled(colorPink, "✦") + " " + styled(ansiBold+colorCream, "I N T E R V I E W   P R E P") + " " + styled(colorTeal, "✦") + "\n"
 }
 
 // Banner is the static (non-animated) full title art, used on the boot

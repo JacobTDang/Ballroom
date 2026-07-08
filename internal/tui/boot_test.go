@@ -22,7 +22,27 @@ func TestBootModel_ChecksRunSequentiallyThenReady(t *testing.T) {
 		t.Fatal("Init() should return a command to run the first check")
 	}
 
-	msg1 := cmd()
+	// Init batches the first check with the banner's tick command, so
+	// unwrap the batch to find the checkDoneMsg among them.
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected Init() to return a batch of commands, got %T", cmd())
+	}
+	var msg1 tea.Msg
+	for _, c := range batch {
+		if c == nil {
+			continue
+		}
+		result := c()
+		if _, isCheck := result.(checkDoneMsg); isCheck {
+			msg1 = result
+			break
+		}
+	}
+	if msg1 == nil {
+		t.Fatal("expected a checkDoneMsg among Init()'s batched commands")
+	}
+
 	newM, cmd2 := m.Update(msg1)
 	bm := newM.(bootModel)
 	if len(bm.checks) != 1 || bm.checks[0].Name != "a" {
@@ -77,6 +97,17 @@ func TestBootModel_QAlwaysRequestsQuit(t *testing.T) {
 	}
 	if !newM.(bootModel).quit {
 		t.Error("expected quit=true after pressing q")
+	}
+}
+
+func TestBootModel_TickAdvancesPhaseAndReschedules(t *testing.T) {
+	m := bootModel{}
+	newM, cmd := m.Update(tickMsg{})
+	if cmd == nil {
+		t.Fatal("expected tick to reschedule another tick command")
+	}
+	if newM.(bootModel).phase != 1 {
+		t.Errorf("phase = %d, want 1", newM.(bootModel).phase)
 	}
 }
 

@@ -21,7 +21,7 @@ func TestBanner_ContainsBallroomArtAndTagline(t *testing.T) {
 
 func TestStyled_ProducesAnsiCodesByDefault(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
-	out := styled(colorTeal1, "hello")
+	out := styled(colorTeal, "hello")
 	if out == "hello" {
 		t.Error("expected styled() to wrap text in ANSI codes when NO_COLOR is unset")
 	}
@@ -32,7 +32,7 @@ func TestStyled_ProducesAnsiCodesByDefault(t *testing.T) {
 
 func TestStyled_RespectsNoColor(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
-	out := styled(colorTeal1, "hello")
+	out := styled(colorTeal, "hello")
 	if out != "hello" {
 		t.Errorf("styled(%q) with NO_COLOR set = %q, want plain %q", "hello", out, "hello")
 	}
