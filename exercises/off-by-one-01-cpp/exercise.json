@@ -1,5 +1,5 @@
 {
-  "id": "cpp-debug-01",
+  "id": "off-by-one-01-cpp",
   "title": "Off-by-one heap overflow in max_of",
   "category": "debug",
   "language": "cpp",

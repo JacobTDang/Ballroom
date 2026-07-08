@@ -1,0 +1,10 @@
+{
+  "id": "racy-counter-01-go",
+  "title": "Racy counter",
+  "category": "concurrency",
+  "language": "go",
+  "time_limit_min": 20,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test -race ./..."
+}
