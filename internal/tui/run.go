@@ -48,11 +48,34 @@ func Run(cfg config.Config) error {
 			runErr = orchestrator.RunSandbox(cfg)
 		case menuStats:
 			runErr = runStats(cfg)
+		case menuModelPicker:
+			cfg, runErr = runModelPicker(cfg)
 		}
 		if runErr != nil {
 			fmt.Fprintf(os.Stderr, "ballroom: %v\n", runErr)
 		}
 	}
+}
+
+// runModelPicker shows the model popup and, if the user picks or types a
+// model, persists it to settings.json and returns an updated cfg so every
+// subsequent orchestrator.RunExercise/RunSandbox call in this same
+// invocation immediately uses it too — not just future launches of the
+// TUI. Backing out of the popup returns cfg unchanged.
+func runModelPicker(cfg config.Config) (config.Config, error) {
+	model, ok, err := RunModelPicker(ollamaHost, cfg.TutorModel)
+	if err != nil {
+		return cfg, err
+	}
+	if !ok {
+		return cfg, nil
+	}
+
+	cfg.TutorModel = model
+	if err := config.SaveSettings(cfg.SettingsPath(), config.Settings{TutorModel: model}); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
 }
 
 // runPracticeLoop shows the category popup and, for whichever category is

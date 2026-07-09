@@ -101,3 +101,119 @@ func TestTestsPath(t *testing.T) {
 		t.Errorf("TestsPath = %q, want %q", got, want)
 	}
 }
+
+func TestSettingsPath(t *testing.T) {
+	cfg := Config{DataDir: "/root/data"}
+	want := filepath.Join("/root/data", "settings.json")
+	if got := cfg.SettingsPath(); got != want {
+		t.Errorf("SettingsPath = %q, want %q", got, want)
+	}
+}
+
+func TestLoadSettings_MissingFileReturnsZeroValueNotError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	s, err := LoadSettings(path)
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if s.TutorModel != "" {
+		t.Errorf("TutorModel = %q, want empty for a missing file", s.TutorModel)
+	}
+}
+
+func TestLoadSettings_MalformedFileReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if _, err := LoadSettings(path); err == nil {
+		t.Fatal("expected an error for malformed settings JSON, got nil")
+	}
+}
+
+func TestSaveSettings_ThenLoadRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	want := Settings{TutorModel: "llama3:8b"}
+	if err := SaveSettings(path, want); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	got, err := LoadSettings(path)
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if got != want {
+		t.Errorf("LoadSettings = %+v, want %+v", got, want)
+	}
+}
+
+func TestSaveSettings_CreatesParentDirIfMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "data", "settings.json")
+
+	if err := SaveSettings(path, Settings{TutorModel: "x"}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("expected settings file to exist at %q: %v", path, err)
+	}
+}
+
+func TestLoad_DefaultsTutorModelWhenNoSettingsFile(t *testing.T) {
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	t.Setenv("PRACTICE_ROOT", resolved)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.TutorModel != DefaultTutorModel {
+		t.Errorf("TutorModel = %q, want default %q", cfg.TutorModel, DefaultTutorModel)
+	}
+}
+
+func TestQwen25Coder14BModel_IsValidOllamaTag(t *testing.T) {
+	want := "qwen2.5-coder:14b-instruct"
+	if Qwen25Coder14BModel != want {
+		t.Errorf("Qwen25Coder14BModel = %q, want %q", Qwen25Coder14BModel, want)
+	}
+}
+
+func TestDeepSeekCoderV2LiteModel_IsValidOllamaTag(t *testing.T) {
+	want := "deepseek-coder-v2:16b-lite-instruct-q4_K_M"
+	if DeepSeekCoderV2LiteModel != want {
+		t.Errorf("DeepSeekCoderV2LiteModel = %q, want %q", DeepSeekCoderV2LiteModel, want)
+	}
+}
+
+func TestLoad_ReadsPersistedTutorModel(t *testing.T) {
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	t.Setenv("PRACTICE_ROOT", resolved)
+
+	settingsPath := filepath.Join(resolved, "data", "settings.json")
+	if err := SaveSettings(settingsPath, Settings{TutorModel: "llama3:8b"}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.TutorModel != "llama3:8b" {
+		t.Errorf("TutorModel = %q, want %q", cfg.TutorModel, "llama3:8b")
+	}
+}

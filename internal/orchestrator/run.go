@@ -55,22 +55,7 @@ func RunExercise(cfg config.Config, ex exercise.Exercise) error {
 		revealErr <- WaitAndReveal(ctx, controlDir, cfg.TestsPath(ex.ID), workspaceDir, revealPollInterval)
 	}()
 
-	args := []string{
-		"run", "-it", "--rm",
-		"-v", workspaceDir + ":/workspace",
-		"-v", cfg.DataDir + ":/data",
-		"-v", controlDir + ":/control",
-		"-e", "PRACTICE_CONTROL_DIR=/control",
-		"-e", "PRACTICE_WORKSPACE_DIR=/workspace",
-		"-e", "PRACTICE_TEST_COMMAND=" + ex.TestCommand,
-		"-e", "PRACTICE_EXERCISE_ID=" + ex.ID,
-		"-e", "PRACTICE_CATEGORY=" + ex.Category,
-		"-e", "PRACTICE_LANGUAGE=" + ex.Language,
-		"-e", "PRACTICE_TUTOR_MODE=" + ex.TutorMode,
-		"-e", "PRACTICE_STARTED_AT=" + startedAt.Format(time.RFC3339),
-		"-e", "PRACTICE_DB_PATH=/data/tracker.db",
-		cfg.DockerImage,
-	}
+	args := exerciseRunArgs(cfg, ex, controlDir, workspaceDir, startedAt)
 
 	cmd := exec.Command("docker", args...)
 	cmd.Stdin = os.Stdin
@@ -102,11 +87,7 @@ func RunSandbox(cfg config.Config) error {
 		return err
 	}
 
-	args := []string{
-		"run", "-it", "--rm",
-		"-v", sandboxVolume + ":/workspace",
-		cfg.DockerImage,
-	}
+	args := sandboxRunArgs(cfg)
 
 	cmd := exec.Command("docker", args...)
 	cmd.Stdin = os.Stdin
@@ -116,4 +97,41 @@ func RunSandbox(cfg config.Config) error {
 		return fmt.Errorf("orchestrator: docker run --sandbox: %w", err)
 	}
 	return nil
+}
+
+// exerciseRunArgs builds the `docker run` argument list for a graded
+// exercise session. Pulled out as a pure function (no docker/filesystem
+// side effects) so the flags it produces — notably TUTOR_MODEL, sourced
+// from cfg.TutorModel rather than a hardcoded const — are unit-testable
+// without shelling out to docker.
+func exerciseRunArgs(cfg config.Config, ex exercise.Exercise, controlDir, workspaceDir string, startedAt time.Time) []string {
+	return []string{
+		"run", "-it", "--rm",
+		"-v", workspaceDir + ":/workspace",
+		"-v", cfg.DataDir + ":/data",
+		"-v", controlDir + ":/control",
+		"-e", "PRACTICE_CONTROL_DIR=/control",
+		"-e", "PRACTICE_WORKSPACE_DIR=/workspace",
+		"-e", "PRACTICE_TEST_COMMAND=" + ex.TestCommand,
+		"-e", "PRACTICE_EXERCISE_ID=" + ex.ID,
+		"-e", "PRACTICE_CATEGORY=" + ex.Category,
+		"-e", "PRACTICE_LANGUAGE=" + ex.Language,
+		"-e", "PRACTICE_TUTOR_MODE=" + ex.TutorMode,
+		"-e", "PRACTICE_STARTED_AT=" + startedAt.Format(time.RFC3339),
+		"-e", "PRACTICE_DB_PATH=/data/tracker.db",
+		"-e", "TUTOR_MODEL=" + cfg.TutorModel,
+		cfg.DockerImage,
+	}
+}
+
+// sandboxRunArgs builds the `docker run` argument list for an ungraded
+// sandbox session. Same rationale as exerciseRunArgs for being a pure
+// function.
+func sandboxRunArgs(cfg config.Config) []string {
+	return []string{
+		"run", "-it", "--rm",
+		"-v", sandboxVolume + ":/workspace",
+		"-e", "TUTOR_MODEL=" + cfg.TutorModel,
+		cfg.DockerImage,
+	}
 }

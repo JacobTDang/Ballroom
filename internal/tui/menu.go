@@ -16,14 +16,16 @@ const (
 	menuPractice menuChoice = iota
 	menuSandbox
 	menuStats
+	menuModelPicker
 )
 
-var menuLabels = []string{"Practice", "Sandbox", "Stats"}
+var menuLabels = []string{"Practice", "Sandbox", "Stats", "Model"}
 
 var menuDescriptions = []string{
 	"Pick a pattern and work through exercises",
 	"Free practice, no grading, persists across sessions",
 	"See your progress across categories",
+	"Choose which Ollama model tutors your sessions",
 }
 
 // menuRightColWidth is the fixed content width of the right column —
@@ -79,7 +81,7 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(menuLabels)-1 {
 				m.cursor++
 			}
-		case "1", "2", "3":
+		case "1", "2", "3", "4":
 			n, _ := strconv.Atoi(msg.String())
 			m.cursor = n - 1
 		case "enter":
@@ -109,7 +111,7 @@ func (m menuModel) renderRightColumn() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(menuSubtitleStyle.Render("↑/↓ or j/k move · 1/2/3 jump · enter select · q quit"))
+	b.WriteString(menuSubtitleStyle.Render("↑/↓ or j/k move · 1-4 jump · enter select · q quit"))
 	return b.String()
 }
 
