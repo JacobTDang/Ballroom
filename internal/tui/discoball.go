@@ -7,11 +7,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const (
-	discoBallHeight = 24
-	discoBallWidth  = 48
-)
-
 // discoShades goes dim -> bright; used for the mirror-ball's directional
 // shading (denser characters catch more "light").
 var discoShades = []rune{'.', ':', '*', '%', '#'}

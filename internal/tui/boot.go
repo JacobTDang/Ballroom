@@ -9,7 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/JacobTDang/Ballroom/internal/catalog"
 	"github.com/JacobTDang/Ballroom/internal/config"
 	"github.com/JacobTDang/Ballroom/internal/orchestrator"
 	"github.com/JacobTDang/Ballroom/internal/preflight"
@@ -20,10 +19,17 @@ const (
 	tutorModel = "qwen2.5-coder:7b"
 )
 
-// maxBuildLogLines caps how many recent `docker build` lines the boot
-// screen's live panel keeps on screen — the point is to show it's making
-// progress, not to be a full build log.
-const maxBuildLogLines = 12
+// bootRightColWidth is the estimated width budget for the boot screen's
+// right column (title + checks + live build log), used only to work out
+// how much room is left for the disco ball — the panel itself still
+// auto-sizes to whatever content actually renders.
+const bootRightColWidth = 62
+
+// maxStepLogLines caps how many of a single docker-build step's own
+// lines stay on screen — the step entry itself persists for the whole
+// build (so progress doesn't disappear), only its own scrollback within
+// that step is windowed.
+const maxStepLogLines = 3
 
 // imageCheckIndex is the pending-checks slot for the image check — the
 // one that gets special "build it live" treatment instead of just
@@ -41,6 +47,32 @@ var (
 type checkDoneMsg preflight.Check
 type buildLineMsg string
 type buildDoneMsg struct{ err error }
+
+// buildStepLog groups the docker-build output lines belonging to one
+// step (identified by its leading "#NN" token) — the step itself stays
+// on screen for the whole build, but only its most recent
+// maxStepLogLines lines are kept.
+type buildStepLog struct {
+	id    string
+	lines []string
+}
+
+// stepID extracts the leading "#NN" token docker buildkit's plain
+// progress output prefixes every line with (e.g. "#5 [2/4] RUN ..." ->
+// "#5"). Returns "" if the line doesn't start with one.
+func stepID(line string) string {
+	if len(line) < 2 || line[0] != '#' {
+		return ""
+	}
+	i := 1
+	for i < len(line) && line[i] >= '0' && line[i] <= '9' {
+		i++
+	}
+	if i == 1 {
+		return ""
+	}
+	return line[:i]
+}
 
 // buildImageFn is a var (not a direct call) so tests can substitute a
 // fake build stream instead of shelling out to docker for real.
@@ -61,11 +93,12 @@ type bootModel struct {
 	phase   int
 
 	building    bool
-	buildLines  []string
+	buildSteps  []buildStepLog
 	buildLineCh <-chan string
 	buildErrCh  <-chan error
 
 	width, height int
+	ballGrid      [][]discoBallCell
 }
 
 func newBootModel(cfg config.Config) bootModel {
@@ -119,6 +152,9 @@ func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		maxW, maxH := ballAreaSize(m.width, m.height, bootRightColWidth)
+		h, w := dashboardBallSize(maxW, maxH)
+		m.ballGrid = buildDiscoBall(h, w)
 		// A resize (especially a big jump, e.g. small window -> full
 		// screen) can leave stale content from the old, differently-
 		// centered render behind — force a full repaint instead of
@@ -144,15 +180,22 @@ func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.advance(check)
 
 	case buildLineMsg:
-		m.buildLines = append(m.buildLines, string(msg))
-		if len(m.buildLines) > maxBuildLogLines {
-			m.buildLines = m.buildLines[len(m.buildLines)-maxBuildLogLines:]
+		line := string(msg)
+		id := stepID(line)
+		if n := len(m.buildSteps); n > 0 && m.buildSteps[n-1].id == id {
+			step := &m.buildSteps[n-1]
+			step.lines = append(step.lines, line)
+			if len(step.lines) > maxStepLogLines {
+				step.lines = step.lines[len(step.lines)-maxStepLogLines:]
+			}
+		} else {
+			m.buildSteps = append(m.buildSteps, buildStepLog{id: id, lines: []string{line}})
 		}
 		return m, waitForBuildLine(m.buildLineCh, m.buildErrCh)
 
 	case buildDoneMsg:
 		m.building = false
-		m.buildLines = nil
+		m.buildSteps = nil
 		result := preflight.Check{Name: preflight.CheckNameImage, OK: msg.err == nil, Detail: "built"}
 		if msg.err != nil {
 			result.Detail = fmt.Sprintf("build failed: %v", msg.err)
@@ -183,10 +226,15 @@ func RunBoot(cfg config.Config) (proceed bool, err error) {
 	return !final.(bootModel).quit, nil
 }
 
-func (m bootModel) View() string {
+// renderRightColumn renders the boot screen's right-hand content: the
+// same "Ballroom" title moment as the main menu, then the live checks /
+// build log / continue prompt underneath it.
+func (m bootModel) renderRightColumn() string {
 	var b strings.Builder
-	b.WriteString(catalog.MosaicBanner(m.phase))
+	b.WriteString(menuTitleStyle.Render("Ballroom"))
 	b.WriteString("\n")
+	b.WriteString(menuSubtitleStyle.Render("Interview Prep"))
+	b.WriteString("\n\n")
 
 	for _, c := range m.checks {
 		mark := checkOKStyle.Render("✓")
@@ -200,8 +248,10 @@ func (m bootModel) View() string {
 	if m.building {
 		fmt.Fprintf(&b, "  %s %-16s %s\n", hintStyle.Render("▾"), preflight.CheckNameImage,
 			checkDimStyle.Render("building — this can take a minute or two"))
-		for _, line := range m.buildLines {
-			fmt.Fprintf(&b, "      %s\n", buildLogStyle.Render(truncateTitle(line, 90)))
+		for _, step := range m.buildSteps {
+			for _, line := range step.lines {
+				fmt.Fprintf(&b, "      %s\n", buildLogStyle.Render(truncateTitle(line, 90)))
+			}
 		}
 		pendingCount-- // the image slot is shown above, not as "… checking"
 	}
@@ -214,9 +264,14 @@ func (m bootModel) View() string {
 		b.WriteString("  " + hintStyle.Render("Press Enter to continue") + checkDimStyle.Render("  (q to quit)") + "\n")
 	}
 
-	content := b.String()
-	if m.width > 0 && m.height > 0 {
-		return placeBlock(m.width, m.height, content)
+	return b.String()
+}
+
+func (m bootModel) View() string {
+	right := m.renderRightColumn()
+	if m.width == 0 || m.height == 0 || m.ballGrid == nil {
+		return right
 	}
-	return content
+	panel := renderDashboardPanel(m.ballGrid, m.phase, right)
+	return placeBlock(m.width, m.height, panel)
 }

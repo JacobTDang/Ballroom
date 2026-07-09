@@ -36,21 +36,13 @@ var (
 	menuTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F2EBDD"))
 	menuSubtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B8680"))
 	menuRowHighlight  = lipgloss.NewStyle().Background(lipgloss.Color("#9B5FB0")).Foreground(lipgloss.Color("#000000")).Bold(true)
-	menuPanelStyle    = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#9B5FB0")).
-				Padding(1, 3)
 )
-
-// discoBallGrid is built once at package init — the shape is fixed, only
-// its sparkle colors animate, so there's no reason to recompute the
-// ellipse/shading math on every render.
-var discoBallGrid = buildDiscoBall(discoBallHeight, discoBallWidth)
 
 // menuModel is the title-screen selection: Practice / Sandbox / Stats, a
 // two-column dashboard — a static monochrome disco ball on the left (a
 // sparse subset of its mirror tiles glint with color on a timer) and the
-// menu on the right, framed in a single bordered panel.
+// menu on the right, framed in a single bordered panel that scales to
+// fill most of the terminal.
 type menuModel struct {
 	cursor        int
 	phase         int
@@ -58,6 +50,7 @@ type menuModel struct {
 	chosen        bool
 	quit          bool
 	width, height int
+	ballGrid      [][]discoBallCell
 }
 
 func newMenuModel() menuModel {
@@ -72,6 +65,9 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		maxW, maxH := ballAreaSize(m.width, m.height, menuRightColWidth)
+		h, w := dashboardBallSize(maxW, maxH)
+		m.ballGrid = buildDiscoBall(h, w)
 		return m, tea.ClearScreen
 
 	case tickMsg:
@@ -129,15 +125,12 @@ func (m menuModel) renderRightColumn() string {
 }
 
 func (m menuModel) View() string {
-	ball := renderDiscoBall(discoBallGrid, m.phase)
 	right := m.renderRightColumn()
-
-	panel := menuPanelStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, ball, "    ", right))
-
-	if m.width > 0 && m.height > 0 {
-		return placeBlock(m.width, m.height, panel)
+	if m.width == 0 || m.height == 0 || m.ballGrid == nil {
+		return right
 	}
-	return panel
+	panel := renderDashboardPanel(m.ballGrid, m.phase, right)
+	return placeBlock(m.width, m.height, panel)
 }
 
 // RunMenu shows the main menu and blocks until the user picks an option

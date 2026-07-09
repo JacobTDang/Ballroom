@@ -188,20 +188,61 @@ func TestBootModel_DockerNotReachableSkipsBuildAttempt(t *testing.T) {
 	}
 }
 
-func TestBootModel_BuildLineAppendsAndCapsLogAndKeepsWaiting(t *testing.T) {
+func TestStepID_ExtractsLeadingHashNumberToken(t *testing.T) {
+	cases := map[string]string{
+		"#5 [2/4] RUN go build ./...": "#5",
+		"#12 0.235 exporting layers":  "#12",
+		"#1 DONE 0.1s":                "#1",
+	}
+	for line, want := range cases {
+		if got := stepID(line); got != want {
+			t.Errorf("stepID(%q) = %q, want %q", line, got, want)
+		}
+	}
+}
+
+func TestStepID_ReturnsEmptyForNonStepLine(t *testing.T) {
+	cases := []string{"", "no leading hash", "#", "#abc not digits"}
+	for _, line := range cases {
+		if got := stepID(line); got != "" {
+			t.Errorf("stepID(%q) = %q, want empty", line, got)
+		}
+	}
+}
+
+func TestBootModel_BuildLineGroupsByStepAndCapsEachStepAtThreeLines(t *testing.T) {
 	lineCh := make(chan string, 1)
 	errCh := make(chan error, 1)
 	m := bootModel{building: true, buildLineCh: lineCh, buildErrCh: errCh}
 
-	for i := 0; i < maxBuildLogLines+3; i++ {
-		newM, cmd := m.Update(buildLineMsg("line"))
+	for i := 0; i < maxStepLogLines+5; i++ {
+		newM, cmd := m.Update(buildLineMsg("#3 some output"))
 		if cmd == nil {
 			t.Fatal("expected buildLineMsg to keep listening for more output")
 		}
 		m = newM.(bootModel)
 	}
-	if len(m.buildLines) != maxBuildLogLines {
-		t.Errorf("buildLines len = %d, want capped at %d", len(m.buildLines), maxBuildLogLines)
+	if len(m.buildSteps) != 1 {
+		t.Fatalf("expected all lines from the same step to stay grouped as 1 entry, got %d", len(m.buildSteps))
+	}
+	if len(m.buildSteps[0].lines) != maxStepLogLines {
+		t.Errorf("step lines = %d, want capped at %d", len(m.buildSteps[0].lines), maxStepLogLines)
+	}
+}
+
+func TestBootModel_BuildLinePersistsPriorStepsWhenNewStepStarts(t *testing.T) {
+	m := bootModel{building: true}
+
+	newM, _ := m.Update(buildLineMsg("#1 [1/4] FROM golang"))
+	m = newM.(bootModel)
+	newM, _ = m.Update(buildLineMsg("#2 [2/4] RUN go build"))
+	m = newM.(bootModel)
+
+	if len(m.buildSteps) != 2 {
+		t.Fatalf("expected both steps to persist once a new step starts, got %d: %+v", len(m.buildSteps), m.buildSteps)
+	}
+	if m.buildSteps[0].id != "#1" || m.buildSteps[1].id != "#2" {
+		t.Errorf("expected steps in order #1, #2, got %+v", m.buildSteps)
 	}
 }
 
@@ -213,7 +254,7 @@ func TestBootModel_BuildDoneSuccessAdvancesAsPassingImageCheck(t *testing.T) {
 		},
 		checks:     []preflight.Check{{Name: "Docker", OK: true}},
 		building:   true,
-		buildLines: []string{"some output"},
+		buildSteps: []buildStepLog{{id: "#1", lines: []string{"some output"}}},
 	}
 
 	newM, cmd := m.Update(buildDoneMsg{err: nil})
@@ -224,7 +265,7 @@ func TestBootModel_BuildDoneSuccessAdvancesAsPassingImageCheck(t *testing.T) {
 	if bm.building {
 		t.Error("expected building=false once the build resolves")
 	}
-	if len(bm.buildLines) != 0 {
+	if len(bm.buildSteps) != 0 {
 		t.Error("expected the build log to clear once resolved (panel collapses)")
 	}
 	if len(bm.checks) != 2 || !bm.checks[1].OK {
