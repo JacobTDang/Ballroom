@@ -189,6 +189,13 @@ func TestQwen25Coder14BModel_IsValidOllamaTag(t *testing.T) {
 	}
 }
 
+func TestDeepSeekCoderV2LiteModel_IsValidOllamaTag(t *testing.T) {
+	want := "deepseek-coder-v2:16b-lite-instruct-q4_K_M"
+	if DeepSeekCoderV2LiteModel != want {
+		t.Errorf("DeepSeekCoderV2LiteModel = %q, want %q", DeepSeekCoderV2LiteModel, want)
+	}
+}
+
 func TestLoad_ReadsPersistedTutorModel(t *testing.T) {
 	dir := t.TempDir()
 	resolved, err := filepath.EvalSymlinks(dir)
