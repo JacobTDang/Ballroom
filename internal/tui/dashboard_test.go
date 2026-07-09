@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/JacobTDang/Ballroom/internal/catalog"
@@ -50,5 +51,42 @@ func TestDashboardBanner_FallsBackToCompactWhenNarrow(t *testing.T) {
 	want := catalog.CompactBanner()
 	if got != want {
 		t.Error("expected the compact single-line banner when width is too tight for the full one")
+	}
+}
+
+func TestCenterRightColumn_AddsHalfTheSlackAsLeftMargin(t *testing.T) {
+	// centerRightColumn only owns the left margin — the caller
+	// (renderDashboardPanel's outer bordered/Width()-styled box) fills
+	// the remaining trailing space on the right automatically, so
+	// leaving exactly half the slack (avail-contentWidth) as a left
+	// margin is what makes the final rendered panel come out balanced.
+	got := centerRightColumn("abc", 11) // avail=11, content=3, slack=8 -> want left=4
+	line := strings.Split(got, "\n")[0]
+	left := len(line) - len(strings.TrimLeft(line, " "))
+	if left != 4 {
+		t.Errorf("expected left margin of 4 (half of 8 slack), got %d in %q", left, line)
+	}
+}
+
+func TestCenterRightColumn_NoOpWhenContentAlreadyFillsAvailWidth(t *testing.T) {
+	got := centerRightColumn("hello world", 8) // content wider than avail
+	if got != "hello world" {
+		t.Errorf("expected content returned unchanged when it doesn't fit, got %q", got)
+	}
+}
+
+func TestCenterRightColumn_PreservesRelativeAlignmentAcrossLines(t *testing.T) {
+	// Every line in the block should get the same left margin, so a
+	// multi-line block (banner above body text) keeps its own internal
+	// alignment instead of each line being centered independently.
+	got := centerRightColumn("ab\nabcde", 15)
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d: %q", len(lines), lines)
+	}
+	left0 := len(lines[0]) - len(strings.TrimLeft(lines[0], " "))
+	left1 := len(lines[1]) - len(strings.TrimLeft(lines[1], " "))
+	if left0 != left1 {
+		t.Errorf("expected both lines to share the same left margin, got %d and %d", left0, left1)
 	}
 }

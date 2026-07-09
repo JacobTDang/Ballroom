@@ -50,26 +50,47 @@ func TestBuildDiscoBall_OnlyUsesShadingCharacters(t *testing.T) {
 	}
 }
 
-func TestBuildDiscoBall_SparkleFractionIsSparse(t *testing.T) {
+func TestBuildDiscoBall_SparklesOnlyInEquatorBand(t *testing.T) {
 	grid := buildDiscoBall(24, 48)
-	total, sparkles := 0, 0
-	for _, row := range grid {
-		for _, cell := range row {
-			if cell.ch == ' ' {
-				continue
-			}
-			total++
-			if cell.sparkle {
-				sparkles++
+	height := len(grid)
+	top, bottom := height/3, height-height/3
+	for r, row := range grid {
+		for c, cell := range row {
+			if cell.sparkle && (r < top || r >= bottom) {
+				t.Fatalf("cell (%d,%d) sparkles outside the equator band [%d,%d) — shimmer should reflect off the ball's middle third only", r, c, top, bottom)
 			}
 		}
 	}
-	if total == 0 {
-		t.Fatal("expected a non-empty ball")
+}
+
+func TestBuildDiscoBall_SparklesFormSmallClusters(t *testing.T) {
+	// Reads as reflected light only if glints cluster together — an
+	// isolated single-cell sparkle with no sparkling neighbor reads as
+	// random color noise instead.
+	grid := buildDiscoBall(24, 48)
+	height, width := len(grid), len(grid[0])
+	found := false
+	for r := 0; r < height; r++ {
+		for c := 0; c < width; c++ {
+			if !grid[r][c].sparkle {
+				continue
+			}
+			found = true
+			hasNeighbor := false
+			for _, d := range [][2]int{{0, 1}, {1, 0}, {0, -1}, {-1, 0}} {
+				nr, nc := r+d[0], c+d[1]
+				if nr >= 0 && nr < height && nc >= 0 && nc < width && grid[nr][nc].sparkle {
+					hasNeighbor = true
+					break
+				}
+			}
+			if !hasNeighbor {
+				t.Errorf("sparkle at (%d,%d) has no adjacent sparkle — expected small clusters, not isolated scatter", r, c)
+			}
+		}
 	}
-	frac := float64(sparkles) / float64(total)
-	if frac < 0.05 || frac > 0.20 {
-		t.Errorf("sparkle fraction = %.2f, want roughly 8-15%% (allowing some margin)", frac)
+	if !found {
+		t.Fatal("expected at least one sparkle cluster within the equator band")
 	}
 }
 
