@@ -32,6 +32,11 @@ type modelsLoadedMsg struct {
 // that isn't actually there. A second enter after the warning confirms the
 // tag anyway, matching this codebase's "informational, not blocking"
 // preflight-check philosophy.
+//
+// There's no separate "known/suggested models" quick-pick list here beyond
+// what's locally pulled — typing a tag directly is the mechanism for using
+// any model that isn't. config.DeepSeekCoderV2LiteModel documents one such
+// verified-working tag (deepseek-coder-v2:16b-lite-instruct-q4_K_M).
 type modelPickerModel struct {
 	host    string
 	current string
