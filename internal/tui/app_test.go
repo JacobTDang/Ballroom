@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -451,6 +452,9 @@ func TestAppModel_ModelPicker_TypingArbitraryTagNotPulledShowsWarningWithoutSele
 	if got.modelWarning == "" {
 		t.Error("expected a non-empty warning message")
 	}
+	if got.modelPendingDownloadTag != "custom:tag" {
+		t.Errorf("modelPendingDownloadTag = %q, want %q", got.modelPendingDownloadTag, "custom:tag")
+	}
 }
 
 func TestAppModel_ModelPicker_SuggestedModelsAppearEvenWhenNotPulledLocally(t *testing.T) {
@@ -519,18 +523,25 @@ func TestAppModel_ModelPicker_SelectingSuggestedNotPulledModelWarnsFirst(t *test
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := newM.(appModel)
 	if cmd != nil {
-		t.Fatal("expected enter on a suggested-but-unpulled model to NOT quit, just warn")
+		t.Fatal("expected enter on a suggested-but-unpulled model to NOT quit, just prompt")
 	}
 	if got.stage != stageModelPicker {
-		t.Error("expected to stay in the model picker while the warning shows")
+		t.Error("expected to stay in the model picker while the download prompt shows")
 	}
 	if got.modelWarning == "" {
 		t.Error("expected a non-empty warning message")
 	}
+	if got.modelPendingDownloadTag != config.DeepSeekCoderV2LiteModel {
+		t.Errorf("modelPendingDownloadTag = %q, want %q", got.modelPendingDownloadTag, config.DeepSeekCoderV2LiteModel)
+	}
 }
 
-func TestAppModel_ModelPicker_SecondEnterOnSuggestedNotPulledModelConfirms(t *testing.T) {
+func TestAppModel_ModelPicker_YOnDownloadPromptStartsLivePullAndSelectsOnSuccess(t *testing.T) {
 	defer fakeCheckModel(preflight.Check{OK: false, Detail: config.Qwen25Coder14BModel + " not pulled — ollama pull " + config.Qwen25Coder14BModel})()
+
+	lineCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	defer fakePullModel(lineCh, errCh)()
 
 	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b"})
 	idx := -1
@@ -549,17 +560,143 @@ func TestAppModel_ModelPicker_SecondEnterOnSuggestedNotPulledModelConfirms(t *te
 
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = newM.(appModel)
-
-	newM2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil {
-		t.Error("expected the second enter to confirm without leaving the program (selecting a model is an internal stage change)")
+	if m.modelPendingDownloadTag == "" {
+		t.Fatal("expected a pending download prompt before answering y/n")
 	}
-	got := newM2.(appModel)
+
+	newM2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if cmd == nil {
+		t.Fatal("expected 'y' to start waiting for pull output")
+	}
+	m = newM2.(appModel)
+	if !m.modelDownloading {
+		t.Fatal("expected modelDownloading=true after answering 'y'")
+	}
+	if m.modelPendingDownloadTag != "" {
+		t.Error("expected the download prompt to clear once 'y' starts the pull")
+	}
+
+	newM3, cmd3 := m.Update(pullDoneMsg{err: nil})
+	if cmd3 != nil {
+		t.Error("expected no external command once the pull succeeds — selecting a model is an internal stage change")
+	}
+	got := newM3.(appModel)
 	if got.stage != stageMain {
 		t.Errorf("stage = %v, want stageMain", got.stage)
 	}
 	if got.cfg.TutorModel != config.Qwen25Coder14BModel {
-		t.Errorf("cfg.TutorModel = %q, want %q after confirming", got.cfg.TutorModel, config.Qwen25Coder14BModel)
+		t.Errorf("cfg.TutorModel = %q, want %q after a successful download", got.cfg.TutorModel, config.Qwen25Coder14BModel)
+	}
+	if got.modelDownloading {
+		t.Error("expected modelDownloading=false once the pull resolves")
+	}
+}
+
+func TestAppModel_ModelPicker_NOnDownloadPromptCancelsWithoutSelecting(t *testing.T) {
+	defer fakeCheckModel(preflight.Check{OK: false, Detail: "custom:tag not pulled — ollama pull custom:tag"})()
+
+	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b"})
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("custom:tag")})
+	m = newM.(appModel)
+	newM2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM2.(appModel)
+	if m.modelPendingDownloadTag == "" {
+		t.Fatal("expected a pending download prompt")
+	}
+
+	newM3, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if cmd != nil {
+		t.Fatal("expected 'n' to just cancel, not quit or leave the picker")
+	}
+	got := newM3.(appModel)
+	if got.stage != stageModelPicker {
+		t.Error("expected to stay in the model picker after declining the download")
+	}
+	if got.cfg.TutorModel != "" {
+		t.Error("expected no selection after declining the download")
+	}
+	if got.modelPendingDownloadTag != "" {
+		t.Error("expected the download prompt to clear after 'n'")
+	}
+	if got.modelDownloading {
+		t.Error("expected no download to have started after 'n'")
+	}
+}
+
+func TestAppModel_ModelPicker_PullFailureShowsWarningWithoutSelecting(t *testing.T) {
+	defer fakeCheckModel(preflight.Check{OK: false, Detail: "custom:tag not pulled — ollama pull custom:tag"})()
+
+	lineCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	defer fakePullModel(lineCh, errCh)()
+
+	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b"})
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("custom:tag")})
+	m = newM.(appModel)
+	newM2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM2.(appModel)
+	newM3, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = newM3.(appModel)
+
+	newM4, cmd := m.Update(pullDoneMsg{err: errors.New("boom")})
+	if cmd != nil {
+		t.Fatal("expected no quit/external command when the download fails")
+	}
+	got := newM4.(appModel)
+	if got.stage != stageModelPicker {
+		t.Error("expected to stay in the model picker after a failed download")
+	}
+	if got.cfg.TutorModel != "" {
+		t.Error("expected no selection when the download fails")
+	}
+	if got.modelDownloading {
+		t.Error("expected modelDownloading=false once the failed pull resolves")
+	}
+	if got.modelWarning == "" {
+		t.Error("expected a non-empty warning explaining the failure")
+	}
+}
+
+func TestAppModel_ModelPicker_DownloadLineCapsAtThreeLinesTotal(t *testing.T) {
+	lineCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	m := appModel{stage: stageModelPicker, modelDownloading: true, modelDownloadLineCh: lineCh, modelDownloadErrCh: errCh}
+
+	for i := 0; i < maxOutputLines+5; i++ {
+		newM, cmd := m.Update(pullLineMsg(fmt.Sprintf("line %d", i)))
+		if cmd == nil {
+			t.Fatal("expected pullLineMsg to keep listening for more output")
+		}
+		m = newM.(appModel)
+	}
+	if len(m.modelDownloadLines) != maxOutputLines {
+		t.Errorf("modelDownloadLines = %d, want capped at %d", len(m.modelDownloadLines), maxOutputLines)
+	}
+}
+
+func TestAppModel_RenderModelPicker_ShowsDownloadPromptAndLiveOutput(t *testing.T) {
+	m := appModel{
+		stage:                   stageModelPicker,
+		modelPendingDownloadTag: "custom:tag",
+		modelWarning:            "custom:tag not pulled — ollama pull custom:tag",
+	}
+	view := stripAnsiTUI(m.View())
+	if !strings.Contains(view, "download custom:tag? (y/n)") {
+		t.Errorf("expected a y/n download prompt, got:\n%s", view)
+	}
+
+	m2 := appModel{
+		stage:               stageModelPicker,
+		modelDownloading:    true,
+		modelDownloadTarget: "custom:tag",
+		modelDownloadLines:  []string{"pulling manifest", "downloading (42%)"},
+	}
+	view2 := stripAnsiTUI(m2.View())
+	if !strings.Contains(view2, "downloading custom:tag") {
+		t.Errorf("expected a downloading-in-progress notice, got:\n%s", view2)
+	}
+	if !strings.Contains(view2, "pulling manifest") || !strings.Contains(view2, "downloading (42%)") {
+		t.Errorf("expected live pull output visible, got:\n%s", view2)
 	}
 }
 

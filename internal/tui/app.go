@@ -196,6 +196,18 @@ type appModel struct {
 	modelCursor   int
 	modelWarning  string
 
+	// modelPendingDownloadTag etc. mirror bootModel's pullingModel/
+	// pullLines fields in boot.go — same pullLineMsg/pullDoneMsg/
+	// waitForPullLine/pullModelFn/maxOutputLines machinery, reused as-is
+	// (same package) for a live download triggered from the picker
+	// itself instead of boot's own fallback.
+	modelPendingDownloadTag string
+	modelDownloading        bool
+	modelDownloadTarget     string
+	modelDownloadLines      []string
+	modelDownloadLineCh     <-chan string
+	modelDownloadErrCh      <-chan error
+
 	// outcome is read by Run() once the program exits.
 	outcome       appOutcome
 	exerciseToRun exercise.Exercise
@@ -240,6 +252,23 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.models = browsableModels(msg.models)
 		m.modelFiltered = filterModels(m.models, m.modelFilter)
 		return m, nil
+
+	case pullLineMsg:
+		line := string(msg)
+		m.modelDownloadLines = append(m.modelDownloadLines, line)
+		if len(m.modelDownloadLines) > maxOutputLines {
+			m.modelDownloadLines = m.modelDownloadLines[len(m.modelDownloadLines)-maxOutputLines:]
+		}
+		return m, waitForPullLine(m.modelDownloadLineCh, m.modelDownloadErrCh)
+
+	case pullDoneMsg:
+		m.modelDownloading = false
+		if msg.err != nil {
+			m.modelWarning = fmt.Sprintf("download failed: %v", msg.err)
+			m.modelDownloadLines = nil
+			return m, nil
+		}
+		return m.selectModel(m.modelDownloadTarget)
 
 	case tea.KeyMsg:
 		switch m.stage {
@@ -344,6 +373,9 @@ func (m appModel) loadModelPicker() (tea.Model, tea.Cmd) {
 	m.modelFiltered = nil
 	m.modelCursor = 0
 	m.modelWarning = ""
+	m.modelPendingDownloadTag = ""
+	m.modelDownloading = false
+	m.modelDownloadLines = nil
 	return m, func() tea.Msg {
 		models, err := listModelsFn(ollamaHost)
 		return modelsLoadedMsg{models: models, err: err}
@@ -471,6 +503,14 @@ func (m appModel) updateStats(tea.KeyMsg) (tea.Model, tea.Cmd) {
 // --- stageModelPicker ---
 
 func (m appModel) updateModelPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.modelDownloading {
+		// Nothing to do with input mid-download — it isn't
+		// interruptible, matching boot.go's live build/pull panels.
+		return m, nil
+	}
+	if m.modelPendingDownloadTag != "" {
+		return m.handleModelDownloadPrompt(msg)
+	}
 	switch msg.Type {
 	case tea.KeyUp:
 		if m.modelCursor > 0 {
@@ -528,38 +568,66 @@ func (m appModel) isLocalModel(name string) bool {
 // handleModelEnter selects the highlighted entry if it's already pulled
 // locally, or — for a highlighted-but-unpulled suggested entry, or when
 // the typed filter matches nothing — treats the tag as a candidate:
-// confirmModelTag checks it against Ollama and warns if it isn't pulled,
-// and a second enter (with the warning already showing) confirms using
-// it anyway.
+// checkModelTag checks it against Ollama and, if it isn't pulled, asks
+// whether to download it (see handleModelDownloadPrompt).
 func (m appModel) handleModelEnter() (tea.Model, tea.Cmd) {
 	if len(m.modelFiltered) > 0 {
 		sel := m.modelFiltered[m.modelCursor]
 		if m.isLocalModel(sel) {
 			return m.selectModel(sel)
 		}
-		return m.confirmModelTag(sel)
+		return m.checkModelTag(sel)
 	}
 
 	tag := strings.TrimSpace(m.modelFilter)
 	if tag == "" {
 		return m, nil
 	}
-	return m.confirmModelTag(tag)
+	return m.checkModelTag(tag)
 }
 
-// confirmModelTag is the not-pulled warn-then-confirm flow shared by
-// both a freely typed tag and a highlighted suggested-but-unpulled entry.
-func (m appModel) confirmModelTag(tag string) (tea.Model, tea.Cmd) {
-	if m.modelWarning != "" {
+// checkModelTag checks tag against Ollama: if it's actually already
+// pulled (e.g. a tag Ollama resolves some other way, or a race with a
+// pull that just finished outside this picker), select it immediately;
+// otherwise show why, and ask whether to download it.
+func (m appModel) checkModelTag(tag string) (tea.Model, tea.Cmd) {
+	check := checkModelFn(ollamaHost, tag)
+	if check.OK {
 		return m.selectModel(tag)
 	}
+	m.modelWarning = check.Detail
+	m.modelPendingDownloadTag = tag
+	return m, nil
+}
 
-	check := checkModelFn(ollamaHost, tag)
-	if !check.OK {
-		m.modelWarning = check.Detail
+// handleModelDownloadPrompt handles the y/n answer to "download <tag>?"
+// — y starts a live preflight.PullModel stream (see the pullLineMsg/
+// pullDoneMsg cases in Update), n cancels back to the picker with
+// nothing selected, and esc/ctrl+c back out to the main menu entirely,
+// matching stageModelPicker's normal esc/ctrl+c behavior.
+func (m appModel) handleModelDownloadPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.stage = stageMain
 		return m, nil
+	case tea.KeyRunes:
+		switch string(msg.Runes) {
+		case "y", "Y":
+			tag := m.modelPendingDownloadTag
+			m.modelPendingDownloadTag = ""
+			m.modelDownloading = true
+			m.modelDownloadTarget = tag
+			lineCh, errCh := pullModelFn(ollamaHost, tag)
+			m.modelDownloadLineCh = lineCh
+			m.modelDownloadErrCh = errCh
+			return m, waitForPullLine(lineCh, errCh)
+		case "n", "N":
+			m.modelPendingDownloadTag = ""
+			m.modelWarning = ""
+			return m, nil
+		}
 	}
-	return m.selectModel(tag)
+	return m, nil
 }
 
 // selectModel persists the pick immediately (same call the pre-merge
@@ -801,11 +869,23 @@ func (m appModel) renderModelPicker() string {
 		}
 	}
 
-	if m.modelWarning != "" {
+	switch {
+	case m.modelDownloading:
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render(fmt.Sprintf("downloading %s...", m.modelDownloadTarget)))
+		b.WriteString("\n")
+		for _, line := range m.modelDownloadLines {
+			fmt.Fprintf(&b, "    %s\n", buildLogStyle.Render(line))
+		}
+	case m.modelPendingDownloadTag != "":
 		b.WriteString("\n")
 		b.WriteString(hintStyle.Render(m.modelWarning))
 		b.WriteString("\n")
-		b.WriteString(checkDimStyle.Render("press enter again to use it anyway"))
+		b.WriteString(checkDimStyle.Render(fmt.Sprintf("download %s? (y/n)", m.modelPendingDownloadTag)))
+		b.WriteString("\n")
+	case m.modelWarning != "":
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render(m.modelWarning))
 		b.WriteString("\n")
 	}
 
