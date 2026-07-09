@@ -135,6 +135,51 @@ if command -v nvim >/dev/null 2>&1; then
     else
       echo "PASS: injection payload via file field did not execute"
     fi
+
+    echo
+    echo "--- ballroom_highlight.toggle(): hide/show without deleting data (issue #25) ---"
+    extmark_count() {
+      nvim --server "$sock" --remote-expr \
+        "luaeval('#vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_create_namespace(\"ballroom_tutor\"), 0, -1, {})')" 2>/dev/null
+    }
+    toggle() {
+      nvim --server "$sock" --remote-expr "v:lua.require('ballroom_highlight').toggle()" 2>&1
+    }
+
+    before=$(extmark_count)
+    state=$(toggle)
+    after_hide=$(extmark_count)
+    if [ "$state" = "hidden" ] && [ "${after_hide:-1}" -eq 0 ]; then
+      echo "PASS: toggle() hides rendering (extmarks cleared, state=hidden)"
+    else
+      echo "FAIL: toggle() did not hide correctly (state=$state, extmark_count=$after_hide)"
+      fail_count=$((fail_count + 1))
+    fi
+
+    state=$(toggle)
+    after_show=$(extmark_count)
+    if [ "$state" = "shown" ] && [ "$after_show" -eq "$before" ]; then
+      echo "PASS: toggling back on replays the exact same stored note(s) (extmark count restored, state=shown)"
+    else
+      echo "FAIL: toggle() back on did not restore correctly (state=$state, extmark_count=$after_show, want=$before)"
+      fail_count=$((fail_count + 1))
+    fi
+
+    # Add a highlight while hidden: must be stored, not rendered, until
+    # toggled back on — this is the "does not delete the underlying
+    # notes/data" acceptance criterion, verified against a second note
+    # rather than just the first.
+    toggle >/dev/null # -> hidden
+    NVIM_SOCKET="$sock" bash -c "source '$SCRIPT_DIR/chat.sh'; apply_highlight 'solution.go' 2 2 'added while hidden'" >/dev/null 2>&1
+    count_while_hidden=$(extmark_count)
+    toggle >/dev/null # -> shown
+    count_after_reshow=$(extmark_count)
+    if [ "${count_while_hidden:-1}" -eq 0 ] && [ "$count_after_reshow" -gt "$before" ]; then
+      echo "PASS: a note added while hidden stays hidden, then appears once toggled back on"
+    else
+      echo "FAIL: note-added-while-hidden case wrong (hidden count=$count_while_hidden, reshow count=$count_after_reshow, want > $before)"
+      fail_count=$((fail_count + 1))
+    fi
   else
     echo "SKIP: nvim RPC socket never came up, skipping live RPC checks"
     skip_count=$((skip_count + 1))
