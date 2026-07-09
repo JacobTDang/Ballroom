@@ -21,6 +21,34 @@ import (
 var listModelsFn = preflight.ListModels
 var checkModelFn = preflight.CheckModel
 
+// suggestedModels are known-good tutor model tags surfaced in the picker
+// even before they're pulled locally, so they're discoverable without
+// already knowing their exact Ollama tag. Selecting one that isn't
+// pulled yet goes through the same not-pulled warn-then-confirm flow as
+// typing an arbitrary tag (see handleModelEnter).
+var suggestedModels = []string{
+	config.DeepSeekCoderV2LiteModel,
+	config.Qwen25Coder14BModel,
+}
+
+// browsableModels merges local (locally pulled) with suggestedModels,
+// deduplicated — a suggested tag already pulled just appears once, as a
+// normal local entry.
+func browsableModels(local []string) []string {
+	seen := make(map[string]bool, len(local))
+	out := make([]string, 0, len(local)+len(suggestedModels))
+	for _, name := range local {
+		seen[name] = true
+		out = append(out, name)
+	}
+	for _, name := range suggestedModels {
+		if !seen[name] {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // modelsLoadedMsg carries the result of querying Ollama's /api/tags for
 // the locally pulled model list.
 type modelsLoadedMsg struct {
@@ -161,7 +189,8 @@ type appModel struct {
 	// stageModelPicker
 	modelLoading  bool
 	modelLoadErr  error
-	models        []string
+	localModels   []string // exactly what Ollama reports pulled, for isLocalModel
+	models        []string // localModels + suggestedModels, deduplicated
 	modelFilter   string
 	modelFiltered []string
 	modelCursor   int
@@ -207,7 +236,8 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modelsLoadedMsg:
 		m.modelLoading = false
 		m.modelLoadErr = msg.err
-		m.models = msg.models
+		m.localModels = msg.models
+		m.models = browsableModels(msg.models)
 		m.modelFiltered = filterModels(m.models, m.modelFilter)
 		return m, nil
 
@@ -483,21 +513,43 @@ func (m appModel) updateModelPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleModelEnter selects the highlighted local model, or — when the
-// typed filter matches nothing local — treats the filter itself as a
-// candidate model tag: the first enter checks it against Ollama and warns
-// if it isn't pulled, and a second enter (with the warning already
-// showing) confirms using it anyway.
+// isLocalModel reports whether name is actually pulled locally (as
+// opposed to merely suggested) — selecting a local entry can skip
+// straight to selection; anything else needs the not-pulled check first.
+func (m appModel) isLocalModel(name string) bool {
+	for _, local := range m.localModels {
+		if local == name {
+			return true
+		}
+	}
+	return false
+}
+
+// handleModelEnter selects the highlighted entry if it's already pulled
+// locally, or — for a highlighted-but-unpulled suggested entry, or when
+// the typed filter matches nothing — treats the tag as a candidate:
+// confirmModelTag checks it against Ollama and warns if it isn't pulled,
+// and a second enter (with the warning already showing) confirms using
+// it anyway.
 func (m appModel) handleModelEnter() (tea.Model, tea.Cmd) {
 	if len(m.modelFiltered) > 0 {
-		return m.selectModel(m.modelFiltered[m.modelCursor])
+		sel := m.modelFiltered[m.modelCursor]
+		if m.isLocalModel(sel) {
+			return m.selectModel(sel)
+		}
+		return m.confirmModelTag(sel)
 	}
 
 	tag := strings.TrimSpace(m.modelFilter)
 	if tag == "" {
 		return m, nil
 	}
+	return m.confirmModelTag(tag)
+}
 
+// confirmModelTag is the not-pulled warn-then-confirm flow shared by
+// both a freely typed tag and a highlighted suggested-but-unpulled entry.
+func (m appModel) confirmModelTag(tag string) (tea.Model, tea.Cmd) {
 	if m.modelWarning != "" {
 		return m.selectModel(tag)
 	}
@@ -730,13 +782,15 @@ func (m appModel) renderModelPicker() string {
 		b.WriteString(checkDimStyle.Render("you can still type a model tag directly"))
 		b.WriteString("\n")
 	case len(m.modelFiltered) == 0:
-		b.WriteString(checkDimStyle.Render("no local matches"))
+		b.WriteString(checkDimStyle.Render("no matches"))
 		b.WriteString("\n")
 	default:
 		for i, name := range m.modelFiltered {
 			label := name
 			if name == m.cfg.TutorModel {
 				label += "  " + hintStyle.Render("(current)")
+			} else if !m.isLocalModel(name) {
+				label += "  " + checkDimStyle.Render("(not pulled)")
 			}
 			if i == m.modelCursor {
 				b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s", label)))

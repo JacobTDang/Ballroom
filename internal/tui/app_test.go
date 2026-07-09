@@ -230,8 +230,11 @@ func TestAppModel_EnterOnModel_KicksOffAsyncLoad(t *testing.T) {
 	if got2.modelLoading {
 		t.Error("expected modelLoading=false once loaded")
 	}
-	if len(got2.modelFiltered) != 2 {
-		t.Errorf("modelFiltered = %v, want 2 entries", got2.modelFiltered)
+	// 2 local ("a", "b") + 2 suggested (DeepSeek-Coder-V2-Lite,
+	// Qwen2.5-Coder-14B) — see the SuggestedModels* tests below for the
+	// discoverability behavior itself.
+	if len(got2.modelFiltered) != 4 {
+		t.Errorf("modelFiltered = %v, want 4 entries (2 local + 2 suggested)", got2.modelFiltered)
 	}
 }
 
@@ -367,14 +370,20 @@ func TestAppModel_Language_QGoesBackToProblems(t *testing.T) {
 
 // --- stageModelPicker ---
 
-func modelPickerFixture(models []string) appModel {
-	m := appModel{stage: stageModelPicker, modelLoading: true}
+// modelPickerFixture gives cfg a temp DataDir — selecting a model calls
+// config.SaveSettings for real (see appModel.selectModel), so every test
+// built on this fixture needs an isolated settings.json rather than
+// writing into the repo's actual working directory.
+func modelPickerFixture(t *testing.T, models []string) appModel {
+	t.Helper()
+	cfg := config.Config{DataDir: t.TempDir()}
+	m := appModel{cfg: cfg, stage: stageModelPicker, modelLoading: true}
 	newM, _ := m.Update(modelsLoadedMsg{models: models})
 	return newM.(appModel)
 }
 
 func TestAppModel_ModelPicker_TypingFilters(t *testing.T) {
-	m := modelPickerFixture([]string{"qwen2.5-coder:7b", "llama3:8b"})
+	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b", "llama3:8b"})
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("llama")})
 	got := newM.(appModel)
 	if len(got.modelFiltered) != 1 || got.modelFiltered[0] != "llama3:8b" {
@@ -383,7 +392,7 @@ func TestAppModel_ModelPicker_TypingFilters(t *testing.T) {
 }
 
 func TestAppModel_ModelPicker_QWithNoFilterGoesBackToMain(t *testing.T) {
-	m := modelPickerFixture([]string{"qwen2.5-coder:7b"})
+	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b"})
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if cmd != nil {
 		t.Error("expected no external command — back to main is an internal stage change")
@@ -427,7 +436,7 @@ func TestAppModel_ModelPicker_EnterOnLocalModelPersistsAndReturnsToMain(t *testi
 func TestAppModel_ModelPicker_TypingArbitraryTagNotPulledShowsWarningWithoutSelecting(t *testing.T) {
 	defer fakeCheckModel(preflight.Check{OK: false, Detail: "custom:tag not pulled"})()
 
-	m := modelPickerFixture([]string{"qwen2.5-coder:7b"})
+	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b"})
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("custom:tag")})
 	m = newM.(appModel)
 
@@ -441,6 +450,136 @@ func TestAppModel_ModelPicker_TypingArbitraryTagNotPulledShowsWarningWithoutSele
 	}
 	if got.modelWarning == "" {
 		t.Error("expected a non-empty warning message")
+	}
+}
+
+func TestAppModel_ModelPicker_SuggestedModelsAppearEvenWhenNotPulledLocally(t *testing.T) {
+	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b"})
+
+	foundDeepSeek, foundQwen14B := false, false
+	for _, name := range m.modelFiltered {
+		if name == config.DeepSeekCoderV2LiteModel {
+			foundDeepSeek = true
+		}
+		if name == config.Qwen25Coder14BModel {
+			foundQwen14B = true
+		}
+	}
+	if !foundDeepSeek {
+		t.Errorf("expected %s to be listed even though it isn't pulled, filtered = %v", config.DeepSeekCoderV2LiteModel, m.modelFiltered)
+	}
+	if !foundQwen14B {
+		t.Errorf("expected %s to be listed even though it isn't pulled, filtered = %v", config.Qwen25Coder14BModel, m.modelFiltered)
+	}
+}
+
+func TestAppModel_ModelPicker_SuggestedModelAlreadyPulledDoesNotAppearTwice(t *testing.T) {
+	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b", config.DeepSeekCoderV2LiteModel})
+
+	count := 0
+	for _, name := range m.modelFiltered {
+		if name == config.DeepSeekCoderV2LiteModel {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected %s to appear exactly once, appeared %d times in %v", config.DeepSeekCoderV2LiteModel, count, m.modelFiltered)
+	}
+}
+
+func TestAppModel_RenderModelPicker_MarksSuggestedNotPulledModelsDistinctly(t *testing.T) {
+	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b"})
+	view := stripAnsiTUI(m.View())
+	if !strings.Contains(view, config.DeepSeekCoderV2LiteModel) {
+		t.Fatalf("expected view to list %s, got:\n%s", config.DeepSeekCoderV2LiteModel, view)
+	}
+	if !strings.Contains(view, "not pulled") {
+		t.Errorf("expected a not-pulled marker in the view, got:\n%s", view)
+	}
+}
+
+func TestAppModel_ModelPicker_SelectingSuggestedNotPulledModelWarnsFirst(t *testing.T) {
+	defer fakeCheckModel(preflight.Check{OK: false, Detail: config.DeepSeekCoderV2LiteModel + " not pulled — ollama pull " + config.DeepSeekCoderV2LiteModel})()
+
+	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b"})
+	idx := -1
+	for i, name := range m.modelFiltered {
+		if name == config.DeepSeekCoderV2LiteModel {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("expected %s in filtered list, got %v", config.DeepSeekCoderV2LiteModel, m.modelFiltered)
+	}
+	for i := 0; i < idx; i++ {
+		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = newM.(appModel)
+	}
+
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := newM.(appModel)
+	if cmd != nil {
+		t.Fatal("expected enter on a suggested-but-unpulled model to NOT quit, just warn")
+	}
+	if got.stage != stageModelPicker {
+		t.Error("expected to stay in the model picker while the warning shows")
+	}
+	if got.modelWarning == "" {
+		t.Error("expected a non-empty warning message")
+	}
+}
+
+func TestAppModel_ModelPicker_SecondEnterOnSuggestedNotPulledModelConfirms(t *testing.T) {
+	defer fakeCheckModel(preflight.Check{OK: false, Detail: config.Qwen25Coder14BModel + " not pulled — ollama pull " + config.Qwen25Coder14BModel})()
+
+	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b"})
+	idx := -1
+	for i, name := range m.modelFiltered {
+		if name == config.Qwen25Coder14BModel {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("expected %s in filtered list, got %v", config.Qwen25Coder14BModel, m.modelFiltered)
+	}
+	for i := 0; i < idx; i++ {
+		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = newM.(appModel)
+	}
+
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(appModel)
+
+	newM2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected the second enter to confirm without leaving the program (selecting a model is an internal stage change)")
+	}
+	got := newM2.(appModel)
+	if got.stage != stageMain {
+		t.Errorf("stage = %v, want stageMain", got.stage)
+	}
+	if got.cfg.TutorModel != config.Qwen25Coder14BModel {
+		t.Errorf("cfg.TutorModel = %q, want %q after confirming", got.cfg.TutorModel, config.Qwen25Coder14BModel)
+	}
+}
+
+func TestAppModel_ModelPicker_SelectingLocalModelNeverCallsCheckModel(t *testing.T) {
+	// No fakeCheckModel set up here on purpose — if selecting an
+	// already-pulled local model called checkModelFn at all, this test
+	// would hit the real network-calling default and could hang/flake in
+	// CI. Selecting a genuinely local entry must short-circuit before
+	// ever reaching that call.
+	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b", "llama3:8b"})
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected enter to select immediately for an already-pulled local model, no external command")
+	}
+	got := newM.(appModel)
+	if got.stage != stageMain {
+		t.Errorf("stage = %v, want stageMain", got.stage)
+	}
+	if got.cfg.TutorModel != "qwen2.5-coder:7b" {
+		t.Errorf("cfg.TutorModel = %q, want %q", got.cfg.TutorModel, "qwen2.5-coder:7b")
 	}
 }
 

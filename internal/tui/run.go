@@ -25,7 +25,7 @@ import (
 // way `ballroom practice <id>` and `ballroom sandbox` get the same
 // behavior whether or not they go through this TUI.
 func Run(cfg config.Config) error {
-	proceed, err := RunBoot(cfg)
+	cfg, proceed, err := RunBoot(cfg)
 	if err != nil {
 		return err
 	}

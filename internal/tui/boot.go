@@ -44,6 +44,8 @@ var (
 type checkDoneMsg preflight.Check
 type buildLineMsg string
 type buildDoneMsg struct{ err error }
+type pullLineMsg string
+type pullDoneMsg struct{ err error }
 
 // startCheckMsg fires after checkStartDelay to kick off the check at
 // index — the delay between a check resolving and the next one starting
@@ -132,6 +134,10 @@ func stepID(line string) string {
 // fake build stream instead of shelling out to docker for real.
 var buildImageFn = orchestrator.BuildImage
 
+// pullModelFn is a var (not a direct call) so tests can substitute a fake
+// pull stream instead of making a real HTTP call to Ollama.
+var pullModelFn = preflight.PullModel
+
 // bootModel runs preflight checks one at a time (so they visibly appear
 // in sequence, like a real boot log) and then waits for the user to
 // continue. If the practice image isn't built, it builds it right here —
@@ -150,6 +156,16 @@ type bootModel struct {
 	buildSteps  []buildStepLog
 	buildLineCh <-chan string
 	buildErrCh  <-chan error
+
+	// pullingModel etc. mirror the building/buildSteps fields above, for
+	// the same live-panel treatment applied to a fallback `ollama pull`
+	// instead of `docker build` — see checkDoneMsg's handling of
+	// preflight.CheckNameModel.
+	pullingModel     bool
+	pullLines        []string
+	pullLineCh       <-chan string
+	pullErrCh        <-chan error
+	pullFallbackFrom string // the originally configured model, captured when the fallback pull starts
 
 	width, height int
 
@@ -188,6 +204,26 @@ func (m bootModel) buildCommand() string {
 	return fmt.Sprintf("docker build -f docker/Dockerfile -t %s .", m.cfg.DockerImage)
 }
 
+// pullCommand is the actual Ollama request preflight.PullModel makes to
+// fetch the fallback default model, shown next to the live pull panel for
+// the same reason every other check shows its command.
+func (m bootModel) pullCommand() string {
+	return fmt.Sprintf("POST %s/api/pull {\"model\":%q}", ollamaHost, config.DefaultTutorModel)
+}
+
+// checkOK reports whether checks contains a check with the given name
+// that passed — used to gate the model-pull fallback on Ollama itself
+// actually being reachable, so it doesn't attempt (and immediately fail)
+// a pull when the real problem is that Ollama isn't running at all.
+func checkOK(checks []preflight.Check, name string) bool {
+	for _, c := range checks {
+		if c.Name == name {
+			return c.OK
+		}
+	}
+	return false
+}
+
 func (m bootModel) Init() tea.Cmd {
 	return tea.Batch(m.runCheck(0), tickCmd())
 }
@@ -210,6 +246,17 @@ func waitForBuildLine(lineCh <-chan string, errCh <-chan error) tea.Cmd {
 			return buildLineMsg(line)
 		}
 		return buildDoneMsg{err: <-errCh}
+	}
+}
+
+// waitForPullLine is waitForBuildLine's counterpart for a live model pull.
+func waitForPullLine(lineCh <-chan string, errCh <-chan error) tea.Cmd {
+	return func() tea.Msg {
+		line, ok := <-lineCh
+		if ok {
+			return pullLineMsg(line)
+		}
+		return pullDoneMsg{err: <-errCh}
 	}
 }
 
@@ -260,6 +307,20 @@ func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.buildErrCh = errCh
 			return m, waitForBuildLine(lineCh, errCh)
 		}
+		// The configured tutor model isn't pulled — fall back to pulling
+		// the default (qwen 7B) live right here, same "don't leave you
+		// stuck, actually fix it" treatment as the image-build step
+		// above. Gated on Ollama itself being reachable so this doesn't
+		// also attempt (and immediately fail) a pull when the real
+		// problem is Ollama not running at all.
+		if check.Name == preflight.CheckNameModel && !check.OK && checkOK(m.checks, preflight.CheckNameOllama) {
+			m.pullFallbackFrom = m.cfg.TutorModel
+			lineCh, errCh := pullModelFn(ollamaHost, config.DefaultTutorModel)
+			m.pullingModel = true
+			m.pullLineCh = lineCh
+			m.pullErrCh = errCh
+			return m, waitForPullLine(lineCh, errCh)
+		}
 		return m.advance(check)
 
 	case buildLineMsg:
@@ -291,6 +352,32 @@ func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.buildSteps = nil
 		return m.advance(result)
 
+	case pullLineMsg:
+		line := string(msg)
+		m.pullLines = append(m.pullLines, line)
+		if len(m.pullLines) > maxOutputLines {
+			m.pullLines = m.pullLines[len(m.pullLines)-maxOutputLines:]
+		}
+		return m, waitForPullLine(m.pullLineCh, m.pullErrCh)
+
+	case pullDoneMsg:
+		m.pullingModel = false
+		result := preflight.Check{
+			Name:    preflight.CheckNameModel,
+			Command: m.pullCommand(),
+			Output:  strings.Join(m.pullLines, "\n"),
+		}
+		if msg.err != nil {
+			result.OK = false
+			result.Detail = fmt.Sprintf("%s not pulled, and falling back to %s failed: %v", m.pullFallbackFrom, config.DefaultTutorModel, msg.err)
+		} else {
+			result.OK = true
+			result.Detail = fmt.Sprintf("%s not pulled — downloaded default %s instead", m.pullFallbackFrom, config.DefaultTutorModel)
+			m.cfg.TutorModel = config.DefaultTutorModel
+		}
+		m.pullLines = nil
+		return m.advance(result)
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -306,13 +393,18 @@ func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // RunBoot shows the boot screen and blocks until the user presses Enter
-// (proceed=true) or quits (proceed=false).
-func RunBoot(cfg config.Config) (proceed bool, err error) {
+// (proceed=true) or quits (proceed=false). The returned Config may differ
+// from the one passed in: if the configured tutor model wasn't pulled,
+// boot falls back to pulling the default (qwen 7B) live and switches to
+// it for this run only — the persisted setting is left untouched, so a
+// future launch still tries the real pick first.
+func RunBoot(cfg config.Config) (result config.Config, proceed bool, err error) {
 	final, err := tea.NewProgram(newBootModel(cfg), tea.WithAltScreen()).Run()
 	if err != nil {
-		return false, err
+		return cfg, false, err
 	}
-	return !final.(bootModel).quit, nil
+	fm := final.(bootModel)
+	return fm.cfg, !fm.quit, nil
 }
 
 // expandedCheckRow shows a check with its real invoked command and up to
@@ -351,6 +443,12 @@ func (m bootModel) renderRightColumn() string {
 			fmt.Fprintf(&b, "      %s\n", buildLogStyle.Render(truncateTitle(line, 90)))
 		}
 		startIdx++ // the image slot is shown above, not in the queued loop
+	} else if m.pullingModel {
+		b.WriteString(expandedCheckRow(hintStyle.Render("▾"), preflight.CheckNameModel, m.pullCommand(), ""))
+		for _, line := range m.pullLines {
+			fmt.Fprintf(&b, "      %s\n", buildLogStyle.Render(truncateTitle(line, 90)))
+		}
+		startIdx++ // the model slot is shown above, not in the queued loop
 	}
 	for i := startIdx; i < len(m.pending); i++ {
 		fmt.Fprintf(&b, "  %s %s\n", checkDimStyle.Render("…"), m.checkNames[i])
