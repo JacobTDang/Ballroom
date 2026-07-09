@@ -57,7 +57,9 @@ func Run(cfg config.Config) error {
 
 // runPracticeLoop shows the pattern tree and, each time an exercise
 // finishes, reopens it with refreshed status until the user backs out to
-// the main menu.
+// the main menu. Selecting a problem doesn't launch it directly — a
+// language popup asks which variant to practice first; backing out of
+// that popup returns to the tree rather than the main menu.
 func runPracticeLoop(cfg config.Config) error {
 	for {
 		statuses, err := catalog.List(cfg)
@@ -65,7 +67,7 @@ func runPracticeLoop(cfg config.Config) error {
 			return err
 		}
 
-		sel, ok, err := RunTree(statuses)
+		problem, ok, err := RunTree(statuses)
 		if err != nil {
 			return err
 		}
@@ -73,7 +75,15 @@ func runPracticeLoop(cfg config.Config) error {
 			return nil
 		}
 
-		if runErr := orchestrator.RunExercise(cfg, sel.Exercise); runErr != nil {
+		variant, ok, err := RunLangPicker(problem)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+
+		if runErr := orchestrator.RunExercise(cfg, variant.Exercise); runErr != nil {
 			fmt.Fprintf(os.Stderr, "ballroom: %v\n", runErr)
 		}
 	}

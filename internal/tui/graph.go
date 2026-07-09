@@ -7,7 +7,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/JacobTDang/Ballroom/internal/catalog"
-	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
 
 // boxGap is the horizontal spacing (in columns) between adjacent boxes
@@ -95,21 +94,25 @@ func renderCategoryBox(category string, solved, total int, highlighted bool) str
 	return style.Render(content)
 }
 
-func renderExerciseBox(s catalog.ExerciseStatus, highlighted bool) string {
+// renderProblemBox renders a tree leaf node for a problem (which may have
+// several language variants — language itself is chosen afterward, via
+// the popup in langpicker.go, not represented in this box). Solved is
+// language-agnostic: lit up once any variant has passed.
+func renderProblemBox(p catalog.ProblemStatus, highlighted bool) string {
 	icon := "░░"
 	style := exerciseNotAttemptedBoxStyle
-	switch s.LastResult {
-	case tracker.ResultPass:
+	switch {
+	case p.Solved:
 		icon = "▓▓✦"
 		style = exercisePassBoxStyle
-	case tracker.ResultFail:
+	case p.Attempts > 0:
 		icon = "▓░"
 		style = exerciseFailBoxStyle
 	}
 	if highlighted {
 		style = highlightedBoxStyle
 	}
-	content := s.Exercise.Language + "\n" + icon
+	content := truncateTitle(p.Title, 12) + "\n" + icon
 	return style.Render(content)
 }
 

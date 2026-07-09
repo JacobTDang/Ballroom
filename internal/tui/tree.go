@@ -8,21 +8,21 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/JacobTDang/Ballroom/internal/catalog"
-	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
 
 // pixelBarWidth is how many blocks wide a category's mini progress bar is.
 const pixelBarWidth = 5
 
-// pixelStatusIcon renders a small "sprite" per exercise that lights up as
+// pixelStatusIcon renders a small "sprite" per problem that lights up as
 // you make progress on it: dim/hollow when untouched, half-lit in the
-// fail color after a failed attempt, fully lit with a sparkle once
-// solved. Always 3 runes wide (before styling) so rows stay aligned.
-func pixelStatusIcon(result string) string {
-	switch result {
-	case tracker.ResultPass:
+// fail color after an attempt with no pass yet, fully lit with a sparkle
+// once solved (in any language). Always 3 runes wide (before styling) so
+// rows stay aligned.
+func pixelStatusIcon(solved bool, attempts int) string {
+	switch {
+	case solved:
 		return passStyle.Render("▓▓") + sparkleStyle.Render("✦")
-	case tracker.ResultFail:
+	case attempts > 0:
 		return failStyle.Render("▓░") + " "
 	default:
 		return checkDimStyle.Render("░░") + " "
@@ -32,45 +32,50 @@ func pixelStatusIcon(result string) string {
 // treeModel is the NeetCode-roadmap-style practice picker: a real node
 // graph — one root node branching to the 5 categories, and (one at a
 // time, to keep the layout width-bounded) a category branching down to
-// its exercises when you drill into it.
+// its problems when you drill into it. Selecting a problem doesn't pick
+// a language itself — that's a separate popup (see langpicker.go) shown
+// afterward by the caller, since a problem can have several language
+// variants.
 type treeModel struct {
-	statuses      []catalog.ExerciseStatus
+	problems      []catalog.ProblemStatus
 	categories    []string
 	catCursor     int
 	inExerciseRow bool
 	exCursor      int
-	selected      *catalog.ExerciseStatus
+	selected      *catalog.ProblemStatus
 	back          bool
 	width, height int
 }
 
 func newTreeModel(statuses []catalog.ExerciseStatus) treeModel {
+	problems := catalog.GroupByProblem(statuses)
+
 	var categories []string
 	seen := make(map[string]bool)
-	for _, s := range statuses {
-		if !seen[s.Exercise.Category] {
-			seen[s.Exercise.Category] = true
-			categories = append(categories, s.Exercise.Category)
+	for _, p := range problems {
+		if !seen[p.Category] {
+			seen[p.Category] = true
+			categories = append(categories, p.Category)
 		}
 	}
-	return treeModel{statuses: statuses, categories: categories}
+	return treeModel{problems: problems, categories: categories}
 }
 
-func (m treeModel) exercisesFor(category string) []catalog.ExerciseStatus {
-	var out []catalog.ExerciseStatus
-	for _, s := range m.statuses {
-		if s.Exercise.Category == category {
-			out = append(out, s)
+func (m treeModel) problemsFor(category string) []catalog.ProblemStatus {
+	var out []catalog.ProblemStatus
+	for _, p := range m.problems {
+		if p.Category == category {
+			out = append(out, p)
 		}
 	}
 	return out
 }
 
 func (m treeModel) categoryCounts(category string) (solved, total int) {
-	for _, s := range m.statuses {
-		if s.Exercise.Category == category {
+	for _, p := range m.problems {
+		if p.Category == category {
 			total++
-			if s.LastResult == tracker.ResultPass {
+			if p.Solved {
 				solved++
 			}
 		}
@@ -98,20 +103,20 @@ func (m treeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.inExerciseRow {
-		exs := m.exercisesFor(m.categories[m.catCursor])
+		probs := m.problemsFor(m.categories[m.catCursor])
 		switch keyMsg.String() {
 		case "left", "h":
 			if m.exCursor > 0 {
 				m.exCursor--
 			}
 		case "right", "l":
-			if m.exCursor < len(exs)-1 {
+			if m.exCursor < len(probs)-1 {
 				m.exCursor++
 			}
 		case "up", "k":
 			m.inExerciseRow = false
 		case "enter":
-			sel := exs[m.exCursor]
+			sel := probs[m.exCursor]
 			m.selected = &sel
 			return m, tea.Quit
 		}
@@ -161,14 +166,14 @@ func (m treeModel) View() string {
 	// no matter which side the mismatch falls on.
 	var exCenters []int
 	var exRow string
-	var exs []catalog.ExerciseStatus
+	var probs []catalog.ProblemStatus
 	catShift := 0
 	if m.inExerciseRow {
-		exs = m.exercisesFor(m.categories[m.catCursor])
-		exBoxes := make([]string, len(exs))
-		exWidths := make([]int, len(exs))
-		for i, s := range exs {
-			exBoxes[i] = renderExerciseBox(s, i == m.exCursor)
+		probs = m.problemsFor(m.categories[m.catCursor])
+		exBoxes := make([]string, len(probs))
+		exWidths := make([]int, len(probs))
+		for i, p := range probs {
+			exBoxes[i] = renderProblemBox(p, i == m.exCursor)
 			exWidths[i] = lipgloss.Width(exBoxes[i])
 		}
 		exRow = joinBoxesHorizontal(exBoxes, boxGap)
@@ -222,7 +227,7 @@ func (m treeModel) View() string {
 			b.WriteString(l + "\n")
 		}
 		b.WriteString(exRowPadded + "\n\n")
-		b.WriteString(exerciseDetailLine(exs[m.exCursor]))
+		b.WriteString(problemDetailLine(probs[m.exCursor]))
 		b.WriteString("\n\n")
 		b.WriteString(checkDimStyle.Render("  ←/→ move · ↑ back to categories · enter select · q back"))
 	} else {
@@ -236,34 +241,41 @@ func (m treeModel) View() string {
 	return content
 }
 
-func exerciseDetailLine(s catalog.ExerciseStatus) string {
+func problemDetailLine(p catalog.ProblemStatus) string {
 	status := "not attempted"
 	statusStyle := checkDimStyle
-	if s.LastResult != "" {
+	if p.Attempts > 0 {
 		plural := "s"
-		if s.Attempts == 1 {
+		if p.Attempts == 1 {
 			plural = ""
 		}
-		status = fmt.Sprintf("%s (%d attempt%s)", s.LastResult, s.Attempts, plural)
+		status = fmt.Sprintf("%d attempt%s", p.Attempts, plural)
 		statusStyle = failStyle
-		if s.LastResult == tracker.ResultPass {
+		if p.Solved {
+			status = "solved (" + status + ")"
 			statusStyle = passStyle
 		}
 	}
-	title := truncateTitle(s.Exercise.Title, 50)
-	return fmt.Sprintf("  %s %s — %s", pixelStatusIcon(s.LastResult), hintStyle.Render(title), statusStyle.Render(status))
+	langs := make([]string, len(p.Variants))
+	for i, v := range p.Variants {
+		langs[i] = v.Exercise.Language
+	}
+	title := truncateTitle(p.Title, 50)
+	return fmt.Sprintf("  %s %s — %s — %s", pixelStatusIcon(p.Solved, p.Attempts), hintStyle.Render(title),
+		statusStyle.Render(status), checkDimStyle.Render(strings.Join(langs, "/")))
 }
 
-// RunTree shows the practice tree and blocks until the user selects an
-// exercise (ok=true) or goes back to the main menu (ok=false).
-func RunTree(statuses []catalog.ExerciseStatus) (sel catalog.ExerciseStatus, ok bool, err error) {
+// RunTree shows the practice tree and blocks until the user selects a
+// problem (ok=true) or goes back to the main menu (ok=false). Which
+// language to practice it in is a separate step — see RunLangPicker.
+func RunTree(statuses []catalog.ExerciseStatus) (sel catalog.ProblemStatus, ok bool, err error) {
 	final, err := tea.NewProgram(newTreeModel(statuses), tea.WithAltScreen()).Run()
 	if err != nil {
-		return catalog.ExerciseStatus{}, false, err
+		return catalog.ProblemStatus{}, false, err
 	}
 	tm := final.(treeModel)
 	if tm.selected == nil {
-		return catalog.ExerciseStatus{}, false, nil
+		return catalog.ProblemStatus{}, false, nil
 	}
 	return *tm.selected, true, nil
 }

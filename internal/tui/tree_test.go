@@ -8,7 +8,6 @@ import (
 
 	"github.com/JacobTDang/Ballroom/internal/catalog"
 	"github.com/JacobTDang/Ballroom/internal/exercise"
-	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
 
 func treeFixture() []catalog.ExerciseStatus {
@@ -21,14 +20,17 @@ func treeFixture() []catalog.ExerciseStatus {
 }
 
 // fakeStatus builds a minimal ExerciseStatus for Update()-logic tests
-// that don't touch the real exercise catalog or tracker DB.
+// that don't touch the real exercise catalog or tracker DB. ProblemID
+// defaults to ID, so each fixture call is its own standalone problem
+// unless a test deliberately groups several under a shared ProblemID.
 func fakeStatus(id string) catalog.ExerciseStatus {
 	return catalog.ExerciseStatus{
 		Exercise: exercise.Exercise{
-			ID:       id,
-			Title:    id,
-			Category: "pattern",
-			Language: "go",
+			ID:        id,
+			ProblemID: id,
+			Title:     id,
+			Category:  "pattern",
+			Language:  "go",
 		},
 	}
 }
@@ -193,7 +195,7 @@ func TestTreeModel_EnterOnExerciseSelectsAndQuits(t *testing.T) {
 		t.Fatal("expected enter on an exercise to return a quit command")
 	}
 	tm2 := newM2.(treeModel)
-	if tm2.selected == nil || tm2.selected.Exercise.ID != "two-pointers-01" {
+	if tm2.selected == nil || tm2.selected.ProblemID != "two-pointers-01" {
 		t.Errorf("expected two-pointers-01 selected, got %+v", tm2.selected)
 	}
 }
@@ -219,14 +221,14 @@ func TestTreeModel_QRequestsBackFromEitherRow(t *testing.T) {
 }
 
 func TestPixelStatusIcon_DiffersByStatus(t *testing.T) {
-	notAttempted := stripAnsiTUI(pixelStatusIcon(""))
-	fail := stripAnsiTUI(pixelStatusIcon(tracker.ResultFail))
-	pass := stripAnsiTUI(pixelStatusIcon(tracker.ResultPass))
+	notAttempted := stripAnsiTUI(pixelStatusIcon(false, 0))
+	attemptedNotSolved := stripAnsiTUI(pixelStatusIcon(false, 2))
+	solved := stripAnsiTUI(pixelStatusIcon(true, 3))
 
-	if notAttempted == fail || notAttempted == pass || fail == pass {
-		t.Errorf("expected 3 visually distinct icons, got %q / %q / %q", notAttempted, fail, pass)
+	if notAttempted == attemptedNotSolved || notAttempted == solved || attemptedNotSolved == solved {
+		t.Errorf("expected 3 visually distinct icons, got %q / %q / %q", notAttempted, attemptedNotSolved, solved)
 	}
-	if !strings.Contains(pass, "✦") {
-		t.Errorf("expected a sparkle in the solved icon, got %q", pass)
+	if !strings.Contains(solved, "✦") {
+		t.Errorf("expected a sparkle in the solved icon, got %q", solved)
 	}
 }

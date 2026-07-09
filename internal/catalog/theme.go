@@ -47,18 +47,21 @@ func styled(codes, s string) string {
 	return codes + s + ansiReset
 }
 
-// Two-tone block-letter art (figlet "banner4"): '#' is the letter
-// stroke, '.' is the negative space within each glyph's own bounding
-// box (true blanks stay blank) — gives the banner actual texture instead
-// of a flat solid silhouette.
+// Solid block-letter art (figlet "banner3", # swapped for a solid Unicode
+// block) — filled in completely. An earlier attempt used a two-tone font
+// with a dim texture in each glyph's negative space, but that destroyed
+// the letter silhouettes entirely — from normal viewing distance it read
+// as colored static, not "BALLROOM". Texture now comes from the mosaic
+// coloring alone (many colors within a solid, unambiguous letter shape),
+// not from filling the background too.
 var bannerArt = []string{
-	`.########.....###....##.......##.......########...#######...#######..##.....##`,
-	`.##.....##...##.##...##.......##.......##.....##.##.....##.##.....##.###...###`,
-	`.##.....##..##...##..##.......##.......##.....##.##.....##.##.....##.####.####`,
-	`.########..##.....##.##.......##.......########..##.....##.##.....##.##.###.##`,
-	`.##.....##.#########.##.......##.......##...##...##.....##.##.....##.##.....##`,
-	`.##.....##.##.....##.##.......##.......##....##..##.....##.##.....##.##.....##`,
-	`.########..##.....##.########.########.##.....##..#######...#######..##.....##`,
+	`████████     ███    ██       ██       ████████   ███████   ███████  ██     ██ `,
+	`██     ██   ██ ██   ██       ██       ██     ██ ██     ██ ██     ██ ███   ███ `,
+	`██     ██  ██   ██  ██       ██       ██     ██ ██     ██ ██     ██ ████ ████ `,
+	`████████  ██     ██ ██       ██       ████████  ██     ██ ██     ██ ██ ███ ██ `,
+	`██     ██ █████████ ██       ██       ██   ██   ██     ██ ██     ██ ██     ██ `,
+	`██     ██ ██     ██ ██       ██       ██    ██  ██     ██ ██     ██ ██     ██ `,
+	`████████  ██     ██ ████████ ████████ ██     ██  ███████   ███████  ██     ██ `,
 }
 
 var bannerGradient = []string{colorRed, colorOrange, colorGold, colorPink, colorPurple, colorBlue, colorTeal}
@@ -78,10 +81,11 @@ const bannerScale = 2
 // mosaic (each small block of characters gets its own color from the
 // palette, diagonally offset per row) instead of a smooth per-row
 // gradient — closer to light scattering off a disco ball than a sunset
-// gradient. The glyphs' own negative space renders as a dim texture
-// rather than blank, and phase shifts the mosaic pattern; incrementing it
-// on a timer (see internal/tui's tick handling) animates a shimmer across
-// the letters. Pass phase=0 for a static render.
+// gradient. Only the letter strokes are colored; true blank space stays
+// blank, so the silhouette stays unambiguous no matter how many colors
+// are cycling through it. phase shifts the mosaic pattern; incrementing
+// it on a timer (see internal/tui's tick handling) animates a shimmer
+// across the letters. Pass phase=0 for a static render.
 func MosaicBanner(phase int) string {
 	var b strings.Builder
 	b.WriteString("\n")
@@ -91,11 +95,6 @@ func MosaicBanner(phase int) string {
 		for _, ch := range line {
 			if ch == ' ' {
 				b.WriteString(strings.Repeat(" ", bannerScale))
-				col += bannerScale
-				continue
-			}
-			if ch == '.' {
-				b.WriteString(styled(colorDim, strings.Repeat("░", bannerScale)))
 				col += bannerScale
 				continue
 			}
