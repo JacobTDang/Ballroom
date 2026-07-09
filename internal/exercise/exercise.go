@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	CategoryPattern        = "pattern"
+	CategoryDSA            = "dsa"
 	CategoryDebug          = "debug"
 	CategoryConcurrency    = "concurrency"
 	CategoryImplementation = "implementation"
@@ -31,7 +31,7 @@ const (
 )
 
 var validCategories = map[string]bool{
-	CategoryPattern:        true,
+	CategoryDSA:            true,
 	CategoryDebug:          true,
 	CategoryConcurrency:    true,
 	CategoryImplementation: true,

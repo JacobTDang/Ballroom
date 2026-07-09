@@ -32,7 +32,7 @@ func writeExercise(t *testing.T, exercisesDir, id string, fields map[string]any)
 	base := map[string]any{
 		"id":             id,
 		"title":          "Title for " + id,
-		"category":       "pattern",
+		"category":       "dsa",
 		"language":       "go",
 		"time_limit_min": 20,
 		"tutor_mode":     "hints-first",
@@ -104,8 +104,8 @@ func TestList_ReturnsExercisesSkippingTemplate(t *testing.T) {
 func TestList_SortsByCategoryThenID(t *testing.T) {
 	cfg := testConfig(t)
 	writeExercise(t, cfg.ExercisesDir, "z-ai-assisted-01", map[string]any{"category": "ai-assisted"})
-	writeExercise(t, cfg.ExercisesDir, "a-pattern-02", map[string]any{"category": "pattern"})
-	writeExercise(t, cfg.ExercisesDir, "b-pattern-01", map[string]any{"category": "pattern"})
+	writeExercise(t, cfg.ExercisesDir, "a-dsa-02", map[string]any{"category": "dsa"})
+	writeExercise(t, cfg.ExercisesDir, "b-dsa-01", map[string]any{"category": "dsa"})
 	writeExercise(t, cfg.ExercisesDir, "y-debug-01", map[string]any{"category": "debug", "language": "cpp"})
 
 	statuses, err := List(cfg)
@@ -120,9 +120,9 @@ func TestList_SortsByCategoryThenID(t *testing.T) {
 	for _, s := range statuses {
 		gotOrder = append(gotOrder, s.Exercise.ID)
 	}
-	want := []string{"a-pattern-02", "b-pattern-01", "y-debug-01", "z-ai-assisted-01"}
+	want := []string{"a-dsa-02", "b-dsa-01", "y-debug-01", "z-ai-assisted-01"}
 	if strings.Join(gotOrder, ",") != strings.Join(want, ",") {
-		t.Errorf("order = %v, want %v (category order pattern < debug < ai-assisted, alphabetical within category)", gotOrder, want)
+		t.Errorf("order = %v, want %v (category order dsa < debug < ai-assisted, alphabetical within category)", gotOrder, want)
 	}
 }
 
