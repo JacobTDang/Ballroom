@@ -17,6 +17,20 @@ const defaultDockerImage = "ballroom-practice"
 // stay in sync.
 const DefaultTutorModel = "qwen2.5-coder:7b"
 
+// DeepSeekCoderV2LiteModel is a second tutor model confirmed to work
+// end-to-end (preflight check, TUTOR_MODEL wiring, and a real chat
+// round-trip) — deepseek-coder-v2:16b-lite-instruct-q4_K_M, verified
+// against the tag list at ollama.com/library/deepseek-coder-v2/tags.
+// It is not the default. There's no fixed "supported models" list in
+// this codebase: the model picker (internal/tui/modelpicker.go) already
+// accepts any locally pulled or freely typed Ollama tag, so selecting
+// this one is just a matter of typing it there or running
+// `ollama pull deepseek-coder-v2:16b-lite-instruct-q4_K_M` first. This
+// const exists purely so the verified tag is documented and typo-proof
+// (e.g. for scripting a pull, or referencing in tests) rather than
+// re-typed from memory.
+const DeepSeekCoderV2LiteModel = "deepseek-coder-v2:16b-lite-instruct-q4_K_M"
+
 // settingsFileName is the persisted user-settings file, stored under
 // Config.DataDir alongside tracker.db.
 const settingsFileName = "settings.json"
