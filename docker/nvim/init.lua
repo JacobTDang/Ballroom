@@ -21,3 +21,8 @@ vim.cmd.colorscheme("habamax")
 
 vim.opt.laststatus = 3
 vim.opt.statusline = " %{toupper(mode())} │ %f %m%r%h%w%=%y  ln %l/%L col %c "
+
+-- Registers highlight groups + the add_highlight/clear_all RPC targets used
+-- by tutor/chat.sh (issue #24: tutor-driven highlights/notes in the editor
+-- pane). See lua/ballroom_highlight.lua for the implementation.
+require("ballroom_highlight")
