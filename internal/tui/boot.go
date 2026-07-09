@@ -31,12 +31,6 @@ const maxStepLogLines = 3
 // preflight.Check.Output instead of docker build's step lines.
 const maxOutputLines = 3
 
-// recentCheckWindow is how many of the most recently invoked checks stay
-// expanded (showing their real command + output); older ones collapse to
-// a single summary line so the screen doesn't get more cluttered as more
-// checks finish.
-const recentCheckWindow = 3
-
 // checkStartDelay paces checks so they visibly run one at a time instead
 // of all resolving within the same frame — a var (not a const) so tests
 // can zero it out instead of actually sleeping.
@@ -89,16 +83,6 @@ func lastLines(output string, n int) []string {
 		lines = lines[len(lines)-n:]
 	}
 	return lines
-}
-
-// recentWindowStart returns the index of the first check that should
-// stay expanded — everything before it collapses to a summary line.
-func recentWindowStart(total, window int) int {
-	start := total - window
-	if start < 0 {
-		return 0
-	}
-	return start
 }
 
 // lastBuildStepOutput carries the last docker-build step's lines into
@@ -315,17 +299,10 @@ func RunBoot(cfg config.Config) (proceed bool, err error) {
 	return !final.(bootModel).quit, nil
 }
 
-// collapsedCheckRow is a compact summary for a check that's aged out of
-// the recent window: just mark + name. No canned detail string — that
-// would silently stand in for the real command output the row showed
-// while it was still expanded, which reads as if it replaced it.
-func collapsedCheckRow(mark, name string) string {
-	return fmt.Sprintf("  %s %s\n", mark, name)
-}
-
 // expandedCheckRow shows a check with its real invoked command and up to
-// maxOutputLines of its real output, indented underneath — for checks
-// still within the recent window (see recentCheckWindow).
+// maxOutputLines of its real output, indented underneath. Every check
+// stays in this form for the whole boot sequence — nothing collapses
+// away or gets replaced by a summary once it's been shown.
 func expandedCheckRow(mark, name, command, output string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "  %s %s\n", mark, name)
@@ -337,22 +314,16 @@ func expandedCheckRow(mark, name, command, output string) string {
 }
 
 // renderRightColumn renders the boot screen's right-hand content: the
-// live checks (the last few invoked ones expanded with their real
-// command + output, older ones collapsed to a summary line) / build log
-// / continue prompt. The animated Ballroom banner above this is added by
-// renderDashboardPanel, not here.
+// live checks, each with the real command it ran and its real output /
+// build log / continue prompt. The animated Ballroom banner above this
+// is added by renderDashboardPanel, not here.
 func (m bootModel) renderRightColumn() string {
 	var b strings.Builder
 
-	expandFrom := recentWindowStart(len(m.checks), recentCheckWindow)
-	for i, c := range m.checks {
+	for _, c := range m.checks {
 		mark := checkOKStyle.Render("✓")
 		if !c.OK {
 			mark = checkFailStyle.Render("✗")
-		}
-		if i < expandFrom {
-			b.WriteString(collapsedCheckRow(mark, c.Name))
-			continue
 		}
 		b.WriteString(expandedCheckRow(mark, c.Name, c.Command, c.Output))
 	}

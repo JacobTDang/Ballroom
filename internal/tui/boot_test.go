@@ -343,18 +343,6 @@ func TestLastLines_EmptyOutputReturnsNoLines(t *testing.T) {
 	}
 }
 
-func TestRecentWindowStart_KeepsOnlyLastNIndices(t *testing.T) {
-	if got := recentWindowStart(5, 3); got != 2 {
-		t.Errorf("recentWindowStart(5, 3) = %d, want 2", got)
-	}
-}
-
-func TestRecentWindowStart_NeverNegative(t *testing.T) {
-	if got := recentWindowStart(2, 3); got != 0 {
-		t.Errorf("recentWindowStart(2, 3) = %d, want 0", got)
-	}
-}
-
 func TestBootModel_RenderRightColumnShowsRealCommandAndOutputForRecentCheck(t *testing.T) {
 	m := bootModel{
 		checks: []preflight.Check{
@@ -370,7 +358,7 @@ func TestBootModel_RenderRightColumnShowsRealCommandAndOutputForRecentCheck(t *t
 	}
 }
 
-func TestBootModel_RenderRightColumnCollapsesChecksOutsideRecentWindow(t *testing.T) {
+func TestBootModel_RenderRightColumnNeverCollapsesEarlierChecks(t *testing.T) {
 	m := bootModel{
 		checks: []preflight.Check{
 			{Name: "Docker daemon", OK: true, Detail: "running", Command: "docker info", Output: "oldest output line"},
@@ -380,11 +368,11 @@ func TestBootModel_RenderRightColumnCollapsesChecksOutsideRecentWindow(t *testin
 		},
 	}
 	out := m.renderRightColumn()
-	if strings.Contains(out, "oldest output line") {
-		t.Errorf("expected the oldest check (outside the last-3 window) to collapse and hide its output, got:\n%s", out)
+	if !strings.Contains(out, "oldest output line") {
+		t.Errorf("expected the oldest check to stay expanded and keep showing its output, got:\n%s", out)
 	}
 	if !strings.Contains(out, "sha256:abc") {
-		t.Errorf("expected the 2nd-oldest check (within the last-3 window) to still show its output, got:\n%s", out)
+		t.Errorf("expected a later check to also still show its output, got:\n%s", out)
 	}
 }
 
