@@ -57,9 +57,16 @@ func BuildImage(cfg config.Config) (<-chan string, <-chan error) {
 	go func() {
 		defer close(errCh)
 
+		root, err := dockerBuildRoot(cfg.Root)
+		if err != nil {
+			close(lineCh)
+			errCh <- err
+			return
+		}
+
 		pr, pw := io.Pipe()
 		cmd := exec.Command("docker", "build", "-f", "docker/Dockerfile", "-t", cfg.DockerImage, ".")
-		cmd.Dir = cfg.Root
+		cmd.Dir = root
 		cmd.Stdout = pw
 		cmd.Stderr = pw
 
