@@ -53,6 +53,7 @@ var validTutorModes = map[string]bool{
 // Exercise is a parsed, validated exercise.json.
 type Exercise struct {
 	ID           string
+	ProblemID    string // groups language variants of the same problem
 	Title        string
 	Category     string
 	Language     string
@@ -65,6 +66,7 @@ type Exercise struct {
 // raw mirrors the on-disk JSON shape before validation/path resolution.
 type raw struct {
 	ID           string `json:"id"`
+	ProblemID    string `json:"problem_id"`
 	Title        string `json:"title"`
 	Category     string `json:"category"`
 	Language     string `json:"language"`
@@ -120,8 +122,16 @@ func Load(path string) (Exercise, error) {
 		return Exercise{}, fmt.Errorf("exercise: %s: repo_path %q does not exist or is not a directory", path, repoPath)
 	}
 
+	problemID := r.ProblemID
+	if problemID == "" {
+		// Standalone exercises with no language siblings don't need to
+		// declare a problem_id just to load — they're their own problem.
+		problemID = r.ID
+	}
+
 	return Exercise{
 		ID:           r.ID,
+		ProblemID:    problemID,
 		Title:        r.Title,
 		Category:     r.Category,
 		Language:     r.Language,

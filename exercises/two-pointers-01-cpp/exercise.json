@@ -1,5 +1,6 @@
 {
   "id": "two-pointers-01-cpp",
+  "problem_id": "two-pointers-01",
   "title": "Two Sum II (sorted input)",
   "category": "pattern",
   "language": "cpp",

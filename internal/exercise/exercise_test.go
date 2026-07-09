@@ -70,6 +70,36 @@ func TestLoad_ValidExercise(t *testing.T) {
 	}
 }
 
+func TestLoad_ProblemIDParsed(t *testing.T) {
+	dir := t.TempDir()
+	os.Mkdir(filepath.Join(dir, "repo"), 0o755)
+	path := writeExercise(t, dir, map[string]any{"id": "two-pointers-01-go", "problem_id": "two-pointers-01"})
+
+	ex, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if ex.ProblemID != "two-pointers-01" {
+		t.Errorf("ProblemID = %q, want %q", ex.ProblemID, "two-pointers-01")
+	}
+}
+
+func TestLoad_ProblemIDDefaultsToIDWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	os.Mkdir(filepath.Join(dir, "repo"), 0o755)
+	// no problem_id field at all — older/standalone exercises without
+	// language siblings shouldn't need to add one just to load.
+	path := writeExercise(t, dir, map[string]any{"id": "standalone-01"})
+
+	ex, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if ex.ProblemID != "standalone-01" {
+		t.Errorf("ProblemID = %q, want it to default to ID %q", ex.ProblemID, "standalone-01")
+	}
+}
+
 func TestLoad_MissingFile(t *testing.T) {
 	if _, err := Load(filepath.Join(t.TempDir(), "does-not-exist.json")); err == nil {
 		t.Fatal("expected error for missing file, got nil")

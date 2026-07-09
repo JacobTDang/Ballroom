@@ -1,5 +1,6 @@
 {
   "id": "off-by-one-01-python",
+  "problem_id": "off-by-one-01",
   "title": "Off-by-one IndexError in max_of",
   "category": "debug",
   "language": "python",

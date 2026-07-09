@@ -114,7 +114,7 @@ func lastResult(attempts []tracker.Attempt) string {
 func FormatTable(statuses []ExerciseStatus) string {
 	var b strings.Builder
 	header := fmt.Sprintf("  %-3s %-15s %-8s %-36s %s", "#", "Category", "Lang", "Title", "Status")
-	fmt.Fprintln(&b, styled(ansiBold+colorTeal1, header))
+	fmt.Fprintln(&b, styled(ansiBold+colorTeal, header))
 
 	for i, s := range statuses {
 		status := "not attempted"
@@ -132,7 +132,7 @@ func FormatTable(statuses []ExerciseStatus) string {
 		}
 
 		num := fmt.Sprintf("%-3d", i+1)
-		category := styled(colorTeal2, fmt.Sprintf("%-15s", s.Exercise.Category))
+		category := styled(colorBlue, fmt.Sprintf("%-15s", s.Exercise.Category))
 		lang := styled(colorPurple, fmt.Sprintf("%-8s", s.Exercise.Language))
 		title := fmt.Sprintf("%-36s", truncate(s.Exercise.Title, 36))
 
@@ -169,8 +169,8 @@ func FormatSummary(statuses []ExerciseStatus) string {
 	parts := make([]string, len(order))
 	for i, cat := range order {
 		c := byCategory[cat]
-		fraction := styled(colorWhite1, fmt.Sprintf("%d/%d", c.solved, c.total))
-		parts[i] = fmt.Sprintf("%s: %s", styled(colorTeal2, cat), fraction)
+		fraction := styled(colorCream, fmt.Sprintf("%d/%d", c.solved, c.total))
+		parts[i] = fmt.Sprintf("%s: %s", styled(colorBlue, cat), fraction)
 	}
 	return strings.Join(parts, styled(colorDim, " · "))
 }
@@ -184,7 +184,7 @@ func FormatSandboxRow(n int) string {
 
 // Prompt styles the input-prompt line shown at the bottom of the homepage.
 func Prompt(s string) string {
-	return styled(ansiBold+colorWhite1, s)
+	return styled(ansiBold+colorCream, s)
 }
 
 func truncate(s string, n int) string {

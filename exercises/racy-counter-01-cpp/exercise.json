@@ -1,5 +1,6 @@
 {
   "id": "racy-counter-01-cpp",
+  "problem_id": "racy-counter-01",
   "title": "Racy counter",
   "category": "concurrency",
   "language": "cpp",

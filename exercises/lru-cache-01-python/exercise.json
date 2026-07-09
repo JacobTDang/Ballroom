@@ -1,5 +1,6 @@
 {
   "id": "lru-cache-01-python",
+  "problem_id": "lru-cache-01",
   "title": "LRU cache (AI-assisted)",
   "category": "ai-assisted",
   "language": "python",
