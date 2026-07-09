@@ -18,6 +18,35 @@ int main() {
     assert(cache.get(3) == 300);
     assert(cache.get(4) == 400);
 
+    {
+        LRUCache c(2);
+        c.put(1, 1);
+        c.put(2, 2);
+        c.put(1, 10);              // update, not a new insert -- must not evict 2
+        assert(c.get(2) == 2);
+        assert(c.get(1) == 10);
+    }
+    {
+        LRUCache c(2);
+        c.put(1, 1);
+        c.put(2, 2);
+        c.get(1);                  // 1 is now most recently used
+        c.put(3, 3);                // should evict 2, not 1
+        assert(c.get(2) == -1);
+        assert(c.get(1) == 1);
+    }
+    {
+        LRUCache c(1);
+        c.put(1, 1);
+        c.put(2, 2);
+        assert(c.get(1) == -1);
+        assert(c.get(2) == 2);
+    }
+    {
+        LRUCache c(2);
+        assert(c.get(999) == -1);
+    }
+
     printf("all assertions passed\n");
     return 0;
 }

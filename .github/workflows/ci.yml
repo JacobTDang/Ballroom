@@ -98,3 +98,25 @@ jobs:
       - uses: actions/checkout@v4
       - name: docker build
         run: docker build -f docker/Dockerfile -t ballroom-practice .
+
+  # For every exercise, checks that its hidden tests actually discriminate
+  # correct from incorrect code: the shipped starter must FAIL
+  # test_command, and exercises/<id>/.reference/'s known-correct solution
+  # must PASS it (see internal/verify) — catches a vacuous or too-weak
+  # test at any of the exercise's 3 language variants, on every change,
+  # not just when the exercise was first authored.
+  verify-exercises:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: install clang, python3, pytest
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang python3 python3-pip
+          pip3 install --user pytest
+      - name: verify exercises
+        run: go run ./cmd/verify-exercises .
