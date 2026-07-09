@@ -21,3 +21,24 @@ def test_resets_after_window(monkeypatch):
 
     t[0] += 5.1
     assert rl.allow() is True
+
+
+def test_multiple_windows_in_sequence(monkeypatch):
+    t = [0.0]
+    monkeypatch.setattr(time, "time", lambda: t[0])
+
+    rl = RateLimiter(limit=2, window_seconds=4)
+    assert rl.allow() is True
+    assert rl.allow() is True
+    assert rl.allow() is False
+
+    t[0] += 5
+    assert rl.allow() is True
+    assert rl.allow() is True
+    assert rl.allow() is False
+
+
+def test_limit_of_one():
+    rl = RateLimiter(limit=1, window_seconds=10)
+    assert rl.allow() is True
+    assert rl.allow() is False

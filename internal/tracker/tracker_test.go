@@ -28,7 +28,11 @@ func TestOpen_CreatesSchema(t *testing.T) {
 	}
 }
 
-func TestOpen_MigratesPatternCategoryToDSA(t *testing.T) {
+func TestOpen_MigratesPatternCategoryThroughToTwoPointers(t *testing.T) {
+	// Open runs the pattern->dsa and dsa->two-pointers migrations
+	// unconditionally, every open — a still-unmigrated "pattern" row
+	// chains through both in one Open() call, landing on today's
+	// category, not the intermediate "dsa" one.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tracker.db")
 
@@ -64,8 +68,49 @@ func TestOpen_MigratesPatternCategoryToDSA(t *testing.T) {
 	if len(attempts) != 1 {
 		t.Fatalf("expected 1 attempt, got %d", len(attempts))
 	}
-	if attempts[0].Category != "dsa" {
-		t.Errorf("Category = %q, want migrated %q", attempts[0].Category, "dsa")
+	if attempts[0].Category != "two-pointers" {
+		t.Errorf("Category = %q, want migrated %q", attempts[0].Category, "two-pointers")
+	}
+}
+
+func TestOpen_MigratesDSACategoryToTwoPointers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tracker.db")
+
+	tr := func() *Tracker {
+		tr, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		return tr
+	}()
+	if _, err := tr.LogAttempt(Attempt{
+		ExerciseID:   "two-pointers-01",
+		Category:     "dsa",
+		Language:     "go",
+		Date:         "2026-07-08",
+		TimeSpentMin: 10,
+		Result:       ResultPass,
+	}); err != nil {
+		t.Fatalf("LogAttempt: %v", err)
+	}
+	tr.Close()
+
+	tr2, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer tr2.Close()
+
+	attempts, err := tr2.ListAttempts()
+	if err != nil {
+		t.Fatalf("ListAttempts: %v", err)
+	}
+	if len(attempts) != 1 {
+		t.Fatalf("expected 1 attempt, got %d", len(attempts))
+	}
+	if attempts[0].Category != "two-pointers" {
+		t.Errorf("Category = %q, want migrated %q", attempts[0].Category, "two-pointers")
 	}
 }
 

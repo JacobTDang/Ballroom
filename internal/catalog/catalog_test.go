@@ -13,6 +13,31 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
 
+func TestDisplayCategory_NeetCodeCategoriesGetHumanReadableLabels(t *testing.T) {
+	cases := map[string]string{
+		exercise.CategoryDSA:             "DSA",
+		exercise.CategoryArraysHashing:   "Arrays & Hashing",
+		exercise.CategoryTwoPointers:     "Two Pointers",
+		exercise.CategorySlidingWindow:   "Sliding Window",
+		exercise.CategoryLinkedList:      "Linked List",
+		exercise.CategoryHeap:            "Heap / Priority Queue",
+		exercise.CategoryAdvancedGraphs:  "Advanced Graphs",
+		exercise.CategoryDP1D:            "1-D Dynamic Programming",
+		exercise.CategoryDP2D:            "2-D Dynamic Programming",
+		exercise.CategoryMathGeometry:    "Math & Geometry",
+		exercise.CategoryBitManipulation: "Bit Manipulation",
+		exercise.CategoryAIAssisted:      "AI-Assisted",
+		exercise.CategoryDebug:           "Debug",
+		exercise.CategoryConcurrency:     "Concurrency",
+		exercise.CategoryImplementation:  "Implementation",
+	}
+	for cat, want := range cases {
+		if got := DisplayCategory(cat); got != want {
+			t.Errorf("DisplayCategory(%q) = %q, want %q", cat, got, want)
+		}
+	}
+}
+
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // stripAnsi removes color escape codes so content assertions can check
@@ -203,13 +228,13 @@ func TestList_SkipsInvalidExerciseDirectories(t *testing.T) {
 
 func TestFormatTable_IncludesExerciseInfo(t *testing.T) {
 	statuses := []ExerciseStatus{
-		{Exercise: fakeExercise("two-pointers-01", "pattern", "go", "Two Sum II"), Attempts: 2, LastResult: tracker.ResultPass},
+		{Exercise: fakeExercise("two-pointers-01", "two-pointers", "go", "Two Sum II"), Attempts: 2, LastResult: tracker.ResultPass},
 		{Exercise: fakeExercise("cpp-debug-01", "debug", "cpp", "Off-by-one"), Attempts: 0, LastResult: ""},
 	}
 
 	out := stripAnsi(FormatTable(statuses))
 
-	for _, want := range []string{"two-pointers-01", "Two Sum II", "pattern", "go", "pass", "2 attempt"} {
+	for _, want := range []string{"two-pointers-01", "Two Sum II", "Two Pointers", "go", "pass", "2 attempt"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("table output missing %q:\n%s", want, out)
 		}
@@ -221,17 +246,17 @@ func TestFormatTable_IncludesExerciseInfo(t *testing.T) {
 
 func TestFormatSummary_ShowsPerCategoryCounts(t *testing.T) {
 	statuses := []ExerciseStatus{
-		{Exercise: fakeExercise("a", "pattern", "go", "A"), LastResult: tracker.ResultPass},
+		{Exercise: fakeExercise("a", "two-pointers", "go", "A"), LastResult: tracker.ResultPass},
 		{Exercise: fakeExercise("b", "debug", "cpp", "B"), LastResult: tracker.ResultFail},
 		{Exercise: fakeExercise("c", "debug", "cpp", "C"), LastResult: ""},
 	}
 
 	out := stripAnsi(FormatSummary(statuses))
 
-	if !strings.Contains(out, "pattern: 1/1") {
-		t.Errorf("summary missing pattern 1/1:\n%s", out)
+	if !strings.Contains(out, "Two Pointers: 1/1") {
+		t.Errorf("summary missing Two Pointers 1/1:\n%s", out)
 	}
-	if !strings.Contains(out, "debug: 0/2") {
-		t.Errorf("summary missing debug 0/2:\n%s", out)
+	if !strings.Contains(out, "Debug: 0/2") {
+		t.Errorf("summary missing Debug 0/2:\n%s", out)
 	}
 }
