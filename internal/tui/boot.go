@@ -316,14 +316,11 @@ func RunBoot(cfg config.Config) (proceed bool, err error) {
 }
 
 // collapsedCheckRow is a compact summary for a check that's aged out of
-// the recent window: mark + name on one line, its final detail indented
-// below (matching expandedCheckRow's shape) — no command or output,
-// keeping settled history out of the way.
-func collapsedCheckRow(mark, name, detail string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "  %s %s\n", mark, name)
-	fmt.Fprintf(&b, "      %s\n", checkDimStyle.Render(detail))
-	return b.String()
+// the recent window: just mark + name. No canned detail string — that
+// would silently stand in for the real command output the row showed
+// while it was still expanded, which reads as if it replaced it.
+func collapsedCheckRow(mark, name string) string {
+	return fmt.Sprintf("  %s %s\n", mark, name)
 }
 
 // expandedCheckRow shows a check with its real invoked command and up to
@@ -354,7 +351,7 @@ func (m bootModel) renderRightColumn() string {
 			mark = checkFailStyle.Render("✗")
 		}
 		if i < expandFrom {
-			b.WriteString(collapsedCheckRow(mark, c.Name, c.Detail))
+			b.WriteString(collapsedCheckRow(mark, c.Name))
 			continue
 		}
 		b.WriteString(expandedCheckRow(mark, c.Name, c.Command, c.Output))
