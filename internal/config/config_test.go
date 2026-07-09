@@ -182,6 +182,13 @@ func TestLoad_DefaultsTutorModelWhenNoSettingsFile(t *testing.T) {
 	}
 }
 
+func TestQwen25Coder14BModel_IsValidOllamaTag(t *testing.T) {
+	want := "qwen2.5-coder:14b-instruct"
+	if Qwen25Coder14BModel != want {
+		t.Errorf("Qwen25Coder14BModel = %q, want %q", Qwen25Coder14BModel, want)
+	}
+}
+
 func TestDeepSeekCoderV2LiteModel_IsValidOllamaTag(t *testing.T) {
 	want := "deepseek-coder-v2:16b-lite-instruct-q4_K_M"
 	if DeepSeekCoderV2LiteModel != want {

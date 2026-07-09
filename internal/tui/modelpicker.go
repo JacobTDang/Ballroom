@@ -35,8 +35,14 @@ type modelsLoadedMsg struct {
 //
 // There's no separate "known/suggested models" quick-pick list here beyond
 // what's locally pulled — typing a tag directly is the mechanism for using
-// any model that isn't. config.DeepSeekCoderV2LiteModel documents one such
-// verified-working tag (deepseek-coder-v2:16b-lite-instruct-q4_K_M).
+// any model that isn't. config.DeepSeekCoderV2LiteModel and
+// config.Qwen25Coder14BModel document two such verified-working tags
+// (deepseek-coder-v2:16b-lite-instruct-q4_K_M and qwen2.5-coder:14b-instruct
+// respectively) — the latter a larger variant of the default 7B model that
+// needs meaningfully more RAM/VRAM to run (roughly 12-16GB free vs. the 7B
+// default's ~8GB). There's no per-entry hint UI here to surface that
+// inline, so it's called out in the const's doc comment instead — check
+// there before pulling/selecting it on constrained hardware.
 type modelPickerModel struct {
 	host    string
 	current string
