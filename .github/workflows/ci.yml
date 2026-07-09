@@ -34,7 +34,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck docker/entrypoint.sh tutor/chat.sh
+        run: shellcheck docker/entrypoint.sh tutor/chat.sh tutor/chat_test.sh
+      - name: tutor/chat.sh tests
+        run: bash tutor/chat_test.sh
 
   docker-build:
     runs-on: ubuntu-latest
