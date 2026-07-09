@@ -13,7 +13,12 @@ tmux -f "$TMUX_CONF" new-session -d -s "$SESSION" -n main -c "$WORKDIR"
 # pane 0: editor (left, full height). Open directly into the solution
 # file to implement, not the netrw directory listing — glob rather than
 # hardcode an extension, since it varies by language (.go/.py/.cpp/.hpp).
-# Falls back to `nvim .` when there's no solution file (e.g. sandbox mode).
+# When the exercise ships a problem.md (statement + examples +
+# constraints — see internal/verify's sibling authoring convention), open
+# it as a read-only left split so it reads like NeetCode's own two-pane
+# layout, with focus landing on the solution file for editing. Falls back
+# to a single-file open (or `nvim .` with no solution file at all, e.g.
+# sandbox mode) when there's no problem.md.
 #
 # --listen exposes an RPC socket so the tutor pane (pane 2) can drive
 # highlights/notes in the running nvim instance (issue #24). The socket
@@ -27,7 +32,13 @@ NVIM_SOCKET="${NVIM_SOCKET:-/tmp/ballroom-nvim.sock}"
 rm -f "$NVIM_SOCKET"
 tmux select-pane -t "${SESSION}:main.0" -T "EDITOR"
 SOLUTION_FILE=$(find "$WORKDIR" -maxdepth 1 -name 'solution.*' -type f | head -n1)
-if [ -n "$SOLUTION_FILE" ]; then
+PROBLEM_FILE="$WORKDIR/problem.md"
+if [ -n "$SOLUTION_FILE" ] && [ -f "$PROBLEM_FILE" ]; then
+  # -c arguments are Vim ex-commands, not shell — no shell quoting inside
+  # them (paths are already fully resolved by this point, so this is safe
+  # even though it wouldn't handle a path containing spaces).
+  tmux send-keys -t "${SESSION}:main.0" "nvim --listen '$NVIM_SOCKET' -c \"vsplit $PROBLEM_FILE\" -c 'set readonly nomodifiable' -c 'wincmd l' '$SOLUTION_FILE'" C-m
+elif [ -n "$SOLUTION_FILE" ]; then
   tmux send-keys -t "${SESSION}:main.0" "nvim --listen '$NVIM_SOCKET' '$SOLUTION_FILE'" C-m
 else
   tmux send-keys -t "${SESSION}:main.0" "nvim --listen '$NVIM_SOCKET' ." C-m

@@ -13,7 +13,8 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
 
-// categoryOrder matches the taxonomy in interview_prep_plan.md Part 2 —
+// categoryOrder matches the taxonomy in interview_prep_plan.md Part 2,
+// followed by the NeetCode 150 roadmap's own category sequence —
 // exercises are grouped by category in this order on the homepage.
 var categoryOrder = map[string]int{
 	exercise.CategoryDSA:            0,
@@ -21,19 +22,60 @@ var categoryOrder = map[string]int{
 	exercise.CategoryConcurrency:    2,
 	exercise.CategoryImplementation: 3,
 	exercise.CategoryAIAssisted:     4,
+
+	exercise.CategoryArraysHashing:   5,
+	exercise.CategoryTwoPointers:     6,
+	exercise.CategorySlidingWindow:   7,
+	exercise.CategoryStack:           8,
+	exercise.CategoryBinarySearch:    9,
+	exercise.CategoryLinkedList:      10,
+	exercise.CategoryTrees:           11,
+	exercise.CategoryTries:           12,
+	exercise.CategoryHeap:            13,
+	exercise.CategoryBacktracking:    14,
+	exercise.CategoryGraphs:          15,
+	exercise.CategoryAdvancedGraphs:  16,
+	exercise.CategoryDP1D:            17,
+	exercise.CategoryDP2D:            18,
+	exercise.CategoryGreedy:          19,
+	exercise.CategoryIntervals:       20,
+	exercise.CategoryMathGeometry:    21,
+	exercise.CategoryBitManipulation: 22,
 }
 
-// DisplayCategory maps a raw category id to how it's shown in the UI —
-// every id reads fine as-is except "dsa", which is an acronym rather than
-// a word (unlike debug/concurrency/implementation/ai-assisted) and needs
-// to be uppercased explicitly rather than just printed raw. Exported so
-// internal/tui can render category names the same way FormatTable and
-// FormatSummary do below.
+// categoryDisplayNames holds the categories whose display label isn't
+// just the raw id read as-is — an acronym (DSA), a NeetCode roadmap name
+// with punctuation/casing a simple humanizer can't derive
+// ("Heap / Priority Queue", "1-D Dynamic Programming"), or a
+// multi-word phrase joined by "&". Anything not listed here falls back
+// to title-casing each hyphen-separated word (see DisplayCategory).
+var categoryDisplayNames = map[string]string{
+	exercise.CategoryDSA:        "DSA",
+	exercise.CategoryAIAssisted: "AI-Assisted",
+
+	exercise.CategoryArraysHashing:   "Arrays & Hashing",
+	exercise.CategoryHeap:            "Heap / Priority Queue",
+	exercise.CategoryDP1D:            "1-D Dynamic Programming",
+	exercise.CategoryDP2D:            "2-D Dynamic Programming",
+	exercise.CategoryMathGeometry:    "Math & Geometry",
+	exercise.CategoryBitManipulation: "Bit Manipulation",
+}
+
+// DisplayCategory maps a raw category id to how it's shown in the UI.
+// Exported so internal/tui can render category names the same way
+// FormatTable and FormatSummary do below.
 func DisplayCategory(category string) string {
-	if category == exercise.CategoryDSA {
-		return "DSA"
+	if name, ok := categoryDisplayNames[category]; ok {
+		return name
 	}
-	return category
+	words := strings.Split(category, "-")
+	for i, w := range words {
+		if w == "" {
+			continue
+		}
+		words[i] = strings.ToUpper(w[:1]) + w[1:]
+	}
+	return strings.Join(words, " ")
 }
 
 // ExerciseStatus is one exercise plus its practice history summary.

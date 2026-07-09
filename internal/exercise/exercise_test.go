@@ -70,6 +70,45 @@ func TestLoad_ValidExercise(t *testing.T) {
 	}
 }
 
+func TestLoad_AcceptsEveryNeetCodeCategory(t *testing.T) {
+	categories := []string{
+		CategoryArraysHashing,
+		CategoryTwoPointers,
+		CategorySlidingWindow,
+		CategoryStack,
+		CategoryBinarySearch,
+		CategoryLinkedList,
+		CategoryTrees,
+		CategoryTries,
+		CategoryHeap,
+		CategoryBacktracking,
+		CategoryGraphs,
+		CategoryAdvancedGraphs,
+		CategoryDP1D,
+		CategoryDP2D,
+		CategoryGreedy,
+		CategoryIntervals,
+		CategoryMathGeometry,
+		CategoryBitManipulation,
+	}
+	for _, cat := range categories {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "repo"), 0o755); err != nil {
+			t.Fatalf("mkdir repo: %v", err)
+		}
+		path := writeExercise(t, dir, map[string]any{"category": cat})
+
+		ex, err := Load(path)
+		if err != nil {
+			t.Errorf("Load with category %q: %v", cat, err)
+			continue
+		}
+		if ex.Category != cat {
+			t.Errorf("Category = %q, want %q", ex.Category, cat)
+		}
+	}
+}
+
 func TestLoad_ProblemIDParsed(t *testing.T) {
 	dir := t.TempDir()
 	os.Mkdir(filepath.Join(dir, "repo"), 0o755)

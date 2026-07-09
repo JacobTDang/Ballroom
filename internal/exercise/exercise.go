@@ -18,6 +18,31 @@ const (
 	CategoryAIAssisted     = "ai-assisted"
 )
 
+// The NeetCode 150 roadmap's own category breakdown — every problem
+// generated from that list lands in one of these, not the generic
+// CategoryDSA bucket (see internal/catalog.DisplayCategory for how each
+// renders).
+const (
+	CategoryArraysHashing   = "arrays-hashing"
+	CategoryTwoPointers     = "two-pointers"
+	CategorySlidingWindow   = "sliding-window"
+	CategoryStack           = "stack"
+	CategoryBinarySearch    = "binary-search"
+	CategoryLinkedList      = "linked-list"
+	CategoryTrees           = "trees"
+	CategoryTries           = "tries"
+	CategoryHeap            = "heap"
+	CategoryBacktracking    = "backtracking"
+	CategoryGraphs          = "graphs"
+	CategoryAdvancedGraphs  = "advanced-graphs"
+	CategoryDP1D            = "1d-dp"
+	CategoryDP2D            = "2d-dp"
+	CategoryGreedy          = "greedy"
+	CategoryIntervals       = "intervals"
+	CategoryMathGeometry    = "math-geometry"
+	CategoryBitManipulation = "bit-manipulation"
+)
+
 const (
 	LanguageGo     = "go"
 	LanguageCpp    = "cpp"
@@ -36,6 +61,25 @@ var validCategories = map[string]bool{
 	CategoryConcurrency:    true,
 	CategoryImplementation: true,
 	CategoryAIAssisted:     true,
+
+	CategoryArraysHashing:   true,
+	CategoryTwoPointers:     true,
+	CategorySlidingWindow:   true,
+	CategoryStack:           true,
+	CategoryBinarySearch:    true,
+	CategoryLinkedList:      true,
+	CategoryTrees:           true,
+	CategoryTries:           true,
+	CategoryHeap:            true,
+	CategoryBacktracking:    true,
+	CategoryGraphs:          true,
+	CategoryAdvancedGraphs:  true,
+	CategoryDP1D:            true,
+	CategoryDP2D:            true,
+	CategoryGreedy:          true,
+	CategoryIntervals:       true,
+	CategoryMathGeometry:    true,
+	CategoryBitManipulation: true,
 }
 
 var validLanguages = map[string]bool{
