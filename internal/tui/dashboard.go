@@ -15,16 +15,12 @@ const (
 	dashboardMarginW = 4
 	dashboardMarginH = 2
 
-	// dashboardBorderPadW/H account for dashboardPanelStyle's own
-	// border (1 cell each side) and padding (1 row / 3 cols each side).
-	dashboardBorderPadW = 8
-	dashboardBorderPadH = 4
+	// minPanelWidth/Height keep the panel usable on a tiny terminal
+	// instead of collapsing to nothing.
+	minPanelWidth  = 30
+	minPanelHeight = 12
 
 	dashboardGapWidth = 4
-
-	// minBallHeight keeps the ball from collapsing into an unrecognizable
-	// scribble on a very small or not-yet-sized terminal.
-	minBallHeight = 10
 )
 
 var dashboardGap = func() string {
@@ -40,40 +36,39 @@ var dashboardPanelStyle = lipgloss.NewStyle().
 	BorderForeground(lipgloss.Color("#9B5FB0")).
 	Padding(1, 3)
 
-// ballAreaSize computes how much space is left for the disco ball once
-// the terminal margins, the panel's own border/padding, the gap between
-// columns, and the right column's width are all reserved.
-func ballAreaSize(termW, termH, rightColWidth int) (maxW, maxH int) {
-	maxW = termW - dashboardMarginW - dashboardBorderPadW - rightColWidth - dashboardGapWidth
-	maxH = termH - dashboardMarginH - dashboardBorderPadH
-	return maxW, maxH
+// sharedBallGrid is built once at package init, at a fixed size — the
+// ball reads as the same, consistent shape on every screen and every
+// resize; only its sparkle colors animate.
+var sharedBallGrid = buildDiscoBall(discoBallHeight, discoBallWidth)
+
+// panelDimensions is the panel's total rendered size (border included):
+// the terminal size minus a small fixed margin, clamped so it never
+// collapses to an unusable size on a tiny terminal. It does NOT depend on
+// how much content the panel currently holds — the panel stays the same
+// size as checks/build-log lines come and go, instead of resizing itself
+// around whatever content happens to be present.
+func panelDimensions(termW, termH int) (w, h int) {
+	w = termW - dashboardMarginW
+	h = termH - dashboardMarginH
+	if w < minPanelWidth {
+		w = minPanelWidth
+	}
+	if h < minPanelHeight {
+		h = minPanelHeight
+	}
+	return w, h
 }
 
-// dashboardBallSize picks (height, width) for the ball within the given
-// budget, preferring to use the full available height — width is always
-// exactly 2x height to read as circular (terminal cells are roughly
-// twice as tall as wide) — and only shrinking to fit a tight width.
-func dashboardBallSize(maxW, maxH int) (h, w int) {
-	h = maxH
-	if h < minBallHeight {
-		h = minBallHeight
-	}
-	w = h * 2
-	if w > maxW {
-		w = maxW
-		h = w / 2
-		if h < minBallHeight {
-			h = minBallHeight
-		}
-	}
-	return h, w
-}
-
-// renderDashboardPanel joins a pre-built ball grid and right-column
-// content into the shared bordered two-column panel, top-aligned so the
-// title/menu always starts at the same spot regardless of how much
-// taller the ball is — matching the original, smaller layout's look.
-func renderDashboardPanel(ballGrid [][]discoBallCell, phase int, right string) string {
-	ball := renderDiscoBall(ballGrid, phase)
-	return dashboardPanelStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, ball, dashboardGap, right))
+// renderDashboardPanel joins the shared ball grid and right-column
+// content into the shared bordered two-column panel, sized to fill most
+// of the terminal at a fixed, content-independent size (lipgloss wraps
+// rather than grows the box past it) and top-aligned so the title/menu
+// always starts at the same spot regardless of ball height.
+func renderDashboardPanel(termW, termH, phase int, right string) string {
+	panelW, panelH := panelDimensions(termW, termH)
+	ball := renderDiscoBall(sharedBallGrid, phase)
+	content := lipgloss.JoinHorizontal(lipgloss.Top, ball, dashboardGap, right)
+	// Width/Height set the box excluding the border, so subtract it here
+	// to make the final rendered panel exactly panelW x panelH.
+	return dashboardPanelStyle.Width(panelW - 2).Height(panelH - 2).Render(content)
 }

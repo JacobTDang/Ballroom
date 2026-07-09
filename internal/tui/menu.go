@@ -7,7 +7,14 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/JacobTDang/Ballroom/internal/catalog"
 )
+
+// menuBannerScale is the pixel-scale used for the animated mosaic
+// "Ballroom" banner in the right column — small enough to sit beside the
+// disco ball instead of the full-width scale used nowhere else anymore.
+const menuBannerScale = 1
 
 // menuChoice is one of the main menu options.
 type menuChoice int
@@ -33,16 +40,15 @@ var menuDescriptions = []string{
 const menuRightColWidth = 54
 
 var (
-	menuTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F2EBDD"))
 	menuSubtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B8680"))
 	menuRowHighlight  = lipgloss.NewStyle().Background(lipgloss.Color("#9B5FB0")).Foreground(lipgloss.Color("#000000")).Bold(true)
 )
 
 // menuModel is the title-screen selection: Practice / Sandbox / Stats, a
-// two-column dashboard — a static monochrome disco ball on the left (a
-// sparse subset of its mirror tiles glint with color on a timer) and the
-// menu on the right, framed in a single bordered panel that scales to
-// fill most of the terminal.
+// two-column dashboard — a fixed-size disco ball on the left (a sparse
+// subset of its mirror tiles glint with color on a timer) and the
+// animated Ballroom banner + menu on the right, framed in a single
+// bordered panel sized to fill most of the terminal.
 type menuModel struct {
 	cursor        int
 	phase         int
@@ -50,7 +56,6 @@ type menuModel struct {
 	chosen        bool
 	quit          bool
 	width, height int
-	ballGrid      [][]discoBallCell
 }
 
 func newMenuModel() menuModel {
@@ -65,9 +70,6 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		maxW, maxH := ballAreaSize(m.width, m.height, menuRightColWidth)
-		h, w := dashboardBallSize(maxW, maxH)
-		m.ballGrid = buildDiscoBall(h, w)
 		return m, tea.ClearScreen
 
 	case tickMsg:
@@ -101,11 +103,8 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m menuModel) renderRightColumn() string {
 	var b strings.Builder
-	b.WriteString("\n")
-	b.WriteString(menuTitleStyle.Render("Ballroom"))
-	b.WriteString("\n")
-	b.WriteString(menuSubtitleStyle.Render("Interview Prep"))
-	b.WriteString("\n\n\n")
+	b.WriteString(catalog.MosaicBannerScaled(m.phase, menuBannerScale))
+	b.WriteString("\n\n")
 
 	for i, label := range menuLabels {
 		numLabel := fmt.Sprintf("%d. %s", i+1, label)
@@ -126,10 +125,10 @@ func (m menuModel) renderRightColumn() string {
 
 func (m menuModel) View() string {
 	right := m.renderRightColumn()
-	if m.width == 0 || m.height == 0 || m.ballGrid == nil {
+	if m.width == 0 || m.height == 0 {
 		return right
 	}
-	panel := renderDashboardPanel(m.ballGrid, m.phase, right)
+	panel := renderDashboardPanel(m.width, m.height, m.phase, right)
 	return placeBlock(m.width, m.height, panel)
 }
 

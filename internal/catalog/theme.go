@@ -87,6 +87,15 @@ const bannerScale = 2
 // it on a timer (see internal/tui's tick handling) animates a shimmer
 // across the letters. Pass phase=0 for a static render.
 func MosaicBanner(phase int) string {
+	return MosaicBannerScaled(phase, bannerScale)
+}
+
+// MosaicBannerScaled is MosaicBanner with an explicit pixel-scale instead
+// of the default — a smaller scale (e.g. 1) fits the banner into a
+// narrower column, such as sitting beside the disco ball in the two-
+// column dashboard layout, while still keeping the same animated mosaic
+// coloring.
+func MosaicBannerScaled(phase, scale int) string {
 	var b strings.Builder
 	b.WriteString("\n")
 	for row, line := range bannerArt {
@@ -94,13 +103,13 @@ func MosaicBanner(phase int) string {
 		col := 0
 		for _, ch := range line {
 			if ch == ' ' {
-				b.WriteString(strings.Repeat(" ", bannerScale))
-				col += bannerScale
+				b.WriteString(strings.Repeat(" ", scale))
+				col += scale
 				continue
 			}
 			idx := (row + col/mosaicWidth + phase) % len(bannerGradient)
-			b.WriteString(styled(bannerGradient[idx], strings.Repeat("█", bannerScale)))
-			col += bannerScale
+			b.WriteString(styled(bannerGradient[idx], strings.Repeat("█", scale)))
+			col += scale
 		}
 		b.WriteString("\n")
 	}

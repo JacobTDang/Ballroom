@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/JacobTDang/Ballroom/internal/catalog"
 	"github.com/JacobTDang/Ballroom/internal/config"
 	"github.com/JacobTDang/Ballroom/internal/orchestrator"
 	"github.com/JacobTDang/Ballroom/internal/preflight"
@@ -19,11 +20,9 @@ const (
 	tutorModel = "qwen2.5-coder:7b"
 )
 
-// bootRightColWidth is the estimated width budget for the boot screen's
-// right column (title + checks + live build log), used only to work out
-// how much room is left for the disco ball — the panel itself still
-// auto-sizes to whatever content actually renders.
-const bootRightColWidth = 62
+// bootBannerScale matches menuBannerScale — small enough for the
+// animated mosaic banner to sit beside the disco ball.
+const bootBannerScale = 1
 
 // maxStepLogLines caps how many of a single docker-build step's own
 // lines stay on screen — the step entry itself persists for the whole
@@ -98,7 +97,6 @@ type bootModel struct {
 	buildErrCh  <-chan error
 
 	width, height int
-	ballGrid      [][]discoBallCell
 }
 
 func newBootModel(cfg config.Config) bootModel {
@@ -152,9 +150,6 @@ func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		maxW, maxH := ballAreaSize(m.width, m.height, bootRightColWidth)
-		h, w := dashboardBallSize(maxW, maxH)
-		m.ballGrid = buildDiscoBall(h, w)
 		// A resize (especially a big jump, e.g. small window -> full
 		// screen) can leave stale content from the old, differently-
 		// centered render behind — force a full repaint instead of
@@ -227,13 +222,11 @@ func RunBoot(cfg config.Config) (proceed bool, err error) {
 }
 
 // renderRightColumn renders the boot screen's right-hand content: the
-// same "Ballroom" title moment as the main menu, then the live checks /
-// build log / continue prompt underneath it.
+// same animated Ballroom banner moment as the main menu, then the live
+// checks / build log / continue prompt underneath it.
 func (m bootModel) renderRightColumn() string {
 	var b strings.Builder
-	b.WriteString(menuTitleStyle.Render("Ballroom"))
-	b.WriteString("\n")
-	b.WriteString(menuSubtitleStyle.Render("Interview Prep"))
+	b.WriteString(catalog.MosaicBannerScaled(m.phase, bootBannerScale))
 	b.WriteString("\n\n")
 
 	for _, c := range m.checks {
@@ -269,9 +262,9 @@ func (m bootModel) renderRightColumn() string {
 
 func (m bootModel) View() string {
 	right := m.renderRightColumn()
-	if m.width == 0 || m.height == 0 || m.ballGrid == nil {
+	if m.width == 0 || m.height == 0 {
 		return right
 	}
-	panel := renderDashboardPanel(m.ballGrid, m.phase, right)
+	panel := renderDashboardPanel(m.width, m.height, m.phase, right)
 	return placeBlock(m.width, m.height, panel)
 }

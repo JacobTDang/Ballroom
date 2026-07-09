@@ -2,44 +2,22 @@ package tui
 
 import "testing"
 
-func TestDashboardBallSize_UsesFullHeightWhenWidthAllows(t *testing.T) {
-	h, w := dashboardBallSize(300, 30)
-	if h != 30 {
-		t.Errorf("h = %d, want 30 (full available height)", h)
+func TestPanelDimensions_SubtractsMargin(t *testing.T) {
+	w, h := panelDimensions(160, 50)
+	if w != 160-dashboardMarginW {
+		t.Errorf("w = %d, want %d", w, 160-dashboardMarginW)
 	}
-	if w != 60 {
-		t.Errorf("w = %d, want 60 (2x height, circular aspect)", w)
-	}
-}
-
-func TestDashboardBallSize_ShrinksToFitWidthConstraint(t *testing.T) {
-	h, w := dashboardBallSize(40, 30)
-	if w > 40 {
-		t.Errorf("w = %d, must not exceed available width 40", w)
-	}
-	if h != w/2 {
-		t.Errorf("h = %d, w = %d: expected h == w/2 to keep circular aspect", h, w)
-	}
-	if h >= 30 {
-		t.Errorf("h = %d, expected it to shrink below the full available height 30", h)
+	if h != 50-dashboardMarginH {
+		t.Errorf("h = %d, want %d", h, 50-dashboardMarginH)
 	}
 }
 
-func TestDashboardBallSize_NeverBelowMinimum(t *testing.T) {
-	h, _ := dashboardBallSize(200, 2)
-	if h < minBallHeight {
-		t.Errorf("h = %d, want at least minBallHeight = %d", h, minBallHeight)
+func TestPanelDimensions_ClampsToMinimumOnTinyTerminal(t *testing.T) {
+	w, h := panelDimensions(5, 3)
+	if w < minPanelWidth {
+		t.Errorf("w = %d, want at least minPanelWidth = %d", w, minPanelWidth)
 	}
-}
-
-func TestBallAreaSize_ReservesMarginsBorderPaddingAndRightColumn(t *testing.T) {
-	maxW, maxH := ballAreaSize(120, 40, 54)
-	wantW := 120 - dashboardMarginW - dashboardBorderPadW - 54 - dashboardGapWidth
-	wantH := 40 - dashboardMarginH - dashboardBorderPadH
-	if maxW != wantW {
-		t.Errorf("maxW = %d, want %d", maxW, wantW)
-	}
-	if maxH != wantH {
-		t.Errorf("maxH = %d, want %d", maxH, wantH)
+	if h < minPanelHeight {
+		t.Errorf("h = %d, want at least minPanelHeight = %d", h, minPanelHeight)
 	}
 }

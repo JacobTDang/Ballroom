@@ -7,6 +7,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// discoBallHeight/Width are fixed — the ball is a consistent, modest
+// size on every screen rather than scaling with the terminal, so it
+// stays proportionate next to the animated banner instead of dominating
+// the panel.
+const (
+	discoBallHeight = 24
+	discoBallWidth  = 48
+)
+
 // discoShades goes dim -> bright; used for the mirror-ball's directional
 // shading (denser characters catch more "light").
 var discoShades = []rune{'.', ':', '*', '%', '#'}
