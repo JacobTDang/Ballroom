@@ -85,6 +85,36 @@ else
   echo "PASS: each call re-reads the file (edit between calls is reflected)"
 fi
 
+# 5: comprehension-check instruction (#23) is present in hints-first and
+# full-assist's system prompt, and absent from syntax-only's.
+system_prompt_for_mode() {
+  local mode="$1"
+  PRACTICE_TUTOR_MODE="$mode" OLLAMA_HOST="unused" TUTOR_MODEL="unused" WORKDIR="$tmp/empty" \
+    bash -c "source '$SCRIPT_DIR/chat.sh'; printf '%s' \"\$SYSTEM_PROMPT\""
+}
+
+marker="comprehension"
+
+for mode in hints-first full-assist unrecognized-mode; do
+  prompt=$(system_prompt_for_mode "$mode")
+  case "$prompt" in
+    *"$marker"*) echo "PASS: $mode prompt includes the comprehension-check instruction" ;;
+    *)
+      echo "FAIL: $mode prompt missing the comprehension-check instruction"
+      fail_count=$((fail_count + 1))
+      ;;
+  esac
+done
+
+prompt=$(system_prompt_for_mode "syntax-only")
+case "$prompt" in
+  *"$marker"*)
+    echo "FAIL: syntax-only prompt should NOT include the comprehension-check instruction"
+    fail_count=$((fail_count + 1))
+    ;;
+  *) echo "PASS: syntax-only prompt correctly excludes the comprehension-check instruction" ;;
+esac
+
 echo
 if [ "$fail_count" -eq 0 ]; then
   echo "All tests passed."
