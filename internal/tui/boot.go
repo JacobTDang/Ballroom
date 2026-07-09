@@ -5,6 +5,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -25,6 +26,22 @@ const (
 // that step is windowed.
 const maxStepLogLines = 3
 
+// maxOutputLines caps how many lines of a resolved check's real command
+// output are shown — same windowing idea as maxStepLogLines, applied to
+// preflight.Check.Output instead of docker build's step lines.
+const maxOutputLines = 3
+
+// recentCheckWindow is how many of the most recently invoked checks stay
+// expanded (showing their real command + output); older ones collapse to
+// a single summary line so the screen doesn't get more cluttered as more
+// checks finish.
+const recentCheckWindow = 3
+
+// checkStartDelay paces checks so they visibly run one at a time instead
+// of all resolving within the same frame — a var (not a const) so tests
+// can zero it out instead of actually sleeping.
+var checkStartDelay = 250 * time.Millisecond
+
 // imageCheckIndex is the pending-checks slot for the image check — the
 // one that gets special "build it live" treatment instead of just
 // reporting a plain pass/fail. See newBootModel for the fixed check order.
@@ -41,6 +58,58 @@ var (
 type checkDoneMsg preflight.Check
 type buildLineMsg string
 type buildDoneMsg struct{ err error }
+
+// startCheckMsg fires after checkStartDelay to kick off the check at
+// index — the delay between a check resolving and the next one starting
+// is what makes them visibly run one at a time.
+type startCheckMsg struct{ index int }
+
+// delayedCheck schedules startCheckMsg for the given check index after
+// checkStartDelay.
+func delayedCheck(index int) tea.Cmd {
+	return tea.Tick(checkStartDelay, func(time.Time) tea.Msg {
+		return startCheckMsg{index: index}
+	})
+}
+
+// lastLines splits raw command/response output into non-empty lines and
+// returns at most the last n of them — the same "windowed scrollback"
+// idea as a build step's lines, applied to a resolved check's real
+// output instead.
+func lastLines(output string, n int) []string {
+	var lines []string
+	for _, l := range strings.Split(strings.TrimSpace(output), "\n") {
+		l = strings.TrimRight(l, "\r")
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		lines = append(lines, l)
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines
+}
+
+// recentWindowStart returns the index of the first check that should
+// stay expanded — everything before it collapses to a summary line.
+func recentWindowStart(total, window int) int {
+	start := total - window
+	if start < 0 {
+		return 0
+	}
+	return start
+}
+
+// lastBuildStepOutput carries the last docker-build step's lines into
+// the resolved Image check's Output, so it doesn't lose all its visible
+// output the moment the live build panel collapses into a plain check.
+func lastBuildStepOutput(steps []buildStepLog) string {
+	if len(steps) == 0 {
+		return ""
+	}
+	return strings.Join(steps[len(steps)-1].lines, "\n")
+}
 
 // buildStepLog groups the docker-build output lines belonging to one
 // step (identified by its leading "#NN" token) — the step itself stays
@@ -93,12 +162,10 @@ type bootModel struct {
 
 	width, height int
 
-	// checkNames/checkCmds mirror pending, one entry per slot, so a
-	// check's name and the command it's about to run can be shown while
-	// it's still queued — before it has a Check result to read those
-	// from.
+	// checkNames mirrors pending, one entry per slot, so a check's name
+	// can be shown while it's still queued — before it has actually run
+	// and produced a Check with a real Command/Output to display.
 	checkNames []string
-	checkCmds  []string
 }
 
 func newBootModel(cfg config.Config) bootModel {
@@ -116,12 +183,6 @@ func newBootModel(cfg config.Config) bootModel {
 			preflight.CheckNameImage,
 			preflight.CheckNameOllama,
 			preflight.CheckNameModel,
-		},
-		checkCmds: []string{
-			"docker info",
-			fmt.Sprintf(`docker image inspect %s --format "{{.Id}}"`, image),
-			"GET " + ollamaHost + "/api/tags",
-			"GET " + ollamaHost + "/api/tags",
 		},
 	}
 }
@@ -161,7 +222,10 @@ func waitForBuildLine(lineCh <-chan string, errCh <-chan error) tea.Cmd {
 func (m bootModel) advance(check preflight.Check) (tea.Model, tea.Cmd) {
 	m.checks = append(m.checks, check)
 	if len(m.checks) < len(m.pending) {
-		return m, m.runCheck(len(m.checks))
+		// Pace the next check behind a delay instead of firing it
+		// immediately — otherwise fast checks all resolve within the
+		// same frame and there's nothing to actually watch happen.
+		return m, delayedCheck(len(m.checks))
 	}
 	m.ready = true
 	return m, nil
@@ -180,6 +244,9 @@ func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		m.phase++
 		return m, tickCmd()
+
+	case startCheckMsg:
+		return m, m.runCheck(msg.index)
 
 	case checkDoneMsg:
 		check := preflight.Check(msg)
@@ -211,11 +278,17 @@ func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case buildDoneMsg:
 		m.building = false
-		m.buildSteps = nil
-		result := preflight.Check{Name: preflight.CheckNameImage, OK: msg.err == nil, Detail: "built"}
+		result := preflight.Check{
+			Name:    preflight.CheckNameImage,
+			OK:      msg.err == nil,
+			Detail:  "built",
+			Command: m.buildCommand(),
+			Output:  lastBuildStepOutput(m.buildSteps),
+		}
 		if msg.err != nil {
 			result.Detail = fmt.Sprintf("build failed: %v", msg.err)
 		}
+		m.buildSteps = nil
 		return m.advance(result)
 
 	case tea.KeyMsg:
@@ -242,32 +315,50 @@ func RunBoot(cfg config.Config) (proceed bool, err error) {
 	return !final.(bootModel).quit, nil
 }
 
-// checkRow formats one check line with its name, detail, and the actual
-// command it ran (or will run) — visible for both queued and resolved
-// checks, so it's never a mystery what's happening behind a checkmark.
-func checkRow(mark, name, detail, command string) string {
-	detail = fmt.Sprintf("%-24s", detail)
-	return fmt.Sprintf("  %s %-16s %s %s\n", mark, name, checkDimStyle.Render(detail), checkDimStyle.Render(truncateTitle(command, 60)))
+// collapsedCheckRow is a compact one-liner for a check that's aged out
+// of the recent window: mark, name, and its final detail — no command or
+// output, keeping settled history out of the way.
+func collapsedCheckRow(mark, name, detail string) string {
+	return fmt.Sprintf("  %s %-16s %s\n", mark, name, checkDimStyle.Render(detail))
+}
+
+// expandedCheckRow shows a check with its real invoked command and up to
+// maxOutputLines of its real output, indented underneath — for checks
+// still within the recent window (see recentCheckWindow).
+func expandedCheckRow(mark, name, command, output string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "  %s %s\n", mark, name)
+	fmt.Fprintf(&b, "      %s\n", buildLogStyle.Render("$ "+truncateTitle(command, 80)))
+	for _, line := range lastLines(output, maxOutputLines) {
+		fmt.Fprintf(&b, "      %s\n", buildLogStyle.Render(truncateTitle(line, 80)))
+	}
+	return b.String()
 }
 
 // renderRightColumn renders the boot screen's right-hand content: the
-// live checks (each with the command it ran or is about to run) / build
-// log / continue prompt. The animated Ballroom banner above this is
-// added by renderDashboardPanel, not here.
+// live checks (the last few invoked ones expanded with their real
+// command + output, older ones collapsed to a summary line) / build log
+// / continue prompt. The animated Ballroom banner above this is added by
+// renderDashboardPanel, not here.
 func (m bootModel) renderRightColumn() string {
 	var b strings.Builder
 
-	for _, c := range m.checks {
+	expandFrom := recentWindowStart(len(m.checks), recentCheckWindow)
+	for i, c := range m.checks {
 		mark := checkOKStyle.Render("✓")
 		if !c.OK {
 			mark = checkFailStyle.Render("✗")
 		}
-		b.WriteString(checkRow(mark, c.Name, c.Detail, c.Command))
+		if i < expandFrom {
+			b.WriteString(collapsedCheckRow(mark, c.Name, c.Detail))
+			continue
+		}
+		b.WriteString(expandedCheckRow(mark, c.Name, c.Command, c.Output))
 	}
 
 	startIdx := len(m.checks)
 	if m.building {
-		b.WriteString(checkRow(hintStyle.Render("▾"), preflight.CheckNameImage, "building — this can take a minute or two", m.buildCommand()))
+		b.WriteString(expandedCheckRow(hintStyle.Render("▾"), preflight.CheckNameImage, m.buildCommand(), ""))
 		for _, step := range m.buildSteps {
 			for _, line := range step.lines {
 				fmt.Fprintf(&b, "      %s\n", buildLogStyle.Render(truncateTitle(line, 90)))
@@ -276,7 +367,7 @@ func (m bootModel) renderRightColumn() string {
 		startIdx++ // the image slot is shown above, not in the queued loop
 	}
 	for i := startIdx; i < len(m.pending); i++ {
-		b.WriteString(checkRow(checkDimStyle.Render("…"), m.checkNames[i], "queued", m.checkCmds[i]))
+		fmt.Fprintf(&b, "  %s %s\n", checkDimStyle.Render("…"), m.checkNames[i])
 	}
 
 	if m.ready {

@@ -84,6 +84,9 @@ func TestCheckOllama_ReachableHostReportsOK(t *testing.T) {
 	if !c.OK {
 		t.Errorf("expected OK=true for a reachable host, got Detail=%q", c.Detail)
 	}
+	if c.Output != `{"models":[]}` {
+		t.Errorf("Output = %q, want the raw response body", c.Output)
+	}
 }
 
 func TestCheckModel_ReportsOKWhenPresent(t *testing.T) {

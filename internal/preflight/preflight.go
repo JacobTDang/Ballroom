@@ -24,37 +24,42 @@ const (
 )
 
 // Check is the result of one preflight check. Command is the actual
-// command/request the check ran, shown on the boot screen so it's
-// transparent what's happening behind each result — not just a checkmark.
+// command/request the check ran, and Output is its real, raw output
+// (command stdout/stderr, or HTTP response body) — shown on the boot
+// screen so it's transparent what's actually happening, not just a
+// checkmark and a canned summary string.
 type Check struct {
 	Name    string
 	OK      bool
 	Detail  string
 	Command string
+	Output  string
 }
 
 // CheckDocker reports whether the Docker daemon is reachable.
 func CheckDocker() Check {
 	const cmd = "docker info"
-	if err := exec.Command("docker", "info").Run(); err != nil {
-		return Check{Name: CheckNameDocker, OK: false, Detail: "not running — start Docker Desktop", Command: cmd}
+	out, err := exec.Command("docker", "info").CombinedOutput()
+	if err != nil {
+		return Check{Name: CheckNameDocker, OK: false, Detail: "not running — start Docker Desktop", Command: cmd, Output: string(out)}
 	}
-	return Check{Name: CheckNameDocker, OK: true, Detail: "running", Command: cmd}
+	return Check{Name: CheckNameDocker, OK: true, Detail: "running", Command: cmd, Output: string(out)}
 }
 
 // CheckImage reports whether the given Docker image has been built.
 func CheckImage(image string) Check {
 	cmd := fmt.Sprintf(`docker image inspect %s --format "{{.Id}}"`, image)
-	out, err := exec.Command("docker", "image", "inspect", image, "--format", "{{.Id}}").Output()
+	out, err := exec.Command("docker", "image", "inspect", image, "--format", "{{.Id}}").CombinedOutput()
 	if err != nil || strings.TrimSpace(string(out)) == "" {
 		return Check{
 			Name:    CheckNameImage,
 			OK:      false,
 			Detail:  fmt.Sprintf("%q not built — docker build -f docker/Dockerfile -t %s .", image, image),
 			Command: cmd,
+			Output:  string(out),
 		}
 	}
-	return Check{Name: CheckNameImage, OK: true, Detail: "built", Command: cmd}
+	return Check{Name: CheckNameImage, OK: true, Detail: "built", Command: cmd, Output: string(out)}
 }
 
 // CheckOllama reports whether the Ollama endpoint at host is reachable.
@@ -62,11 +67,15 @@ func CheckOllama(host string) Check {
 	cmd := "GET " + host + "/api/tags"
 	client := http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get(host + "/api/tags")
-	if err != nil || resp.StatusCode != http.StatusOK {
-		return Check{Name: CheckNameOllama, OK: false, Detail: "unreachable at " + host + " — is `ollama serve` running?", Command: cmd}
+	if err != nil {
+		return Check{Name: CheckNameOllama, OK: false, Detail: "unreachable at " + host + " — is `ollama serve` running?", Command: cmd, Output: err.Error()}
 	}
 	defer resp.Body.Close()
-	return Check{Name: CheckNameOllama, OK: true, Detail: "reachable", Command: cmd}
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return Check{Name: CheckNameOllama, OK: false, Detail: "unreachable at " + host + " — is `ollama serve` running?", Command: cmd, Output: string(body)}
+	}
+	return Check{Name: CheckNameOllama, OK: true, Detail: "reachable", Command: cmd, Output: string(body)}
 }
 
 // CheckModel reports whether model has been pulled into the Ollama at host.
@@ -75,18 +84,18 @@ func CheckModel(host, model string) Check {
 	client := http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get(host + "/api/tags")
 	if err != nil {
-		return Check{Name: CheckNameModel, OK: false, Detail: "can't reach Ollama to check", Command: cmd}
+		return Check{Name: CheckNameModel, OK: false, Detail: "can't reach Ollama to check", Command: cmd, Output: err.Error()}
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return Check{Name: CheckNameModel, OK: false, Detail: "can't read Ollama response", Command: cmd}
+		return Check{Name: CheckNameModel, OK: false, Detail: "can't read Ollama response", Command: cmd, Output: err.Error()}
 	}
 	if !modelPresent(body, model) {
-		return Check{Name: CheckNameModel, OK: false, Detail: model + " not pulled — ollama pull " + model, Command: cmd}
+		return Check{Name: CheckNameModel, OK: false, Detail: model + " not pulled — ollama pull " + model, Command: cmd, Output: string(body)}
 	}
-	return Check{Name: CheckNameModel, OK: true, Detail: model + " ready", Command: cmd}
+	return Check{Name: CheckNameModel, OK: true, Detail: model + " ready", Command: cmd, Output: string(body)}
 }
 
 // modelPresent reports whether model appears in an Ollama /api/tags

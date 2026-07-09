@@ -21,7 +21,17 @@ func fakeBuildImage(lineCh <-chan string, errCh <-chan error) func() {
 	return func() { buildImageFn = orig }
 }
 
+// noCheckDelay zeroes the pacing delay between checks so tests that drive
+// the sequence manually don't actually sleep. Returns a restore func.
+func noCheckDelay() func() {
+	orig := checkStartDelay
+	checkStartDelay = 0
+	return func() { checkStartDelay = orig }
+}
+
 func TestBootModel_ChecksRunSequentiallyThenReady(t *testing.T) {
+	defer noCheckDelay()()
+
 	var order []string
 	m := bootModel{
 		pending: []func() preflight.Check{
@@ -65,11 +75,24 @@ func TestBootModel_ChecksRunSequentiallyThenReady(t *testing.T) {
 		t.Fatal("should not be ready after only 1 of 2 checks")
 	}
 	if cmd2 == nil {
-		t.Fatal("expected a command to run the second check")
+		t.Fatal("expected a command to schedule the second check")
 	}
 
-	msg2 := cmd2()
-	newM2, cmd3 := bm.Update(msg2)
+	// The next check doesn't run immediately — it's paced behind a
+	// startCheckMsg (see checkStartDelay) so checks visibly appear one
+	// at a time instead of all resolving within the same frame.
+	startMsg, ok := cmd2().(startCheckMsg)
+	if !ok {
+		t.Fatalf("expected a startCheckMsg to be scheduled, got %T", cmd2())
+	}
+	newM2a, cmd2b := bm.Update(startMsg)
+	bm2a := newM2a.(bootModel)
+	if cmd2b == nil {
+		t.Fatal("expected startCheckMsg to trigger running the second check")
+	}
+
+	msg2 := cmd2b()
+	newM2, cmd3 := bm2a.Update(msg2)
 	bm2 := newM2.(bootModel)
 	if len(bm2.checks) != 2 {
 		t.Fatalf("expected 2 checks recorded, got %d", len(bm2.checks))
@@ -300,28 +323,85 @@ func TestBootModel_BuildDoneFailureAdvancesAsFailingImageCheck(t *testing.T) {
 	}
 }
 
-func TestBootModel_RenderRightColumnShowsCommandForResolvedCheck(t *testing.T) {
-	m := bootModel{
-		checks: []preflight.Check{{Name: "Docker", OK: true, Detail: "running", Command: "docker info"}},
+func TestLastLines_CapsToMostRecentNNonEmptyLines(t *testing.T) {
+	out := "one\ntwo\n\nthree\nfour\nfive"
+	got := lastLines(out, 3)
+	want := []string{"three", "four", "five"}
+	if len(got) != len(want) {
+		t.Fatalf("lastLines = %v, want %v", got, want)
 	}
-	out := m.renderRightColumn()
-	if !strings.Contains(out, "docker info") {
-		t.Errorf("expected the resolved check's command to be visible, got:\n%s", out)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("lastLines[%d] = %q, want %q", i, got[i], want[i])
+		}
 	}
 }
 
-func TestBootModel_RenderRightColumnShowsCommandForQueuedCheck(t *testing.T) {
+func TestLastLines_EmptyOutputReturnsNoLines(t *testing.T) {
+	if got := lastLines("", 3); len(got) != 0 {
+		t.Errorf("lastLines(\"\", 3) = %v, want empty", got)
+	}
+}
+
+func TestRecentWindowStart_KeepsOnlyLastNIndices(t *testing.T) {
+	if got := recentWindowStart(5, 3); got != 2 {
+		t.Errorf("recentWindowStart(5, 3) = %d, want 2", got)
+	}
+}
+
+func TestRecentWindowStart_NeverNegative(t *testing.T) {
+	if got := recentWindowStart(2, 3); got != 0 {
+		t.Errorf("recentWindowStart(2, 3) = %d, want 0", got)
+	}
+}
+
+func TestBootModel_RenderRightColumnShowsRealCommandAndOutputForRecentCheck(t *testing.T) {
+	m := bootModel{
+		checks: []preflight.Check{
+			{Name: "Docker daemon", OK: true, Detail: "running", Command: "docker info", Output: "Client:\n Version: 27.0.0\nServer:\n Containers: 3"},
+		},
+	}
+	out := m.renderRightColumn()
+	if !strings.Contains(out, "docker info") {
+		t.Errorf("expected the real command to be visible, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Containers: 3") {
+		t.Errorf("expected real command output to be visible, got:\n%s", out)
+	}
+}
+
+func TestBootModel_RenderRightColumnCollapsesChecksOutsideRecentWindow(t *testing.T) {
+	m := bootModel{
+		checks: []preflight.Check{
+			{Name: "Docker daemon", OK: true, Detail: "running", Command: "docker info", Output: "oldest output line"},
+			{Name: "Practice image", OK: true, Detail: "built", Command: "docker image inspect x", Output: "sha256:abc"},
+			{Name: "Ollama", OK: true, Detail: "reachable", Command: "GET /api/tags", Output: `{"models":[]}`},
+			{Name: "Tutor model", OK: true, Detail: "ready", Command: "GET /api/tags", Output: `{"models":[{"name":"x"}]}`},
+		},
+	}
+	out := m.renderRightColumn()
+	if strings.Contains(out, "oldest output line") {
+		t.Errorf("expected the oldest check (outside the last-3 window) to collapse and hide its output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "sha256:abc") {
+		t.Errorf("expected the 2nd-oldest check (within the last-3 window) to still show its output, got:\n%s", out)
+	}
+}
+
+func TestBootModel_RenderRightColumnQueuedCheckShowsNameOnlyNoCommand(t *testing.T) {
 	m := bootModel{
 		pending: []func() preflight.Check{
 			func() preflight.Check { return preflight.Check{Name: "Docker"} },
 			func() preflight.Check { return preflight.Check{Name: "Ollama"} },
 		},
 		checkNames: []string{"Docker daemon", "Ollama"},
-		checkCmds:  []string{"docker info", "GET http://localhost:11434/api/tags"},
 	}
 	out := m.renderRightColumn()
-	if !strings.Contains(out, "GET http://localhost:11434/api/tags") {
-		t.Errorf("expected the queued check's command to be visible, got:\n%s", out)
+	if !strings.Contains(out, "Ollama") {
+		t.Errorf("expected the queued check's name to be visible, got:\n%s", out)
+	}
+	if strings.Contains(out, "$") {
+		t.Errorf("expected no command to be shown for a check that hasn't been invoked yet, got:\n%s", out)
 	}
 }
 
