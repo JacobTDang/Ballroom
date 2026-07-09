@@ -6,11 +6,10 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-
-	"github.com/JacobTDang/Ballroom/internal/catalog"
+	"github.com/charmbracelet/lipgloss"
 )
 
-// menuChoice is one of the video-game-style main menu options.
+// menuChoice is one of the main menu options.
 type menuChoice int
 
 const (
@@ -27,10 +26,31 @@ var menuDescriptions = []string{
 	"See your progress across categories",
 }
 
-// menuModel is the title-screen selection: Practice / Sandbox / Stats,
-// with an animated mosaic banner (this is the one idle screen where
-// animation doesn't compete with reading a list, so it gets the full
-// shimmer treatment).
+// menuRightColWidth is the fixed content width of the right column —
+// wide enough for the longest line (the keybinding hint) — so the
+// selected row's highlight reads as a full-width bar rather than a
+// tight box around just the label text.
+const menuRightColWidth = 54
+
+var (
+	menuTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F2EBDD"))
+	menuSubtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B8680"))
+	menuRowHighlight  = lipgloss.NewStyle().Background(lipgloss.Color("#9B5FB0")).Foreground(lipgloss.Color("#000000")).Bold(true)
+	menuPanelStyle    = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#9B5FB0")).
+				Padding(1, 3)
+)
+
+// discoBallGrid is built once at package init — the shape is fixed, only
+// its sparkle colors animate, so there's no reason to recompute the
+// ellipse/shading math on every render.
+var discoBallGrid = buildDiscoBall(discoBallHeight, discoBallWidth)
+
+// menuModel is the title-screen selection: Practice / Sandbox / Stats, a
+// two-column dashboard — a static monochrome disco ball on the left (a
+// sparse subset of its mirror tiles glint with color on a timer) and the
+// menu on the right, framed in a single bordered panel.
 type menuModel struct {
 	cursor        int
 	phase         int
@@ -52,7 +72,7 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		return m, nil
+		return m, tea.ClearScreen
 
 	case tickMsg:
 		m.phase++
@@ -83,31 +103,41 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m menuModel) View() string {
+func (m menuModel) renderRightColumn() string {
 	var b strings.Builder
-	b.WriteString(catalog.MosaicBanner(m.phase))
 	b.WriteString("\n")
+	b.WriteString(menuTitleStyle.Render("Ballroom"))
+	b.WriteString("\n")
+	b.WriteString(menuSubtitleStyle.Render("Interview Prep"))
+	b.WriteString("\n\n\n")
 
 	for i, label := range menuLabels {
+		numLabel := fmt.Sprintf("%d. %s", i+1, label)
 		if i == m.cursor {
-			line := fmt.Sprintf("▸ %d. %s", i+1, label)
-			b.WriteString(cursorRowStyle.Render(line))
-			b.WriteString("\n  " + checkDimStyle.Render(menuDescriptions[i]))
+			row := fmt.Sprintf("❯ %-*s", menuRightColWidth-2, numLabel)
+			b.WriteString(menuRowHighlight.Render(row))
+			b.WriteString("\n  " + menuSubtitleStyle.Render(menuDescriptions[i]))
 		} else {
-			line := fmt.Sprintf("  %d. ", i+1) + categoryStyle.Render(label)
-			b.WriteString(line)
+			b.WriteString("  " + numLabel)
 		}
-		b.WriteString("\n\n")
+		b.WriteString("\n\n\n")
 	}
 
-	b.WriteString(checkDimStyle.Render("  ↑/↓ or j/k move · 1/2/3 jump · enter select · q quit"))
 	b.WriteString("\n")
+	b.WriteString(menuSubtitleStyle.Render("↑/↓ or j/k move · 1/2/3 jump · enter select · q quit"))
+	return b.String()
+}
 
-	content := b.String()
+func (m menuModel) View() string {
+	ball := renderDiscoBall(discoBallGrid, m.phase)
+	right := m.renderRightColumn()
+
+	panel := menuPanelStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, ball, "    ", right))
+
 	if m.width > 0 && m.height > 0 {
-		return placeBlock(m.width, m.height, content)
+		return placeBlock(m.width, m.height, panel)
 	}
-	return content
+	return panel
 }
 
 // RunMenu shows the main menu and blocks until the user picks an option
