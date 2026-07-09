@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -296,6 +297,31 @@ func TestBootModel_BuildDoneFailureAdvancesAsFailingImageCheck(t *testing.T) {
 	}
 	if !bm.ready {
 		t.Error("expected ready=true so the user isn't stuck — they can see the failure and quit")
+	}
+}
+
+func TestBootModel_RenderRightColumnShowsCommandForResolvedCheck(t *testing.T) {
+	m := bootModel{
+		checks: []preflight.Check{{Name: "Docker", OK: true, Detail: "running", Command: "docker info"}},
+	}
+	out := m.renderRightColumn()
+	if !strings.Contains(out, "docker info") {
+		t.Errorf("expected the resolved check's command to be visible, got:\n%s", out)
+	}
+}
+
+func TestBootModel_RenderRightColumnShowsCommandForQueuedCheck(t *testing.T) {
+	m := bootModel{
+		pending: []func() preflight.Check{
+			func() preflight.Check { return preflight.Check{Name: "Docker"} },
+			func() preflight.Check { return preflight.Check{Name: "Ollama"} },
+		},
+		checkNames: []string{"Docker daemon", "Ollama"},
+		checkCmds:  []string{"docker info", "GET http://localhost:11434/api/tags"},
+	}
+	out := m.renderRightColumn()
+	if !strings.Contains(out, "GET http://localhost:11434/api/tags") {
+		t.Errorf("expected the queued check's command to be visible, got:\n%s", out)
 	}
 }
 

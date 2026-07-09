@@ -9,7 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/JacobTDang/Ballroom/internal/catalog"
 	"github.com/JacobTDang/Ballroom/internal/config"
 	"github.com/JacobTDang/Ballroom/internal/orchestrator"
 	"github.com/JacobTDang/Ballroom/internal/preflight"
@@ -19,10 +18,6 @@ const (
 	ollamaHost = "http://localhost:11434"
 	tutorModel = "qwen2.5-coder:7b"
 )
-
-// bootBannerScale matches menuBannerScale — small enough for the
-// animated mosaic banner to sit beside the disco ball.
-const bootBannerScale = 1
 
 // maxStepLogLines caps how many of a single docker-build step's own
 // lines stay on screen — the step entry itself persists for the whole
@@ -97,6 +92,13 @@ type bootModel struct {
 	buildErrCh  <-chan error
 
 	width, height int
+
+	// checkNames/checkCmds mirror pending, one entry per slot, so a
+	// check's name and the command it's about to run can be shown while
+	// it's still queued — before it has a Check result to read those
+	// from.
+	checkNames []string
+	checkCmds  []string
 }
 
 func newBootModel(cfg config.Config) bootModel {
@@ -109,7 +111,26 @@ func newBootModel(cfg config.Config) bootModel {
 			func() preflight.Check { return preflight.CheckOllama(ollamaHost) },
 			func() preflight.Check { return preflight.CheckModel(ollamaHost, tutorModel) },
 		},
+		checkNames: []string{
+			preflight.CheckNameDocker,
+			preflight.CheckNameImage,
+			preflight.CheckNameOllama,
+			preflight.CheckNameModel,
+		},
+		checkCmds: []string{
+			"docker info",
+			fmt.Sprintf(`docker image inspect %s --format "{{.Id}}"`, image),
+			"GET " + ollamaHost + "/api/tags",
+			"GET " + ollamaHost + "/api/tags",
+		},
 	}
+}
+
+// buildCommand is the actual docker build invocation orchestrator.BuildImage
+// runs, shown next to the live build panel for the same reason every other
+// check shows its command.
+func (m bootModel) buildCommand() string {
+	return fmt.Sprintf("docker build -f docker/Dockerfile -t %s .", m.cfg.DockerImage)
 }
 
 func (m bootModel) Init() tea.Cmd {
@@ -221,35 +242,41 @@ func RunBoot(cfg config.Config) (proceed bool, err error) {
 	return !final.(bootModel).quit, nil
 }
 
+// checkRow formats one check line with its name, detail, and the actual
+// command it ran (or will run) — visible for both queued and resolved
+// checks, so it's never a mystery what's happening behind a checkmark.
+func checkRow(mark, name, detail, command string) string {
+	detail = fmt.Sprintf("%-24s", detail)
+	return fmt.Sprintf("  %s %-16s %s %s\n", mark, name, checkDimStyle.Render(detail), checkDimStyle.Render(truncateTitle(command, 60)))
+}
+
 // renderRightColumn renders the boot screen's right-hand content: the
-// same animated Ballroom banner moment as the main menu, then the live
-// checks / build log / continue prompt underneath it.
+// live checks (each with the command it ran or is about to run) / build
+// log / continue prompt. The animated Ballroom banner above this is
+// added by renderDashboardPanel, not here.
 func (m bootModel) renderRightColumn() string {
 	var b strings.Builder
-	b.WriteString(catalog.MosaicBannerScaled(m.phase, bootBannerScale))
-	b.WriteString("\n\n")
 
 	for _, c := range m.checks {
 		mark := checkOKStyle.Render("✓")
 		if !c.OK {
 			mark = checkFailStyle.Render("✗")
 		}
-		fmt.Fprintf(&b, "  %s %-16s %s\n", mark, c.Name, checkDimStyle.Render(c.Detail))
+		b.WriteString(checkRow(mark, c.Name, c.Detail, c.Command))
 	}
 
-	pendingCount := len(m.pending) - len(m.checks)
+	startIdx := len(m.checks)
 	if m.building {
-		fmt.Fprintf(&b, "  %s %-16s %s\n", hintStyle.Render("▾"), preflight.CheckNameImage,
-			checkDimStyle.Render("building — this can take a minute or two"))
+		b.WriteString(checkRow(hintStyle.Render("▾"), preflight.CheckNameImage, "building — this can take a minute or two", m.buildCommand()))
 		for _, step := range m.buildSteps {
 			for _, line := range step.lines {
 				fmt.Fprintf(&b, "      %s\n", buildLogStyle.Render(truncateTitle(line, 90)))
 			}
 		}
-		pendingCount-- // the image slot is shown above, not as "… checking"
+		startIdx++ // the image slot is shown above, not in the queued loop
 	}
-	for i := 0; i < pendingCount; i++ {
-		fmt.Fprintf(&b, "  %s\n", checkDimStyle.Render("… checking"))
+	for i := startIdx; i < len(m.pending); i++ {
+		b.WriteString(checkRow(checkDimStyle.Render("…"), m.checkNames[i], "queued", m.checkCmds[i]))
 	}
 
 	if m.ready {

@@ -2,6 +2,8 @@ package tui
 
 import (
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/JacobTDang/Ballroom/internal/catalog"
 )
 
 // The two-column dashboard layout (disco ball left, content right, framed
@@ -15,12 +17,24 @@ const (
 	dashboardMarginW = 4
 	dashboardMarginH = 2
 
-	// minPanelWidth/Height keep the panel usable on a tiny terminal
-	// instead of collapsing to nothing.
-	minPanelWidth  = 30
-	minPanelHeight = 12
+	// dashboardBorderPadW/H account for dashboardPanelStyle's own
+	// border (1 cell each side) and padding (1 row / 3 cols each side).
+	dashboardBorderPadW = 8
+	dashboardBorderPadH = 4
 
 	dashboardGapWidth = 4
+
+	// minPanelWidth is big enough that the ball, the gap, and at least a
+	// little text always fit without lipgloss having to word-wrap the
+	// joined two-column block — that wrapping doesn't respect the column
+	// boundaries and mangles the layout instead of degrading cleanly.
+	minPanelWidth  = discoBallWidth + dashboardBorderPadW + dashboardGapWidth + 20
+	minPanelHeight = 12
+
+	// bannerScaleSmall is the pixel-scale used for the animated mosaic
+	// banner in the right column — small enough to sit beside the disco
+	// ball instead of the full-width scale used nowhere else anymore.
+	bannerScaleSmall = 1
 )
 
 var dashboardGap = func() string {
@@ -59,13 +73,32 @@ func panelDimensions(termW, termH int) (w, h int) {
 	return w, h
 }
 
-// renderDashboardPanel joins the shared ball grid and right-column
-// content into the shared bordered two-column panel, sized to fill most
-// of the terminal at a fixed, content-independent size (lipgloss wraps
-// rather than grows the box past it) and top-aligned so the title/menu
-// always starts at the same spot regardless of ball height.
-func renderDashboardPanel(termW, termH, phase int, right string) string {
+// dashboardBanner picks the full animated mosaic "BALLROOM" banner when
+// it fits within availWidth, or falls back to the compact single-line
+// wordmark when the terminal is too narrow for it. Without this, a
+// terminal narrower than the full banner would force lipgloss to
+// word-wrap the already-joined ball+banner block, which doesn't respect
+// the column boundaries and spills text outside the panel border.
+func dashboardBanner(phase, availWidth int) string {
+	full := catalog.MosaicBannerScaled(phase, bannerScaleSmall)
+	if lipgloss.Width(full) <= availWidth {
+		return full
+	}
+	return catalog.CompactBanner()
+}
+
+// renderDashboardPanel joins the shared ball grid and an animated banner
+// (sized to fit) with the given right-column body into the shared
+// bordered two-column panel, sized to fill most of the terminal at a
+// fixed, content-independent size, top-aligned so the title/menu always
+// starts at the same spot regardless of ball height.
+func renderDashboardPanel(termW, termH, phase int, rightBody string) string {
 	panelW, panelH := panelDimensions(termW, termH)
+	innerW := panelW - dashboardBorderPadW
+	rightAvail := innerW - discoBallWidth - dashboardGapWidth
+
+	right := dashboardBanner(phase, rightAvail) + "\n\n" + rightBody
+
 	ball := renderDiscoBall(sharedBallGrid, phase)
 	content := lipgloss.JoinHorizontal(lipgloss.Top, ball, dashboardGap, right)
 	// Width/Height set the box excluding the border, so subtract it here

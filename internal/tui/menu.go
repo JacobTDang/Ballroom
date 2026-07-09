@@ -7,14 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-
-	"github.com/JacobTDang/Ballroom/internal/catalog"
 )
-
-// menuBannerScale is the pixel-scale used for the animated mosaic
-// "Ballroom" banner in the right column — small enough to sit beside the
-// disco ball instead of the full-width scale used nowhere else anymore.
-const menuBannerScale = 1
 
 // menuChoice is one of the main menu options.
 type menuChoice int
@@ -103,9 +96,6 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m menuModel) renderRightColumn() string {
 	var b strings.Builder
-	b.WriteString(catalog.MosaicBannerScaled(m.phase, menuBannerScale))
-	b.WriteString("\n\n")
-
 	for i, label := range menuLabels {
 		numLabel := fmt.Sprintf("%d. %s", i+1, label)
 		if i == m.cursor {
