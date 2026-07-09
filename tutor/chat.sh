@@ -60,9 +60,18 @@ apply_highlight() {
   fi
 
   # VimL single-quoted strings only need '' to escape a literal quote;
-  # nothing else is special inside them.
-  local vim_file="${file//\'/\'\'}"
-  local vim_note="${note//\'/\'\'}"
+  # nothing else is special inside them. Substituting via a variable
+  # holding a literal quote (rather than a \' literal in the pattern)
+  # avoids a real bash quoting trap: inside the surrounding double
+  # quotes, "${x//\'/\'\'}" doesn't produce a doubled quote at all — it
+  # inserts a literal backslash before each resulting quote (bash
+  # preserves the backslash rather than treating it as escaping the
+  # quote), which corrupts the escaping and makes nvim's expression
+  # parser reject ANY input containing a quote — apostrophes in
+  # ordinary text ("it's", "doesn't"), not just malicious input.
+  local q="'"
+  local vim_file="${file//$q/$q$q}"
+  local vim_note="${note//$q/$q$q}"
   expr="v:lua.require('ballroom_highlight').add_highlight('${vim_file}', ${start}, ${end}, '${vim_note}')"
 
   if ! out=$(nvim --server "$NVIM_SOCKET" --remote-expr "$expr" 2>&1); then
@@ -104,27 +113,35 @@ process_highlights() {
   sed -E "s/${HIGHLIGHT_DIRECTIVE_RE}//g" <<<"$text"
 }
 
-echo "tutor (${MODEL}, mode=${MODE}) — connected to ${OLLAMA_HOST}. Ctrl-D to exit."
+main() {
+  echo "tutor (${MODEL}, mode=${MODE}) — connected to ${OLLAMA_HOST}. Ctrl-D to exit."
 
-messages=$(jq -n --arg system "$SYSTEM_PROMPT" '[{role: "system", content: $system}]')
+  messages=$(jq -n --arg system "$SYSTEM_PROMPT" '[{role: "system", content: $system}]')
 
-while IFS= read -r -p '> ' line; do
-  [ -z "$line" ] && continue
+  while IFS= read -r -p '> ' line; do
+    [ -z "$line" ] && continue
 
-  messages=$(jq --arg content "$line" '. + [{role: "user", content: $content}]' <<<"$messages")
-  payload=$(jq -n --arg model "$MODEL" --argjson messages "$messages" \
-    '{model: $model, messages: $messages, stream: false, options: {temperature: 0.2}}')
+    messages=$(jq --arg content "$line" '. + [{role: "user", content: $content}]' <<<"$messages")
+    payload=$(jq -n --arg model "$MODEL" --argjson messages "$messages" \
+      '{model: $model, messages: $messages, stream: false, options: {temperature: 0.2}}')
 
-  if ! response=$(curl -sf "${OLLAMA_HOST}/api/chat" -d "$payload"); then
-    echo "tutor: could not reach ${OLLAMA_HOST}" >&2
-    continue
-  fi
+    if ! response=$(curl -sf "${OLLAMA_HOST}/api/chat" -d "$payload"); then
+      echo "tutor: could not reach ${OLLAMA_HOST}" >&2
+      continue
+    fi
 
-  reply=$(echo "$response" | jq -r '.message.content')
-  display_reply=$(process_highlights "$reply")
-  echo "$display_reply"
+    reply=$(echo "$response" | jq -r '.message.content')
+    display_reply=$(process_highlights "$reply")
+    echo "$display_reply"
 
-  messages=$(jq --arg content "$reply" '. + [{role: "assistant", content: $content}]' <<<"$messages")
-done
+    messages=$(jq --arg content "$reply" '. + [{role: "assistant", content: $content}]' <<<"$messages")
+  done
 
-echo
+  echo
+}
+
+# Guards the interactive loop so this script can be `source`d for testing
+# (see chat_test.sh) without dropping into a blocking read loop.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi

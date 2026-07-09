@@ -34,7 +34,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck docker/entrypoint.sh tutor/chat.sh
+        run: shellcheck docker/entrypoint.sh tutor/chat.sh tutor/chat_test.sh
+      - name: install neovim
+        # tutor/chat_test.sh's live RPC checks (the actual verification that
+        # untrusted directive content can't break out of the --remote-expr
+        # call — see docker/nvim/lua/ballroom_highlight.lua) need a real
+        # nvim binary; without it those checks silently skip instead of
+        # actually running. Installing it here is what makes that coverage
+        # real in CI rather than only when a contributor happens to have
+        # nvim locally.
+        run: sudo apt-get update && sudo apt-get install -y neovim
+      - name: tutor/chat.sh tests
+        run: bash tutor/chat_test.sh
 
   docker-build:
     runs-on: ubuntu-latest
