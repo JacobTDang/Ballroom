@@ -29,7 +29,7 @@ func captureUsage(t *testing.T) string {
 func TestPrintUsage_MentionsEverySubcommand(t *testing.T) {
 	out := captureUsage(t)
 	for _, want := range []string{
-		"ballroom", "home", "practice <id>", "sandbox", "submit", "help",
+		"ballroom", "home", "practice <id>", "sandbox", "submit", "return", "help",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("usage output missing %q:\n%s", want, out)
@@ -62,5 +62,52 @@ func TestPracticeCmd_UnknownIDReturnsClearError(t *testing.T) {
 	err := practiceCmd([]string{"does-not-exist"})
 	if err == nil || !strings.Contains(err.Error(), "unknown exercise") {
 		t.Errorf("error = %v, want it to mention \"unknown exercise\"", err)
+	}
+}
+
+// clearSessionEnv unsets the session-scoped env vars orchestrator.RunExercise
+// sets via `docker run -e`, so tests start from a known "on the host"
+// baseline regardless of what's in the ambient environment.
+func clearSessionEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("PRACTICE_WORKSPACE_DIR", "")
+	t.Setenv("PRACTICE_CONTROL_DIR", "")
+	t.Setenv("PRACTICE_STARTED_AT", "")
+}
+
+func TestIsSessionContext_TrueWhenAllSessionVarsSet(t *testing.T) {
+	clearSessionEnv(t)
+	t.Setenv("PRACTICE_WORKSPACE_DIR", "/workspace")
+	t.Setenv("PRACTICE_CONTROL_DIR", "/control")
+	t.Setenv("PRACTICE_STARTED_AT", "2026-07-08T00:00:00Z")
+
+	if !isSessionContext() {
+		t.Error("isSessionContext() = false, want true when all session env vars are set")
+	}
+}
+
+func TestIsSessionContext_FalseOnHost(t *testing.T) {
+	clearSessionEnv(t)
+
+	if isSessionContext() {
+		t.Error("isSessionContext() = true, want false when no session env vars are set")
+	}
+}
+
+func TestIsSessionContext_FalseWhenOnlyPartiallySet(t *testing.T) {
+	clearSessionEnv(t)
+	t.Setenv("PRACTICE_WORKSPACE_DIR", "/workspace")
+
+	if isSessionContext() {
+		t.Error("isSessionContext() = true, want false when only some session env vars are set")
+	}
+}
+
+func TestReturnCmd_ErrorsOutsideSession(t *testing.T) {
+	clearSessionEnv(t)
+
+	err := returnCmd()
+	if err == nil || !strings.Contains(err.Error(), "not running inside an active practice session") {
+		t.Errorf("returnCmd() outside a session = %v, want an error about not being in a session", err)
 	}
 }
