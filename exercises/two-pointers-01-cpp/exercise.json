@@ -2,7 +2,7 @@
   "id": "two-pointers-01-cpp",
   "problem_id": "two-pointers-01",
   "title": "Two Sum II (sorted input)",
-  "category": "two-pointers",
+  "category": "dsa",
   "language": "cpp",
   "time_limit_min": 25,
   "tutor_mode": "hints-first",

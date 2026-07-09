@@ -63,13 +63,6 @@ func Open(path string) (*Tracker, error) {
 		db.Close()
 		return nil, fmt.Errorf("tracker: migrate pattern category: %w", err)
 	}
-	// "dsa" only ever held two-pointers-01, now recategorized into the
-	// NeetCode roadmap's own "two-pointers" bucket — same reasoning as
-	// the pattern->dsa migration above.
-	if _, err := db.Exec(`UPDATE attempts SET category = 'two-pointers' WHERE category = 'dsa'`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("tracker: migrate dsa category: %w", err)
-	}
 	return &Tracker{db: db}, nil
 }
 
