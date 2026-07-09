@@ -13,10 +13,10 @@ import (
 const recentAttemptsLimit = 10
 
 // Run shows the boot screen once, then loops the main menu: Practice
-// opens the pattern tree (itself a loop — you can work through several
-// exercises before going back), Sandbox launches directly, and Stats
-// shows progress. Each returns to the menu when done, until the user
-// quits from there.
+// opens a chain of popups — category, then problem, then language
+// (itself a loop — you can work through several exercises before going
+// back) — Sandbox launches directly, and Stats shows progress. Each
+// returns to the menu when done, until the user quits from there.
 //
 // The practice image itself is ensured (built if missing, stale builds
 // cleaned up) inside orchestrator.RunExercise/RunSandbox, not here — that
@@ -55,19 +55,40 @@ func Run(cfg config.Config) error {
 	}
 }
 
-// runPracticeLoop shows the pattern tree and, each time an exercise
-// finishes, reopens it with refreshed status until the user backs out to
-// the main menu. Selecting a problem doesn't launch it directly — a
-// language popup asks which variant to practice first; backing out of
-// that popup returns to the tree rather than the main menu.
+// runPracticeLoop shows the category popup and, for whichever category is
+// picked, drills into the problem popup until the user backs out to the
+// main menu.
 func runPracticeLoop(cfg config.Config) error {
 	for {
 		statuses, err := catalog.List(cfg)
 		if err != nil {
 			return err
 		}
+		problems := catalog.GroupByProblem(statuses)
 
-		problem, ok, err := RunTree(statuses)
+		category, ok, err := RunCategoryPicker(problems)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+
+		if err := runProblemLoop(cfg, problems, category); err != nil {
+			return err
+		}
+	}
+}
+
+// runProblemLoop shows the problem popup for one category and, each time
+// an exercise finishes, reopens it with refreshed status until the user
+// backs out to the category popup. Selecting a problem doesn't launch it
+// directly — a language popup asks which variant to practice first;
+// backing out of that popup returns to the problem list rather than the
+// category popup.
+func runProblemLoop(cfg config.Config, problems []catalog.ProblemStatus, category string) error {
+	for {
+		problem, ok, err := RunProblemPicker(problems, category)
 		if err != nil {
 			return err
 		}
@@ -86,6 +107,12 @@ func runPracticeLoop(cfg config.Config) error {
 		if runErr := orchestrator.RunExercise(cfg, variant.Exercise); runErr != nil {
 			fmt.Fprintf(os.Stderr, "ballroom: %v\n", runErr)
 		}
+
+		statuses, err := catalog.List(cfg)
+		if err != nil {
+			return err
+		}
+		problems = catalog.GroupByProblem(statuses)
 	}
 }
 

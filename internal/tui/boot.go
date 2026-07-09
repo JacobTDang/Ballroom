@@ -119,7 +119,11 @@ func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		return m, nil
+		// A resize (especially a big jump, e.g. small window -> full
+		// screen) can leave stale content from the old, differently-
+		// centered render behind — force a full repaint instead of
+		// relying on line-by-line diffing to catch it.
+		return m, tea.ClearScreen
 
 	case tickMsg:
 		m.phase++

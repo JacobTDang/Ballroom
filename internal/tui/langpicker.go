@@ -36,7 +36,7 @@ func (m langPickerModel) Init() tea.Cmd { return nil }
 func (m langPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if sizeMsg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width, m.height = sizeMsg.Width, sizeMsg.Height
-		return m, nil
+		return m, tea.ClearScreen
 	}
 
 	keyMsg, ok := msg.(tea.KeyMsg)
