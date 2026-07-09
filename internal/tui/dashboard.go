@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/JacobTDang/Ballroom/internal/catalog"
@@ -87,17 +89,54 @@ func dashboardBanner(phase, availWidth int) string {
 	return catalog.CompactBanner()
 }
 
+// centerRightColumn centers the right-column block (banner + body) within
+// the width available for it — see renderDashboardPanel's doc comment for
+// why: on a wide terminal, the block is narrower than the space reserved
+// for it, and left-hugging the gap next to the ball leaves all the slack
+// as dead space against the panel's right border instead of balancing it
+// on both sides.
+//
+// Deliberately not lipgloss.PlaceHorizontal: it centers each line of a
+// multi-line block independently against its own width, so a banner row
+// and a shorter checklist row below it would end up with different left
+// margins — every line here needs the *same* left margin (based on the
+// block's widest line) so the banner and the body text underneath it
+// stay aligned with each other.
+func centerRightColumn(right string, avail int) string {
+	lines := strings.Split(right, "\n")
+	maxW := 0
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > maxW {
+			maxW = w
+		}
+	}
+	pad := (avail - maxW) / 2
+	if pad <= 0 {
+		return right
+	}
+	margin := strings.Repeat(" ", pad)
+	for i, l := range lines {
+		lines[i] = margin + l
+	}
+	return strings.Join(lines, "\n")
+}
+
 // renderDashboardPanel joins the shared ball grid and an animated banner
 // (sized to fit) with the given right-column body into the shared
 // bordered two-column panel, sized to fill most of the terminal at a
 // fixed, content-independent size, top-aligned so the title/menu always
-// starts at the same spot regardless of ball height.
+// starts at the same spot regardless of ball height. The right column is
+// centered within its available width rather than left-hugging the gap —
+// on a wide terminal the banner+body block otherwise sits flush against
+// the ball with a large dead gap between it and the panel's right edge;
+// centering closes that gap symmetrically on both sides instead.
 func renderDashboardPanel(termW, termH, phase int, rightBody string) string {
 	panelW, panelH := panelDimensions(termW, termH)
 	innerW := panelW - dashboardBorderPadW
 	rightAvail := innerW - discoBallWidth - dashboardGapWidth
 
 	right := dashboardBanner(phase, rightAvail) + "\n\n" + rightBody
+	right = centerRightColumn(right, rightAvail)
 
 	ball := renderDiscoBall(sharedBallGrid, phase)
 	content := lipgloss.JoinHorizontal(lipgloss.Top, ball, dashboardGap, right)

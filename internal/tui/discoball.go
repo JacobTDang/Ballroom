@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"math"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -16,9 +15,17 @@ const (
 	discoBallWidth  = 48
 )
 
-// discoShades goes dim -> bright; used for the mirror-ball's directional
-// shading (denser characters catch more "light").
+// discoShades goes dim -> bright; the full set of characters a rendered
+// ball ever uses (see discoTileSequence for the order they're tiled in).
 var discoShades = []rune{'.', ':', '*', '%', '#'}
+
+// discoTileSequence is the repeating bright->dim mirror-tile unit, tiled
+// diagonally across the ball (see buildDiscoBall) to produce banded
+// facets rather than a single smooth light-source gradient — modeled on
+// a hand-drawn ASCII disco-ball reference. Each character repeats twice
+// so the bands read clearly at terminal resolution instead of dissolving
+// into per-column flicker.
+var discoTileSequence = []rune{'%', '%', '#', '#', '*', '*', ':', ':', '.', '.'}
 
 var (
 	discoBallDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B6B6B"))
@@ -43,17 +50,17 @@ type discoBallCell struct {
 // buildDiscoBall computes a static circular mirror-ball texture: an
 // ellipse mask (width intentionally ~2x height, since typical terminal
 // character cells are roughly twice as tall as wide — without that
-// correction the "circle" reads as a tall oval), filled with a shading
-// gradient simulating a single light source (denser characters closer to
-// the light, sparser toward the shadowed edge) plus a sparse dotted grid
-// evoking individual mirror tiles. A small, fixed fraction of tiles are
-// marked sparkle=true — which ones is deterministic (not random per
-// call), only their *color* animates, via renderDiscoBall's phase.
+// correction the "circle" reads as a tall oval), filled by tiling
+// discoTileSequence diagonally (indexed by row+col) so the facets read as
+// banded mirror tiles catching light at an angle, rather than a single
+// smooth gradient. A small set of tiles in the equator band (see
+// sparkleAt) are marked sparkle=true — which ones is deterministic (not
+// random per call), only their *color* animates, via renderDiscoBall's
+// phase.
 func buildDiscoBall(height, width int) [][]discoBallCell {
 	grid := make([][]discoBallCell, height)
 	cx, cy := float64(width)/2, float64(height)/2
 	rx, ry := float64(width)/2, float64(height)/2
-	lightX, lightY := cx-rx*0.5, cy-ry*0.6
 
 	for row := 0; row < height; row++ {
 		grid[row] = make([]discoBallCell, width)
@@ -65,35 +72,43 @@ func buildDiscoBall(height, width int) [][]discoBallCell {
 				continue
 			}
 
-			// Sparse dotted grid lines (mirror tile borders) — not a
-			// solid overlay, so it still reads as shaded rather than
-			// gridded-over.
-			if row%2 == 0 && col%3 == 0 {
-				grid[row][col] = discoBallCell{ch: '.', sparkle: sparkleAt(row, col)}
-				continue
+			idx := (row + col) % len(discoTileSequence)
+			grid[row][col] = discoBallCell{
+				ch:      discoTileSequence[idx],
+				sparkle: sparkleAt(row, col, height),
 			}
-
-			dx := float64(col) - lightX
-			dy := (float64(row) - lightY) * 2 // correct for cell aspect ratio
-			lightDist := math.Sqrt(dx*dx+dy*dy) / (rx * 1.4)
-			idx := len(discoShades) - 1 - int(lightDist*float64(len(discoShades)))
-			if idx < 0 {
-				idx = 0
-			}
-			if idx >= len(discoShades) {
-				idx = len(discoShades) - 1
-			}
-
-			grid[row][col] = discoBallCell{ch: discoShades[idx], sparkle: sparkleAt(row, col)}
 		}
 	}
 	return grid
 }
 
-// sparkleAt deterministically marks roughly 12% of cells as glint
-// candidates, scattered rather than clustered.
-func sparkleAt(row, col int) bool {
-	return (row*31+col*17)%100 < 12
+// discoClusterRowSpacing/ColSpacing/Size lay shimmer clusters out on a
+// coarse grid within the equator band — small discoClusterSize x
+// discoClusterSize clumps of glint, spaced apart, rather than scattered
+// single cells, so it reads as a few mirror tiles catching light instead
+// of random color noise.
+const (
+	discoClusterRowSpacing = 4
+	discoClusterColSpacing = 6
+	discoClusterSize       = 2
+)
+
+// sparkleAt marks cells belonging to a small cluster on that coarse grid,
+// restricted to the equator band (the middle third of the ball's height)
+// — where a spinning mirror ball actually catches and scatters the most
+// light. Alternating cluster rows are horizontally offset so the clusters
+// don't line up into a rigid, obviously-mechanical grid.
+func sparkleAt(row, col, height int) bool {
+	top, bottom := height/3, height-height/3
+	if row < top || row >= bottom {
+		return false
+	}
+	bandRow := row - top
+	rowBand := bandRow / discoClusterRowSpacing
+	colOffset := (rowBand % 2) * (discoClusterColSpacing / 2)
+	localCol := col + colOffset
+	return bandRow%discoClusterRowSpacing < discoClusterSize &&
+		localCol%discoClusterColSpacing < discoClusterSize
 }
 
 // sparkleColorIndex picks a discoSparkleStyles index for a glinting
