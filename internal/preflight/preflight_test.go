@@ -119,3 +119,70 @@ func TestCheckModel_ReportsNotOKWhenMissing(t *testing.T) {
 		t.Error("expected a non-empty detail message with the pull command")
 	}
 }
+
+func TestListModels_ReturnsAllPulledModelNames(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(sampleTagsJSON))
+	}))
+	defer srv.Close()
+
+	names, err := ListModels(srv.URL)
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	want := []string{"qwen2.5-coder:7b", "qwen2.5-coder:1.5b"}
+	if len(names) != len(want) {
+		t.Fatalf("ListModels = %v, want %v", names, want)
+	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Errorf("ListModels[%d] = %q, want %q", i, names[i], want[i])
+		}
+	}
+}
+
+func TestListModels_EmptyModelsListReturnsEmptySlice(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"models": []}`))
+	}))
+	defer srv.Close()
+
+	names, err := ListModels(srv.URL)
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(names) != 0 {
+		t.Errorf("ListModels = %v, want empty", names)
+	}
+}
+
+func TestListModels_UnreachableHostReturnsError(t *testing.T) {
+	_, err := ListModels("http://127.0.0.1:1")
+	if err == nil {
+		t.Fatal("expected an error for an unreachable host, got nil")
+	}
+}
+
+func TestListModels_MalformedJSONReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`not json`))
+	}))
+	defer srv.Close()
+
+	_, err := ListModels(srv.URL)
+	if err == nil {
+		t.Fatal("expected an error for malformed JSON, got nil")
+	}
+}
+
+func TestListModels_NonOKStatusReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	_, err := ListModels(srv.URL)
+	if err == nil {
+		t.Fatal("expected an error for a non-OK status, got nil")
+	}
+}

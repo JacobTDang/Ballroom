@@ -15,10 +15,7 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/preflight"
 )
 
-const (
-	ollamaHost = "http://localhost:11434"
-	tutorModel = "qwen2.5-coder:7b"
-)
+const ollamaHost = "http://localhost:11434"
 
 // maxStepLogLines caps how many of a single docker-build step's own
 // lines stay on screen — the step entry itself persists for the whole
@@ -173,7 +170,7 @@ func newBootModel(cfg config.Config) bootModel {
 			// `docker image inspect` call first just to discard it.
 			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameImage} },
 			func() preflight.Check { return preflight.CheckOllama(ollamaHost) },
-			func() preflight.Check { return preflight.CheckModel(ollamaHost, tutorModel) },
+			func() preflight.Check { return preflight.CheckModel(ollamaHost, cfg.TutorModel) },
 		},
 		checkNames: []string{
 			preflight.CheckNameDocker,

@@ -57,6 +57,28 @@ func TestMenuModel_EnterChoosesHighlightedOption(t *testing.T) {
 	}
 }
 
+func TestMenuModel_NumberFourJumpsToModelOption(t *testing.T) {
+	m := newMenuModel()
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	if newM.(menuModel).cursor != 3 {
+		t.Errorf("pressing 4 should jump cursor to index 3, got %d", newM.(menuModel).cursor)
+	}
+}
+
+func TestMenuModel_EnterOnModelOptionChoosesMenuModelPicker(t *testing.T) {
+	m := newMenuModel()
+	m.cursor = 3 // Model
+
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected enter to return a quit command")
+	}
+	mm := newM.(menuModel)
+	if mm.choice != menuModelPicker {
+		t.Errorf("choice = %v, want menuModelPicker", mm.choice)
+	}
+}
+
 func TestMenuModel_QRequestsQuitWithoutChoosing(t *testing.T) {
 	m := newMenuModel()
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})

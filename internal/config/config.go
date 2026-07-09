@@ -3,12 +3,23 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 )
 
 const defaultDockerImage = "ballroom-practice"
+
+// DefaultTutorModel is the Ollama model used when nothing has been
+// persisted to settings.json yet (first run, before the user has ever
+// picked a model). Must match tutor/chat.sh's own fallback so the two
+// stay in sync.
+const DefaultTutorModel = "qwen2.5-coder:7b"
+
+// settingsFileName is the persisted user-settings file, stored under
+// Config.DataDir alongside tracker.db.
+const settingsFileName = "settings.json"
 
 // Config holds resolved filesystem paths and settings for one invocation
 // of the launcher.
@@ -19,6 +30,53 @@ type Config struct {
 	DataDir      string // Root/data
 	DBPath       string // DataDir/tracker.db
 	DockerImage  string
+	TutorModel   string // Ollama model tag passed to the container as TUTOR_MODEL
+}
+
+// Settings holds user preferences persisted across invocations, e.g. the
+// last Ollama model picked in the TUI's model picker.
+type Settings struct {
+	TutorModel string `json:"tutor_model"`
+}
+
+// SettingsPath returns the path to the persisted settings file.
+func (c Config) SettingsPath() string {
+	return filepath.Join(c.DataDir, settingsFileName)
+}
+
+// LoadSettings reads persisted settings from path. A missing file returns
+// a zero-value Settings, not an error — there's simply nothing persisted
+// yet on first run. A present-but-malformed file is a real error (fail
+// loud rather than silently discarding whatever the user last picked).
+func LoadSettings(path string) (Settings, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Settings{}, nil
+		}
+		return Settings{}, fmt.Errorf("config: read settings: %w", err)
+	}
+	var s Settings
+	if err := json.Unmarshal(data, &s); err != nil {
+		return Settings{}, fmt.Errorf("config: parse settings %s: %w", path, err)
+	}
+	return s, nil
+}
+
+// SaveSettings persists s to path, creating the parent directory if it
+// doesn't exist yet.
+func SaveSettings(path string, s Settings) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("config: create settings dir: %w", err)
+	}
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return fmt.Errorf("config: marshal settings: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("config: write settings: %w", err)
+	}
+	return nil
 }
 
 // Load resolves Config from the environment. Root defaults to the current
@@ -45,14 +103,25 @@ func Load() (Config, error) {
 		image = defaultDockerImage
 	}
 
-	return Config{
+	cfg := Config{
 		Root:         root,
 		ExercisesDir: filepath.Join(root, "exercises"),
 		TestsDir:     filepath.Join(root, "tests"),
 		DataDir:      filepath.Join(root, "data"),
 		DBPath:       filepath.Join(root, "data", "tracker.db"),
 		DockerImage:  image,
-	}, nil
+	}
+
+	settings, err := LoadSettings(cfg.SettingsPath())
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.TutorModel = settings.TutorModel
+	if cfg.TutorModel == "" {
+		cfg.TutorModel = DefaultTutorModel
+	}
+
+	return cfg, nil
 }
 
 // ExercisePath returns the path to exercise <id>'s definition file.

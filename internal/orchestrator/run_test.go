@@ -1,0 +1,70 @@
+package orchestrator
+
+import (
+	"testing"
+	"time"
+
+	"github.com/JacobTDang/Ballroom/internal/config"
+	"github.com/JacobTDang/Ballroom/internal/exercise"
+)
+
+func containsFlag(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestExerciseRunArgs_IncludesTutorModelEnvFromConfig(t *testing.T) {
+	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
+	ex := exercise.Exercise{ID: "two-pointers-01-go", Category: "pattern", Language: "go", TutorMode: "hint", TestCommand: "go test ./..."}
+
+	args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now())
+
+	if !containsFlag(args, "-e") || !containsFlag(args, "TUTOR_MODEL=llama3:8b") {
+		t.Errorf("expected TUTOR_MODEL=llama3:8b to be passed as an -e flag, got %v", args)
+	}
+}
+
+func TestExerciseRunArgs_DifferentModelProducesDifferentFlag(t *testing.T) {
+	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "qwen2.5-coder:7b"}
+	ex := exercise.Exercise{ID: "two-pointers-01-go", Category: "pattern", Language: "go", TutorMode: "hint", TestCommand: "go test ./..."}
+
+	args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now())
+
+	if !containsFlag(args, "TUTOR_MODEL=qwen2.5-coder:7b") {
+		t.Errorf("expected TUTOR_MODEL=qwen2.5-coder:7b, got %v", args)
+	}
+	if containsFlag(args, "TUTOR_MODEL=llama3:8b") {
+		t.Errorf("did not expect a stale model flag, got %v", args)
+	}
+}
+
+func TestExerciseRunArgs_StillIncludesExistingPracticeEnvVars(t *testing.T) {
+	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
+	ex := exercise.Exercise{ID: "two-pointers-01-go", Category: "pattern", Language: "go", TutorMode: "hint", TestCommand: "go test ./..."}
+
+	args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now())
+
+	if !containsFlag(args, "PRACTICE_EXERCISE_ID=two-pointers-01-go") {
+		t.Errorf("expected PRACTICE_EXERCISE_ID to still be set, got %v", args)
+	}
+	if !containsFlag(args, "ballroom-practice") {
+		t.Errorf("expected the docker image to still be the final arg, got %v", args)
+	}
+}
+
+func TestSandboxRunArgs_IncludesTutorModelEnvFromConfig(t *testing.T) {
+	cfg := config.Config{DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
+
+	args := sandboxRunArgs(cfg)
+
+	if !containsFlag(args, "TUTOR_MODEL=llama3:8b") {
+		t.Errorf("expected TUTOR_MODEL=llama3:8b to be passed as an -e flag, got %v", args)
+	}
+	if !containsFlag(args, "ballroom-practice") {
+		t.Errorf("expected the docker image to still be the final arg, got %v", args)
+	}
+}
