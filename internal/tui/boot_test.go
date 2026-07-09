@@ -353,6 +353,44 @@ func TestLastLines_EmptyOutputReturnsNoLines(t *testing.T) {
 	}
 }
 
+func TestLastBuildLines_CapsAcrossAllStepsNotPerStep(t *testing.T) {
+	steps := []buildStepLog{
+		{id: "#1", lines: []string{"a", "b", "c"}},
+		{id: "#2", lines: []string{"d", "e", "f"}},
+		{id: "#3", lines: []string{"g", "h", "i"}},
+	}
+	got := lastBuildLines(steps, 3)
+	want := []string{"g", "h", "i"}
+	if len(got) != len(want) {
+		t.Fatalf("lastBuildLines = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("lastBuildLines[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestBootModel_RenderRightColumnCapsBuildLogToThreeLinesTotal(t *testing.T) {
+	m := bootModel{
+		checks:   []preflight.Check{{Name: "Docker", OK: true}},
+		building: true,
+		buildSteps: []buildStepLog{
+			{id: "#1", lines: []string{"step one line"}},
+			{id: "#2", lines: []string{"step two line"}},
+			{id: "#3", lines: []string{"step three line"}},
+			{id: "#4", lines: []string{"step four line"}},
+		},
+	}
+	out := m.renderRightColumn()
+	if strings.Contains(out, "step one line") {
+		t.Errorf("expected the build log to cap at the last 3 lines total across all steps, got:\n%s", out)
+	}
+	if !strings.Contains(out, "step four line") {
+		t.Errorf("expected the most recent build line to be visible, got:\n%s", out)
+	}
+}
+
 func TestBootModel_RenderRightColumnShowsRealCommandAndOutputForRecentCheck(t *testing.T) {
 	m := bootModel{
 		checks: []preflight.Check{

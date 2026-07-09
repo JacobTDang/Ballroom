@@ -90,6 +90,21 @@ func lastBuildStepOutput(steps []buildStepLog) string {
 	return strings.Join(steps[len(steps)-1].lines, "\n")
 }
 
+// lastBuildLines flattens every step's lines (in order) and returns at
+// most the last n across the whole build — a real build has far more
+// steps than fit on screen, so the live panel needs one rolling window
+// over the whole stream, not a per-step cap that grows with step count.
+func lastBuildLines(steps []buildStepLog, n int) []string {
+	var all []string
+	for _, step := range steps {
+		all = append(all, step.lines...)
+	}
+	if len(all) > n {
+		all = all[len(all)-n:]
+	}
+	return all
+}
+
 // buildStepLog groups the docker-build output lines belonging to one
 // step (identified by its leading "#NN" token) — the step itself stays
 // on screen for the whole build, but only its most recent
@@ -335,10 +350,8 @@ func (m bootModel) renderRightColumn() string {
 	startIdx := len(m.checks)
 	if m.building {
 		b.WriteString(expandedCheckRow(hintStyle.Render("▾"), preflight.CheckNameImage, m.buildCommand(), ""))
-		for _, step := range m.buildSteps {
-			for _, line := range step.lines {
-				fmt.Fprintf(&b, "      %s\n", buildLogStyle.Render(truncateTitle(line, 90)))
-			}
+		for _, line := range lastBuildLines(m.buildSteps, maxOutputLines) {
+			fmt.Fprintf(&b, "      %s\n", buildLogStyle.Render(truncateTitle(line, 90)))
 		}
 		startIdx++ // the image slot is shown above, not in the queued loop
 	}
