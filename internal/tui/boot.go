@@ -315,11 +315,15 @@ func RunBoot(cfg config.Config) (proceed bool, err error) {
 	return !final.(bootModel).quit, nil
 }
 
-// collapsedCheckRow is a compact one-liner for a check that's aged out
-// of the recent window: mark, name, and its final detail — no command or
-// output, keeping settled history out of the way.
+// collapsedCheckRow is a compact summary for a check that's aged out of
+// the recent window: mark + name on one line, its final detail indented
+// below (matching expandedCheckRow's shape) — no command or output,
+// keeping settled history out of the way.
 func collapsedCheckRow(mark, name, detail string) string {
-	return fmt.Sprintf("  %s %-16s %s\n", mark, name, checkDimStyle.Render(detail))
+	var b strings.Builder
+	fmt.Fprintf(&b, "  %s %s\n", mark, name)
+	fmt.Fprintf(&b, "      %s\n", checkDimStyle.Render(detail))
+	return b.String()
 }
 
 // expandedCheckRow shows a check with its real invoked command and up to
