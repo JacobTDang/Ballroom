@@ -147,7 +147,7 @@ func TestBootModel_TickAdvancesPhaseAndReschedules(t *testing.T) {
 	}
 }
 
-func TestBootModel_ImageNotOkTriggersLiveBuildInsteadOfFailing(t *testing.T) {
+func TestBootModel_DockerOkAlwaysTriggersLiveBuildForImageCheck(t *testing.T) {
 	lineCh := make(chan string)
 	errCh := make(chan error)
 	defer fakeBuildImage(lineCh, errCh)()
@@ -155,12 +155,12 @@ func TestBootModel_ImageNotOkTriggersLiveBuildInsteadOfFailing(t *testing.T) {
 	m := bootModel{
 		pending: []func() preflight.Check{
 			func() preflight.Check { return preflight.Check{Name: "Docker", OK: true} },
-			func() preflight.Check { return preflight.Check{Name: "Image", OK: false, Detail: "not built"} },
+			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameImage} },
 		},
 		checks: []preflight.Check{{Name: "Docker", OK: true}},
 	}
 
-	newM, cmd := m.Update(checkDoneMsg(preflight.Check{Name: "Image", OK: false, Detail: "not built"}))
+	newM, cmd := m.Update(checkDoneMsg(preflight.Check{Name: preflight.CheckNameImage}))
 	if cmd == nil {
 		t.Fatal("expected a command to wait for build output")
 	}
@@ -176,21 +176,31 @@ func TestBootModel_ImageNotOkTriggersLiveBuildInsteadOfFailing(t *testing.T) {
 	}
 }
 
-func TestBootModel_ImageOkDoesNotTriggerBuild(t *testing.T) {
+func TestBootModel_ImageAlreadyBuiltStillTriggersLiveBuild(t *testing.T) {
+	// Docker's own layer cache makes a rebuild of an unchanged image
+	// fast (every step shows CACHED) — this is the only way to show
+	// real build output either way, so it always runs, even when the
+	// image already exists.
+	lineCh := make(chan string)
+	errCh := make(chan error)
+	defer fakeBuildImage(lineCh, errCh)()
+
 	m := bootModel{
 		pending: []func() preflight.Check{
 			func() preflight.Check { return preflight.Check{Name: "Docker", OK: true} },
-			func() preflight.Check { return preflight.Check{Name: "Image", OK: true} },
+			func() preflight.Check {
+				return preflight.Check{Name: preflight.CheckNameImage, OK: true, Detail: "built"}
+			},
 		},
 		checks: []preflight.Check{{Name: "Docker", OK: true}},
 	}
-	newM, _ := m.Update(checkDoneMsg(preflight.Check{Name: "Image", OK: true, Detail: "built"}))
-	bm := newM.(bootModel)
-	if bm.building {
-		t.Error("should not start a build when the image check already passed")
+	newM, cmd := m.Update(checkDoneMsg(preflight.Check{Name: preflight.CheckNameImage, OK: true, Detail: "built"}))
+	if cmd == nil {
+		t.Fatal("expected a command to wait for build output even when the image check already passed")
 	}
-	if len(bm.checks) != 2 {
-		t.Errorf("expected the image check to be appended normally, got %+v", bm.checks)
+	bm := newM.(bootModel)
+	if !bm.building {
+		t.Error("expected building=true so the (cached) build output is still shown")
 	}
 }
 

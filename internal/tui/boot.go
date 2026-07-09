@@ -36,11 +36,6 @@ const maxOutputLines = 3
 // can zero it out instead of actually sleeping.
 var checkStartDelay = 250 * time.Millisecond
 
-// imageCheckIndex is the pending-checks slot for the image check — the
-// one that gets special "build it live" treatment instead of just
-// reporting a plain pass/fail. See newBootModel for the fixed check order.
-const imageCheckIndex = 1
-
 var (
 	checkOKStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#2FA6A6")).Bold(true)
 	checkFailStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F03C3C")).Bold(true)
@@ -153,12 +148,15 @@ type bootModel struct {
 }
 
 func newBootModel(cfg config.Config) bootModel {
-	image := cfg.DockerImage
 	return bootModel{
 		cfg: cfg,
 		pending: []func() preflight.Check{
 			preflight.CheckDocker,
-			func() preflight.Check { return preflight.CheckImage(image) },
+			// The image slot's own result is never used — checkDoneMsg
+			// always runs a real `docker build` here instead (see
+			// imageCheckIndex), so there's no point spending a
+			// `docker image inspect` call first just to discard it.
+			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameImage} },
 			func() preflight.Check { return preflight.CheckOllama(ollamaHost) },
 			func() preflight.Check { return preflight.CheckModel(ollamaHost, tutorModel) },
 		},
@@ -234,11 +232,17 @@ func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case checkDoneMsg:
 		check := preflight.Check(msg)
-		// The image check gets special handling: if it's not OK but
-		// Docker (already resolved, one slot earlier) is reachable,
-		// build it live right here instead of just reporting failure.
-		if len(m.checks) == imageCheckIndex && !check.OK && m.checks[0].OK {
-			lineCh, errCh := orchestrator.BuildImage(m.cfg)
+		// The image check always runs a real `docker build` live right
+		// here instead of just inspecting whether the tag exists —
+		// Docker's own layer cache makes this fast when nothing
+		// changed (every step shows CACHED), and it's the only way to
+		// show real build output either way: downloading fresh layers,
+		// or confirming the cache was used. Only skipped if Docker
+		// itself isn't reachable. Gated on the check's Name (not its
+		// position in pending) so this only ever fires for the actual
+		// image check.
+		if check.Name == preflight.CheckNameImage && len(m.checks) > 0 && m.checks[0].OK {
+			lineCh, errCh := buildImageFn(m.cfg)
 			m.building = true
 			m.buildLineCh = lineCh
 			m.buildErrCh = errCh
