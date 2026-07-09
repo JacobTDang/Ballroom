@@ -17,6 +17,26 @@ const defaultDockerImage = "ballroom-practice"
 // stay in sync.
 const DefaultTutorModel = "qwen2.5-coder:7b"
 
+// Qwen25Coder14BModel is a second tutor model confirmed to work end-to-end
+// (preflight check, TUTOR_MODEL wiring, and a real chat round-trip) —
+// qwen2.5-coder:14b-instruct, verified against the tag list at
+// ollama.com/library/qwen2.5-coder/tags (9.0GB, q4_K_M quantization,
+// 32K context). It is not the default. There's no fixed "supported
+// models" list in this codebase: the model picker
+// (internal/tui/modelpicker.go) already accepts any locally pulled or
+// freely typed Ollama tag, so selecting this one is just a matter of
+// typing it there or running `ollama pull qwen2.5-coder:14b-instruct`
+// first. This const exists purely so the verified tag is documented and
+// typo-proof (e.g. for scripting a pull, or referencing in tests) rather
+// than re-typed from memory.
+//
+// Hardware note: this is a meaningfully larger model than
+// DefaultTutorModel (9.0GB on disk vs. ~4.7GB for the 7B default).
+// Budget roughly 12-16GB of free RAM/VRAM for comfortable inference at
+// this quantization (model weights plus KV cache headroom) — pulling or
+// selecting it on a machine with less will be slow or may fail to load.
+const Qwen25Coder14BModel = "qwen2.5-coder:14b-instruct"
+
 // settingsFileName is the persisted user-settings file, stored under
 // Config.DataDir alongside tracker.db.
 const settingsFileName = "settings.json"

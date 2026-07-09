@@ -32,6 +32,16 @@ type modelsLoadedMsg struct {
 // that isn't actually there. A second enter after the warning confirms the
 // tag anyway, matching this codebase's "informational, not blocking"
 // preflight-check philosophy.
+//
+// There's no separate "known/suggested models" quick-pick list here beyond
+// what's locally pulled — typing a tag directly is the mechanism for using
+// any model that isn't. config.Qwen25Coder14BModel documents one such
+// verified-working tag (qwen2.5-coder:14b-instruct) — a larger variant of
+// the default 7B model that needs meaningfully more RAM/VRAM to run
+// (roughly 12-16GB free vs. the 7B default's ~8GB). There's no per-entry
+// hint UI here to surface that inline, so it's called out in the const's
+// doc comment instead — check there before pulling/selecting it on
+// constrained hardware.
 type modelPickerModel struct {
 	host    string
 	current string

@@ -182,6 +182,13 @@ func TestLoad_DefaultsTutorModelWhenNoSettingsFile(t *testing.T) {
 	}
 }
 
+func TestQwen25Coder14BModel_IsValidOllamaTag(t *testing.T) {
+	want := "qwen2.5-coder:14b-instruct"
+	if Qwen25Coder14BModel != want {
+		t.Errorf("Qwen25Coder14BModel = %q, want %q", Qwen25Coder14BModel, want)
+	}
+}
+
 func TestLoad_ReadsPersistedTutorModel(t *testing.T) {
 	dir := t.TempDir()
 	resolved, err := filepath.EvalSymlinks(dir)
