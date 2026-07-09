@@ -16,11 +16,24 @@ import (
 // categoryOrder matches the taxonomy in interview_prep_plan.md Part 2 —
 // exercises are grouped by category in this order on the homepage.
 var categoryOrder = map[string]int{
-	exercise.CategoryPattern:        0,
+	exercise.CategoryDSA:            0,
 	exercise.CategoryDebug:          1,
 	exercise.CategoryConcurrency:    2,
 	exercise.CategoryImplementation: 3,
 	exercise.CategoryAIAssisted:     4,
+}
+
+// DisplayCategory maps a raw category id to how it's shown in the UI —
+// every id reads fine as-is except "dsa", which is an acronym rather than
+// a word (unlike debug/concurrency/implementation/ai-assisted) and needs
+// to be uppercased explicitly rather than just printed raw. Exported so
+// internal/tui can render category names the same way FormatTable and
+// FormatSummary do below.
+func DisplayCategory(category string) string {
+	if category == exercise.CategoryDSA {
+		return "DSA"
+	}
+	return category
 }
 
 // ExerciseStatus is one exercise plus its practice history summary.
@@ -132,7 +145,7 @@ func FormatTable(statuses []ExerciseStatus) string {
 		}
 
 		num := fmt.Sprintf("%-3d", i+1)
-		category := styled(colorBlue, fmt.Sprintf("%-15s", s.Exercise.Category))
+		category := styled(colorBlue, fmt.Sprintf("%-15s", DisplayCategory(s.Exercise.Category)))
 		lang := styled(colorPurple, fmt.Sprintf("%-8s", s.Exercise.Language))
 		title := fmt.Sprintf("%-36s", truncate(s.Exercise.Title, 36))
 
@@ -170,7 +183,7 @@ func FormatSummary(statuses []ExerciseStatus) string {
 	for i, cat := range order {
 		c := byCategory[cat]
 		fraction := styled(colorCream, fmt.Sprintf("%d/%d", c.solved, c.total))
-		parts[i] = fmt.Sprintf("%s: %s", styled(colorBlue, cat), fraction)
+		parts[i] = fmt.Sprintf("%s: %s", styled(colorBlue, DisplayCategory(cat)), fraction)
 	}
 	return strings.Join(parts, styled(colorDim, " · "))
 }
