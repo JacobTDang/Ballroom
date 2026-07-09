@@ -53,3 +53,49 @@ jobs:
       - uses: actions/checkout@v4
       - name: docker build
         run: docker build -f docker/Dockerfile -t ballroom-practice .
+
+  # Detects upstream API drift before it lands in a tagged release. Charmbracelet doesn't
+  # publish a separate "experimental" repo for bubbletea/lipgloss (checked: no such repo,
+  # no dedicated "exp" branch on either project) -- pre-release changes go straight to each
+  # repo's own `main` branch ahead of a tag. This job points a go.mod replace at `main` for
+  # both modules, in this checkout only, and never commits the result -- the default go.mod
+  # used by every other job stays pinned to tagged releases.
+  #
+  # A red run here means upstream drift, not a Ballroom bug. As of writing it WILL be red:
+  # main for both repos has already moved past the v1.x line this project pins to an
+  # already-tagged v2, under a renamed module path (charm.land/bubbletea/v2,
+  # charm.land/lipgloss/v2) that a same-import-path replace can't resolve -- Go rejects the
+  # mismatch outright at `go mod tidy`. That failure is itself the signal: it tells us
+  # upstream has moved on and a same-path replace is no longer meaningful. If this job goes
+  # green, or fails for a different reason, that's worth a look.
+  charm-experimental:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: point deps at charmbracelet main (this checkout only, never committed)
+        # Both -replace flags must land in one `go mod edit` call: `go mod edit` writes the
+        # branch name unresolved, and re-parsing that on a second invocation errors out before
+        # `go mod tidy` ever gets a chance to resolve it.
+        run: |
+          go mod edit \
+            -replace github.com/charmbracelet/bubbletea=github.com/charmbracelet/bubbletea@main \
+            -replace github.com/charmbracelet/lipgloss=github.com/charmbracelet/lipgloss@main
+      - name: go mod tidy against main
+        env:
+          # Fetch the real tip of main via VCS, not a possibly-stale proxy.golang.org cache.
+          # GOSUMDB stays on (default sum.golang.org) even though GOPROXY=direct bypasses
+          # the module mirror: the two are independent, and there's no reason to skip
+          # checksum verification just because we're fetching straight from VCS instead of
+          # a proxy cache. If sumdb genuinely has no record yet for this pseudo-version, Go
+          # adds one on first verified fetch rather than failing open.
+          GOPROXY: direct
+        run: go mod tidy
+      - name: go build (tui)
+        run: go build ./internal/tui/...
+      - name: go test (tui)
+        run: go test ./internal/tui/...

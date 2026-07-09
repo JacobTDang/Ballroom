@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/JacobTDang/Ballroom/internal/config"
@@ -31,6 +32,8 @@ func main() {
 		exitOnErr(sandboxCmd())
 	case "submit":
 		exitOnErr(submitCmd())
+	case "return":
+		exitOnErr(returnCmd())
 	default:
 		fmt.Fprintf(os.Stderr, "ballroom: unknown command %q\n\n", args[0])
 		printUsage(os.Stderr)
@@ -54,6 +57,7 @@ Usage:
   ballroom practice <id>       Practice a specific exercise by id
   ballroom sandbox             Free practice, no grading, persists across sessions
   ballroom submit              Submit your solution (run this inside an active session)
+  ballroom return              Return to the host homepage (run this inside an active session)
   ballroom help | -h | --help  Show this help
 
 Examples:
@@ -68,13 +72,65 @@ Reset the sandbox volume:
 
 // homeCmd shows the full-screen boot check + exercise picker (see
 // internal/tui) — the "home base" you return to between sessions rather
-// than having to remember exercise ids.
+// than having to remember exercise ids. The ballroom binary baked into
+// the practice image (docker/Dockerfile) means this same code path can
+// run either on the host or inside an active session's container; the
+// boot screen's preflight checks (CheckDocker, CheckOllama against
+// localhost:11434, ...) assume host networking and there's no Docker
+// client inside the container, so booting a nested instance there
+// doesn't fail cleanly. If we're inside a session, return to the host
+// homepage instead of attempting that nested boot.
 func homeCmd() error {
+	if isSessionContext() {
+		return returnToHost()
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 	return tui.Run(cfg)
+}
+
+// isSessionContext reports whether this process is running inside an
+// active practice session's container, as opposed to on the host. It
+// checks all three session-scoped env vars orchestrator.RunExercise sets
+// via `docker run -e` (PRACTICE_WORKSPACE_DIR, PRACTICE_CONTROL_DIR,
+// PRACTICE_STARTED_AT) rather than any single one, so a host shell that
+// happens to have one of these set for unrelated reasons isn't
+// misdetected as a session.
+func isSessionContext() bool {
+	return os.Getenv("PRACTICE_WORKSPACE_DIR") != "" &&
+		os.Getenv("PRACTICE_CONTROL_DIR") != "" &&
+		os.Getenv("PRACTICE_STARTED_AT") != ""
+}
+
+// returnCmd is `ballroom return`, run from a session's TERMINAL pane to
+// get back to the host homepage. Unlike homeCmd, it's only meaningful
+// inside a session, so it errors instead of silently falling back to
+// tui.Run when there's nothing to return from.
+func returnCmd() error {
+	if !isSessionContext() {
+		return fmt.Errorf("return: not running inside an active practice session (did you mean `ballroom home`?)")
+	}
+	return returnToHost()
+}
+
+// returnToHost ends the practice session so control lands back on the
+// host homepage. The container can't reach out and control the host's
+// `docker run -it --rm` (orchestrator.RunExercise) directly — no Docker
+// client is installed inside it — but that `docker run` is blocking on
+// the container's PID 1, which docker/entrypoint.sh sets to `tmux
+// attach` after starting the session's tmux server. Killing that server
+// tears down every pane, which ends the attach client, which exits the
+// container, which is what makes `docker run -it --rm` on the host
+// return. RunExercise returning is what lets practiceCmd continue on to
+// homeCmd and open the homepage picker.
+func returnToHost() error {
+	if err := exec.Command("tmux", "kill-server").Run(); err != nil {
+		return fmt.Errorf("return: tmux kill-server: %w", err)
+	}
+	return nil
 }
 
 func practiceCmd(args []string) error {
@@ -86,7 +142,12 @@ func practiceCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	return runExercise(cfg, args[0])
+	if err := runExercise(cfg, args[0]); err != nil {
+		return err
+	}
+	// The session container just exited (see returnToHost); land back on
+	// the host homepage rather than dropping to a bare shell prompt.
+	return homeCmd()
 }
 
 func runExercise(cfg config.Config, id string) error {
