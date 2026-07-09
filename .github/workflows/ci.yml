@@ -77,8 +77,12 @@ jobs:
       - name: go mod tidy against main
         env:
           # Fetch the real tip of main via VCS, not a possibly-stale proxy.golang.org cache.
+          # GOSUMDB stays on (default sum.golang.org) even though GOPROXY=direct bypasses
+          # the module mirror: the two are independent, and there's no reason to skip
+          # checksum verification just because we're fetching straight from VCS instead of
+          # a proxy cache. If sumdb genuinely has no record yet for this pseudo-version, Go
+          # adds one on first verified fetch rather than failing open.
           GOPROXY: direct
-          GOSUMDB: off
         run: go mod tidy
       - name: go build (tui)
         run: go build ./internal/tui/...
