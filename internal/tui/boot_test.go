@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -19,6 +20,17 @@ func fakeBuildImage(lineCh <-chan string, errCh <-chan error) func() {
 		return lineCh, errCh
 	}
 	return func() { buildImageFn = orig }
+}
+
+// fakePullModel substitutes pullModelFn in tests so triggering a live
+// fallback model pull doesn't make a real HTTP call to Ollama. Returns a
+// restore func to defer.
+func fakePullModel(lineCh <-chan string, errCh <-chan error) func() {
+	orig := pullModelFn
+	pullModelFn = func(string, string) (<-chan string, <-chan error) {
+		return lineCh, errCh
+	}
+	return func() { pullModelFn = orig }
 }
 
 // noCheckDelay zeroes the pacing delay between checks so tests that drive
@@ -219,6 +231,188 @@ func TestBootModel_DockerNotReachableSkipsBuildAttempt(t *testing.T) {
 	}
 	if len(bm.checks) != 2 {
 		t.Errorf("expected the image check to be appended as a plain failure, got %+v", bm.checks)
+	}
+}
+
+func TestBootModel_ModelCheckFailureWithOllamaOKTriggersLivePullFallback(t *testing.T) {
+	lineCh := make(chan string)
+	errCh := make(chan error)
+	defer fakePullModel(lineCh, errCh)()
+
+	m := bootModel{
+		cfg: config.Config{TutorModel: "deepseek-coder-v2:16b-lite-instruct-q4_K_M"},
+		pending: []func() preflight.Check{
+			func() preflight.Check { return preflight.Check{Name: "Docker", OK: true} },
+			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameImage, OK: true} },
+			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameOllama, OK: true} },
+			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameModel, OK: false} },
+		},
+		checks: []preflight.Check{
+			{Name: "Docker", OK: true},
+			{Name: preflight.CheckNameImage, OK: true},
+			{Name: preflight.CheckNameOllama, OK: true},
+		},
+	}
+
+	newM, cmd := m.Update(checkDoneMsg(preflight.Check{Name: preflight.CheckNameModel, OK: false, Detail: "deepseek-coder-v2:... not pulled"}))
+	if cmd == nil {
+		t.Fatal("expected a command to wait for pull output")
+	}
+	bm := newM.(bootModel)
+	if !bm.pullingModel {
+		t.Fatal("expected pullingModel=true")
+	}
+	if len(bm.checks) != 3 {
+		t.Errorf("model check should not be appended yet while pulling, got %+v", bm.checks)
+	}
+	if bm.ready {
+		t.Error("should not be ready while the fallback model is still pulling")
+	}
+}
+
+func TestBootModel_ModelCheckFailureWithOllamaNotOKSkipsPullFallback(t *testing.T) {
+	m := bootModel{
+		pending: []func() preflight.Check{
+			func() preflight.Check { return preflight.Check{Name: "Docker", OK: true} },
+			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameImage, OK: true} },
+			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameOllama, OK: false} },
+			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameModel, OK: false} },
+		},
+		checks: []preflight.Check{
+			{Name: "Docker", OK: true},
+			{Name: preflight.CheckNameImage, OK: true},
+			{Name: preflight.CheckNameOllama, OK: false},
+		},
+	}
+	newM, _ := m.Update(checkDoneMsg(preflight.Check{Name: preflight.CheckNameModel, OK: false, Detail: "can't reach Ollama to check"}))
+	bm := newM.(bootModel)
+	if bm.pullingModel {
+		t.Error("should not attempt a fallback pull when Ollama itself isn't reachable")
+	}
+	if len(bm.checks) != 4 {
+		t.Errorf("expected the model check to be appended as a plain failure, got %+v", bm.checks)
+	}
+}
+
+func TestBootModel_ModelCheckOKSkipsPullFallback(t *testing.T) {
+	m := bootModel{
+		pending: []func() preflight.Check{
+			func() preflight.Check { return preflight.Check{Name: "Docker", OK: true} },
+			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameImage, OK: true} },
+			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameOllama, OK: true} },
+			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameModel, OK: true} },
+		},
+		checks: []preflight.Check{
+			{Name: "Docker", OK: true},
+			{Name: preflight.CheckNameImage, OK: true},
+			{Name: preflight.CheckNameOllama, OK: true},
+		},
+	}
+	newM, _ := m.Update(checkDoneMsg(preflight.Check{Name: preflight.CheckNameModel, OK: true, Detail: "ready"}))
+	bm := newM.(bootModel)
+	if bm.pullingModel {
+		t.Error("should not attempt a fallback pull when the model check already passed")
+	}
+	if len(bm.checks) != 4 || !bm.checks[3].OK {
+		t.Errorf("expected a passing model check appended, got %+v", bm.checks)
+	}
+}
+
+func TestBootModel_PullLineCapsAtThreeLinesTotal(t *testing.T) {
+	lineCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	m := bootModel{pullingModel: true, pullLineCh: lineCh, pullErrCh: errCh}
+
+	for i := 0; i < maxOutputLines+5; i++ {
+		newM, cmd := m.Update(pullLineMsg(fmt.Sprintf("line %d", i)))
+		if cmd == nil {
+			t.Fatal("expected pullLineMsg to keep listening for more output")
+		}
+		m = newM.(bootModel)
+	}
+	if len(m.pullLines) != maxOutputLines {
+		t.Errorf("pullLines = %d, want capped at %d", len(m.pullLines), maxOutputLines)
+	}
+	if m.pullLines[len(m.pullLines)-1] != fmt.Sprintf("line %d", maxOutputLines+4) {
+		t.Errorf("expected the most recent line to be kept, got %+v", m.pullLines)
+	}
+}
+
+func TestBootModel_PullDoneSuccessAdvancesAsPassingModelCheckAndSwitchesCfg(t *testing.T) {
+	m := bootModel{
+		cfg: config.Config{TutorModel: "deepseek-coder-v2:16b-lite-instruct-q4_K_M"},
+		pending: []func() preflight.Check{
+			func() preflight.Check { return preflight.Check{Name: "Docker", OK: true} },
+			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameModel, OK: true} },
+		},
+		checks:           []preflight.Check{{Name: "Docker", OK: true}},
+		pullingModel:     true,
+		pullFallbackFrom: "deepseek-coder-v2:16b-lite-instruct-q4_K_M",
+		pullLines:        []string{"pulling manifest", "success"},
+	}
+
+	newM, cmd := m.Update(pullDoneMsg{err: nil})
+	if cmd != nil {
+		t.Fatal("expected no further pending checks after the last one resolves")
+	}
+	bm := newM.(bootModel)
+	if bm.pullingModel {
+		t.Error("expected pullingModel=false once the pull resolves")
+	}
+	if len(bm.pullLines) != 0 {
+		t.Error("expected the pull log to clear once resolved (panel collapses)")
+	}
+	if len(bm.checks) != 2 || !bm.checks[1].OK {
+		t.Fatalf("expected a passing model check appended, got %+v", bm.checks)
+	}
+	if bm.cfg.TutorModel != config.DefaultTutorModel {
+		t.Errorf("cfg.TutorModel = %q, want it switched to the default %q for this session", bm.cfg.TutorModel, config.DefaultTutorModel)
+	}
+	if !bm.ready {
+		t.Error("expected ready=true once the (now only) remaining check resolves")
+	}
+}
+
+func TestBootModel_PullDoneFailureAdvancesAsFailingModelCheckAndLeavesCfgUnchanged(t *testing.T) {
+	m := bootModel{
+		cfg: config.Config{TutorModel: "deepseek-coder-v2:16b-lite-instruct-q4_K_M"},
+		pending: []func() preflight.Check{
+			func() preflight.Check { return preflight.Check{Name: "Docker", OK: true} },
+			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameModel, OK: true} },
+		},
+		checks:           []preflight.Check{{Name: "Docker", OK: true}},
+		pullingModel:     true,
+		pullFallbackFrom: "deepseek-coder-v2:16b-lite-instruct-q4_K_M",
+	}
+
+	newM, _ := m.Update(pullDoneMsg{err: errors.New("boom")})
+	bm := newM.(bootModel)
+	if bm.pullingModel {
+		t.Error("expected pullingModel=false once the pull resolves, even on failure")
+	}
+	if len(bm.checks) != 2 || bm.checks[1].OK {
+		t.Fatalf("expected a failing model check appended, got %+v", bm.checks)
+	}
+	if bm.cfg.TutorModel != "deepseek-coder-v2:16b-lite-instruct-q4_K_M" {
+		t.Errorf("expected cfg.TutorModel to stay unchanged on pull failure, got %q", bm.cfg.TutorModel)
+	}
+	if !bm.ready {
+		t.Error("expected ready=true so the user isn't stuck")
+	}
+}
+
+func TestBootModel_RenderRightColumnShowsPullingModelPanel(t *testing.T) {
+	m := bootModel{
+		checks:       []preflight.Check{{Name: "Docker", OK: true}},
+		pullingModel: true,
+		pullLines:    []string{"pulling manifest", "downloading (42%)"},
+	}
+	out := m.renderRightColumn()
+	if !strings.Contains(out, "pulling manifest") {
+		t.Errorf("expected live pull output visible, got:\n%s", out)
+	}
+	if !strings.Contains(out, "downloading (42%)") {
+		t.Errorf("expected live pull output visible, got:\n%s", out)
 	}
 }
 

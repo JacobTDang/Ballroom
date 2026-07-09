@@ -1,9 +1,13 @@
 package preflight
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 const sampleTagsJSON = `{
@@ -184,5 +188,149 @@ func TestListModels_NonOKStatusReturnsError(t *testing.T) {
 	_, err := ListModels(srv.URL)
 	if err == nil {
 		t.Fatal("expected an error for a non-OK status, got nil")
+	}
+}
+
+// streamNDJSONServer replies to POST /api/pull with the given lines,
+// flushing after each one so the client genuinely reads them as separate
+// streaming chunks rather than one buffered response — that's the whole
+// point of PullModel over a plain ListModels-style single-body call.
+func streamNDJSONServer(t *testing.T, lines []string) (*httptest.Server, *string) {
+	t.Helper()
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("httptest ResponseWriter doesn't support flushing")
+		}
+		for _, line := range lines {
+			w.Write([]byte(line + "\n"))
+			flusher.Flush()
+		}
+	}))
+	return srv, &gotBody
+}
+
+// drainLines collects every line PullModel sends until lineCh closes,
+// with a generous timeout so a hung implementation fails the test instead
+// of the test suite itself.
+func drainLines(t *testing.T, lineCh <-chan string) []string {
+	t.Helper()
+	var lines []string
+	for {
+		select {
+		case line, ok := <-lineCh:
+			if !ok {
+				return lines
+			}
+			lines = append(lines, line)
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for lineCh")
+		}
+	}
+}
+
+func TestPullModel_StreamsFormattedStatusLines(t *testing.T) {
+	srv, _ := streamNDJSONServer(t, []string{
+		`{"status":"pulling manifest"}`,
+		`{"status":"verifying sha256 digest"}`,
+		`{"status":"success"}`,
+	})
+	defer srv.Close()
+
+	lineCh, errCh := PullModel(srv.URL, "qwen2.5-coder:7b")
+	lines := drainLines(t, lineCh)
+	if err := <-errCh; err != nil {
+		t.Fatalf("PullModel: %v", err)
+	}
+
+	want := []string{"pulling manifest", "verifying sha256 digest", "success"}
+	if len(lines) != len(want) {
+		t.Fatalf("lines = %v, want %v", lines, want)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Errorf("lines[%d] = %q, want %q", i, lines[i], want[i])
+		}
+	}
+}
+
+func TestPullModel_IncludesPercentageWhenTotalKnown(t *testing.T) {
+	srv, _ := streamNDJSONServer(t, []string{
+		`{"status":"downloading sha256:abc","total":1000,"completed":250}`,
+	})
+	defer srv.Close()
+
+	lineCh, errCh := PullModel(srv.URL, "qwen2.5-coder:7b")
+	lines := drainLines(t, lineCh)
+	if err := <-errCh; err != nil {
+		t.Fatalf("PullModel: %v", err)
+	}
+
+	if len(lines) != 1 {
+		t.Fatalf("lines = %v, want 1 entry", lines)
+	}
+	if !strings.Contains(lines[0], "25%") {
+		t.Errorf("lines[0] = %q, want it to include a 25%% progress figure", lines[0])
+	}
+}
+
+func TestPullModel_ErrorFieldInStreamSurfacesAsError(t *testing.T) {
+	srv, _ := streamNDJSONServer(t, []string{
+		`{"status":"pulling manifest"}`,
+		`{"error":"model not found"}`,
+	})
+	defer srv.Close()
+
+	lineCh, errCh := PullModel(srv.URL, "does-not-exist:latest")
+	drainLines(t, lineCh)
+	err := <-errCh
+	if err == nil {
+		t.Fatal("expected a non-nil error when the stream reports an error status")
+	}
+	if !strings.Contains(err.Error(), "model not found") {
+		t.Errorf("error = %v, want it to include the stream's error message", err)
+	}
+}
+
+func TestPullModel_NonOKStatusReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	lineCh, errCh := PullModel(srv.URL, "qwen2.5-coder:7b")
+	drainLines(t, lineCh)
+	if err := <-errCh; err == nil {
+		t.Fatal("expected an error for a non-OK status, got nil")
+	}
+}
+
+func TestPullModel_UnreachableHostReturnsError(t *testing.T) {
+	lineCh, errCh := PullModel("http://127.0.0.1:1", "qwen2.5-coder:7b")
+	drainLines(t, lineCh)
+	if err := <-errCh; err == nil {
+		t.Fatal("expected an error for an unreachable host, got nil")
+	}
+}
+
+func TestPullModel_SendsModelNameInRequestBody(t *testing.T) {
+	srv, gotBody := streamNDJSONServer(t, []string{`{"status":"success"}`})
+	defer srv.Close()
+
+	lineCh, errCh := PullModel(srv.URL, "qwen2.5-coder:7b")
+	drainLines(t, lineCh)
+	<-errCh
+
+	var payload struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal([]byte(*gotBody), &payload); err != nil {
+		t.Fatalf("request body isn't valid JSON: %v (%q)", err, *gotBody)
+	}
+	if payload.Model != "qwen2.5-coder:7b" {
+		t.Errorf("request model = %q, want %q", payload.Model, "qwen2.5-coder:7b")
 	}
 }
