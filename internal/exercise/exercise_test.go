@@ -12,7 +12,7 @@ func writeExercise(t *testing.T, dir string, fields map[string]any) string {
 	base := map[string]any{
 		"id":             "two-pointers-01",
 		"title":          "Two Sum II",
-		"category":       "pattern",
+		"category":       "dsa",
 		"language":       "go",
 		"time_limit_min": 25,
 		"tutor_mode":     "hints-first",
@@ -48,8 +48,8 @@ func TestLoad_ValidExercise(t *testing.T) {
 	if ex.ID != "two-pointers-01" {
 		t.Errorf("ID = %q, want %q", ex.ID, "two-pointers-01")
 	}
-	if ex.Category != CategoryPattern {
-		t.Errorf("Category = %q, want %q", ex.Category, CategoryPattern)
+	if ex.Category != CategoryDSA {
+		t.Errorf("Category = %q, want %q", ex.Category, CategoryDSA)
 	}
 	if ex.Language != LanguageGo {
 		t.Errorf("Language = %q, want %q", ex.Language, LanguageGo)

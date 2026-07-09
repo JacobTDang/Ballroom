@@ -56,6 +56,13 @@ func Open(path string) (*Tracker, error) {
 		db.Close()
 		return nil, fmt.Errorf("tracker: migrate schema: %w", err)
 	}
+	// The "pattern" category was renamed to "dsa" — reclassify any
+	// already-logged attempts so Stats keeps grouping them together
+	// instead of splitting into two buckets under the old and new names.
+	if _, err := db.Exec(`UPDATE attempts SET category = 'dsa' WHERE category = 'pattern'`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("tracker: migrate pattern category: %w", err)
+	}
 	return &Tracker{db: db}, nil
 }
 
