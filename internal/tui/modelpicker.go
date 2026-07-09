@@ -60,10 +60,14 @@ type modelsLoadedMsg struct {
 // is treated as a candidate arbitrary model tag instead. Selecting any
 // entry not actually pulled locally — whether a suggested one from the
 // list or a freely typed tag — checks it against Ollama (reusing
-// preflight.CheckModel's "not pulled" messaging) and warns rather than
-// silently accepting a tag that isn't actually there. A second enter
-// after the warning confirms the tag anyway, matching this codebase's
-// "informational, not blocking" preflight-check philosophy.
+// preflight.CheckModel's "not pulled" messaging) and asks whether to
+// download it (y/n); on yes, preflight.PullModel (via the same
+// pullModelFn boot.go's live image-build/model-pull panels use) streams
+// live into a 3-line indented window, and the tag is selected once the
+// pull actually succeeds — never blindly accepting a tag that isn't
+// there, matching this codebase's "informational, not blocking"
+// preflight-check philosophy while still leaving you with a model that
+// genuinely works.
 //
 // config.Qwen25Coder14BModel — a larger variant of the default 7B model —
 // needs meaningfully more RAM/VRAM to run (roughly 12-16GB free vs. the
@@ -83,6 +87,19 @@ type modelPickerModel struct {
 	filtered []string
 	cursor   int
 	warning  string
+
+	// pendingDownloadTag is set once checkTag finds a tag isn't pulled,
+	// while waiting for a y/n answer to whether to download it.
+	pendingDownloadTag string
+
+	// downloading etc. mirror bootModel's pullingModel/pullLines fields —
+	// same pullLineMsg/pullDoneMsg/waitForPullLine/pullModelFn/
+	// maxOutputLines machinery from boot.go, reused as-is (same package).
+	downloading    bool
+	downloadTarget string
+	downloadLines  []string
+	downloadLineCh <-chan string
+	downloadErrCh  <-chan error
 
 	selected      *string
 	back          bool
@@ -142,7 +159,34 @@ func (m modelPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filtered = filterModels(m.models, m.filter)
 		return m, nil
 
+	case pullLineMsg:
+		line := string(msg)
+		m.downloadLines = append(m.downloadLines, line)
+		if len(m.downloadLines) > maxOutputLines {
+			m.downloadLines = m.downloadLines[len(m.downloadLines)-maxOutputLines:]
+		}
+		return m, waitForPullLine(m.downloadLineCh, m.downloadErrCh)
+
+	case pullDoneMsg:
+		m.downloading = false
+		if msg.err != nil {
+			m.warning = fmt.Sprintf("download failed: %v", msg.err)
+			m.downloadLines = nil
+			return m, nil
+		}
+		sel := m.downloadTarget
+		m.selected = &sel
+		return m, tea.Quit
+
 	case tea.KeyMsg:
+		if m.downloading {
+			// Nothing to do with input mid-download — it isn't
+			// interruptible, matching boot.go's live build/pull panels.
+			return m, nil
+		}
+		if m.pendingDownloadTag != "" {
+			return m.handleDownloadPrompt(msg)
+		}
 		switch msg.Type {
 		case tea.KeyUp:
 			if m.cursor > 0 {
@@ -189,9 +233,8 @@ func (m modelPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleEnter selects the highlighted entry if it's already pulled
 // locally, or — for a highlighted-but-unpulled suggested entry, or when
 // the typed filter matches nothing — treats the tag as a candidate:
-// confirmTag checks it against Ollama and warns if it isn't pulled, and a
-// second enter (with the warning already showing) confirms using it
-// anyway.
+// checkTag checks it against Ollama and, if it isn't pulled, asks
+// whether to download it (see handleDownloadPrompt).
 func (m modelPickerModel) handleEnter() (tea.Model, tea.Cmd) {
 	if len(m.filtered) > 0 {
 		sel := m.filtered[m.cursor]
@@ -199,33 +242,59 @@ func (m modelPickerModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.selected = &sel
 			return m, tea.Quit
 		}
-		return m.confirmTag(sel)
+		return m.checkTag(sel)
 	}
 
 	tag := strings.TrimSpace(m.filter)
 	if tag == "" {
 		return m, nil
 	}
-	return m.confirmTag(tag)
+	return m.checkTag(tag)
 }
 
-// confirmTag is the not-pulled warn-then-confirm flow shared by both a
-// freely typed tag and a highlighted suggested-but-unpulled entry.
-func (m modelPickerModel) confirmTag(tag string) (tea.Model, tea.Cmd) {
-	if m.warning != "" {
+// checkTag checks tag against Ollama: if it's actually already pulled
+// (e.g. a tag Ollama resolves some other way, or a race with a pull that
+// just finished outside this picker), select it immediately; otherwise
+// show why, and ask whether to download it.
+func (m modelPickerModel) checkTag(tag string) (tea.Model, tea.Cmd) {
+	check := checkModelFn(m.host, tag)
+	if check.OK {
 		sel := tag
 		m.selected = &sel
 		return m, tea.Quit
 	}
+	m.warning = check.Detail
+	m.pendingDownloadTag = tag
+	return m, nil
+}
 
-	check := checkModelFn(m.host, tag)
-	if !check.OK {
-		m.warning = check.Detail
-		return m, nil
+// handleDownloadPrompt handles the y/n answer to "download <tag>?" — y
+// starts a live preflight.PullModel stream (see the pullLineMsg/
+// pullDoneMsg cases in Update), n cancels back to the picker with nothing
+// selected, and esc/ctrl+c back out of the picker entirely.
+func (m modelPickerModel) handleDownloadPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.back = true
+		return m, tea.Quit
+	case tea.KeyRunes:
+		switch string(msg.Runes) {
+		case "y", "Y":
+			tag := m.pendingDownloadTag
+			m.pendingDownloadTag = ""
+			m.downloading = true
+			m.downloadTarget = tag
+			lineCh, errCh := pullModelFn(m.host, tag)
+			m.downloadLineCh = lineCh
+			m.downloadErrCh = errCh
+			return m, waitForPullLine(lineCh, errCh)
+		case "n", "N":
+			m.pendingDownloadTag = ""
+			m.warning = ""
+			return m, nil
+		}
 	}
-	sel := tag
-	m.selected = &sel
-	return m, tea.Quit
+	return m, nil
 }
 
 func (m modelPickerModel) View() string {
@@ -267,11 +336,23 @@ func (m modelPickerModel) View() string {
 		}
 	}
 
-	if m.warning != "" {
+	switch {
+	case m.downloading:
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render(fmt.Sprintf("  downloading %s...", m.downloadTarget)))
+		b.WriteString("\n")
+		for _, line := range m.downloadLines {
+			fmt.Fprintf(&b, "      %s\n", buildLogStyle.Render(line))
+		}
+	case m.pendingDownloadTag != "":
 		b.WriteString("\n")
 		b.WriteString(hintStyle.Render("  " + m.warning))
 		b.WriteString("\n")
-		b.WriteString(checkDimStyle.Render("  press enter again to use it anyway"))
+		b.WriteString(checkDimStyle.Render(fmt.Sprintf("  download %s? (y/n)", m.pendingDownloadTag)))
+		b.WriteString("\n")
+	case m.warning != "":
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render("  " + m.warning))
 		b.WriteString("\n")
 	}
 
