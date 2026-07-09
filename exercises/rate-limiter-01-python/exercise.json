@@ -1,5 +1,6 @@
 {
   "id": "rate-limiter-01-python",
+  "problem_id": "rate-limiter-01",
   "title": "Fixed-window rate limiter",
   "category": "implementation",
   "language": "python",

@@ -1,5 +1,6 @@
 {
   "id": "lru-cache-01-cpp",
+  "problem_id": "lru-cache-01",
   "title": "LRU cache (AI-assisted)",
   "category": "ai-assisted",
   "language": "cpp",

@@ -44,6 +44,9 @@ func TestCheckDocker_ReportsStructuredResult(t *testing.T) {
 	if c.Name == "" {
 		t.Error("expected a non-empty check name")
 	}
+	if c.Command != "docker info" {
+		t.Errorf("Command = %q, want %q", c.Command, "docker info")
+	}
 }
 
 func TestCheckImage_UnknownImageReportsNotOK(t *testing.T) {
@@ -54,12 +57,20 @@ func TestCheckImage_UnknownImageReportsNotOK(t *testing.T) {
 	if c.Detail == "" {
 		t.Error("expected a non-empty detail message explaining how to fix it")
 	}
+	want := `docker image inspect this-image-definitely-does-not-exist-12345 --format "{{.Id}}"`
+	if c.Command != want {
+		t.Errorf("Command = %q, want %q", c.Command, want)
+	}
 }
 
 func TestCheckOllama_UnreachableHostReportsNotOK(t *testing.T) {
 	c := CheckOllama("http://127.0.0.1:1")
 	if c.OK {
 		t.Error("expected OK=false for an unreachable host")
+	}
+	want := "GET http://127.0.0.1:1/api/tags"
+	if c.Command != want {
+		t.Errorf("Command = %q, want %q", c.Command, want)
 	}
 }
 
@@ -73,6 +84,9 @@ func TestCheckOllama_ReachableHostReportsOK(t *testing.T) {
 	if !c.OK {
 		t.Errorf("expected OK=true for a reachable host, got Detail=%q", c.Detail)
 	}
+	if c.Output != `{"models":[]}` {
+		t.Errorf("Output = %q, want the raw response body", c.Output)
+	}
 }
 
 func TestCheckModel_ReportsOKWhenPresent(t *testing.T) {
@@ -84,6 +98,10 @@ func TestCheckModel_ReportsOKWhenPresent(t *testing.T) {
 	c := CheckModel(srv.URL, "qwen2.5-coder:7b")
 	if !c.OK {
 		t.Errorf("expected OK=true, got Detail=%q", c.Detail)
+	}
+	want := "GET " + srv.URL + "/api/tags"
+	if c.Command != want {
+		t.Errorf("Command = %q, want %q", c.Command, want)
 	}
 }
 

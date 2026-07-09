@@ -10,9 +10,17 @@ TMUX_CONF="${TMUX_CONF:-/etc/practice/tmux.conf}"
 
 tmux -f "$TMUX_CONF" new-session -d -s "$SESSION" -n main -c "$WORKDIR"
 
-# pane 0: editor (left, full height)
+# pane 0: editor (left, full height). Open directly into the solution
+# file to implement, not the netrw directory listing — glob rather than
+# hardcode an extension, since it varies by language (.go/.py/.cpp/.hpp).
+# Falls back to `nvim .` when there's no solution file (e.g. sandbox mode).
 tmux select-pane -t "${SESSION}:main.0" -T "EDITOR"
-tmux send-keys -t "${SESSION}:main.0" "nvim ." C-m
+SOLUTION_FILE=$(find "$WORKDIR" -maxdepth 1 -name 'solution.*' -type f | head -n1)
+if [ -n "$SOLUTION_FILE" ]; then
+  tmux send-keys -t "${SESSION}:main.0" "nvim '$SOLUTION_FILE'" C-m
+else
+  tmux send-keys -t "${SESSION}:main.0" "nvim ." C-m
+fi
 
 # pane 1: terminal (top right)
 tmux split-window -h -t "${SESSION}:main.0" -c "$WORKDIR"
