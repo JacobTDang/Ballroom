@@ -1,0 +1,11 @@
+{
+  "id": "sliding-window-04-go",
+  "problem_id": "sliding-window-04",
+  "title": "Permutation in String",
+  "category": "sliding-window",
+  "language": "go",
+  "time_limit_min": 20,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}
