@@ -1,0 +1,11 @@
+{
+  "id": "linked-list-10-go",
+  "problem_id": "linked-list-10",
+  "title": "Reverse Nodes in K-Group",
+  "category": "linked-list",
+  "language": "go",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "linked-list-03-cpp",
+  "problem_id": "linked-list-03",
+  "title": "Reorder List",
+  "category": "linked-list",
+  "language": "cpp",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "clang++ -std=c++17 -O0 -g -o /tmp/t solution.cpp hidden_test.cpp && /tmp/t"
+}
