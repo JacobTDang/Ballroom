@@ -122,7 +122,7 @@ func returnCmd() error {
 // client is installed inside it — but that `docker run` is blocking on
 // the container's PID 1, which docker/entrypoint.sh sets to `tmux
 // attach` after starting the session's tmux server. Killing that server
-// tears down every pane, which ends the attach client, which exits the
+// tears down every window, which ends the attach client, which exits the
 // container, which is what makes `docker run -it --rm` on the host
 // return. RunExercise returning is what lets practiceCmd continue on to
 // homeCmd and open the homepage picker.
