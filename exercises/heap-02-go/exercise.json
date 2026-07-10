@@ -1,0 +1,11 @@
+{
+  "id": "heap-02-go",
+  "problem_id": "heap-02",
+  "title": "Last Stone Weight",
+  "category": "heap",
+  "language": "go",
+  "time_limit_min": 15,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}
