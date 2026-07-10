@@ -1,0 +1,11 @@
+{
+  "id": "product-except-self-01-go",
+  "problem_id": "product-except-self-01",
+  "title": "Product of Array Except Self",
+  "category": "arrays-hashing",
+  "language": "go",
+  "time_limit_min": 20,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}

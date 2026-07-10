@@ -1,0 +1,11 @@
+{
+  "id": "valid-sudoku-01-python",
+  "problem_id": "valid-sudoku-01",
+  "title": "Valid Sudoku",
+  "category": "arrays-hashing",
+  "language": "python",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}

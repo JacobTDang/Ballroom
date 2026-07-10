@@ -1,0 +1,11 @@
+{
+  "id": "top-k-frequent-01-python",
+  "problem_id": "top-k-frequent-01",
+  "title": "Top K Frequent Elements",
+  "category": "arrays-hashing",
+  "language": "python",
+  "time_limit_min": 20,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}
