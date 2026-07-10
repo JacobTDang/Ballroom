@@ -1,0 +1,11 @@
+{
+  "id": "advanced-graphs-04-go",
+  "problem_id": "advanced-graphs-04",
+  "title": "Swim in Rising Water",
+  "category": "advanced-graphs",
+  "language": "go",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}

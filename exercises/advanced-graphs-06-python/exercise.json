@@ -1,0 +1,11 @@
+{
+  "id": "advanced-graphs-06-python",
+  "problem_id": "advanced-graphs-06",
+  "title": "Cheapest Flights Within K Stops",
+  "category": "advanced-graphs",
+  "language": "python",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}
