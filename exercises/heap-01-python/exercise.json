@@ -1,0 +1,11 @@
+{
+  "id": "heap-01-python",
+  "problem_id": "heap-01",
+  "title": "Kth Largest Element in a Stream",
+  "category": "heap",
+  "language": "python",
+  "time_limit_min": 20,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}
