@@ -1,0 +1,11 @@
+{
+  "id": "greedy-08-go",
+  "problem_id": "greedy-08",
+  "title": "Valid Parenthesis String",
+  "category": "greedy",
+  "language": "go",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}
