@@ -11,7 +11,26 @@ SESSION="${SESSION_NAME:-practice}"
 WORKDIR="${WORKDIR:-/workspace}"
 TMUX_CONF="${TMUX_CONF:-/etc/practice/tmux.conf}"
 
-tmux -f "$TMUX_CONF" new-session -d -s "$SESSION" -n MAIN -c "$WORKDIR"
+# A session created detached (-d, no client ever attached) has no
+# established window size on this image's tmux (3.4) until a client
+# attaches — and `split-window -p` (percentage) errors with "size
+# missing" in that state regardless, even when the session is later
+# given an explicit size, so percentage splits are unusable here. Read
+# the real terminal size directly instead: `docker run -it` already
+# gives this script's own stdin a real pty matching the host terminal,
+# so `stty size` reports it without needing to wait for `tmux attach`.
+# Fall back to tmux's own default (80x24) if stdin isn't a terminal at
+# all (e.g. a non -it invocation).
+if REAL_SIZE=$(stty size 2>/dev/null); then
+  read -r REAL_ROWS REAL_COLS <<<"$REAL_SIZE"
+else
+  REAL_COLS=80
+  REAL_ROWS=24
+fi
+BOTTOM_LINES=$((REAL_ROWS / 4))
+[ "$BOTTOM_LINES" -lt 5 ] && BOTTOM_LINES=5
+
+tmux -f "$TMUX_CONF" new-session -d -s "$SESSION" -n MAIN -c "$WORKDIR" -x "$REAL_COLS" -y "$REAL_ROWS"
 
 # pane 0 (top, full width): editor. Open directly into the solution file
 # to implement, not the netrw directory listing — glob rather than
@@ -46,12 +65,14 @@ else
   tmux send-keys -t "${SESSION}:MAIN.0" "nvim --listen '$NVIM_SOCKET' ." C-m
 fi
 
-# Split off a bottom row (25% of the window height) below the editor,
+# Split off a bottom row (~25% of the real window height, computed
+# above as BOTTOM_LINES — a fixed line count, not -p/--percentage,
+# since percentage splits error on this image's tmux) below the editor,
 # then split that row into tutor (left, under the problem statement) and
 # terminal (right, under the editor). Pane indices are assigned in
 # creation order — 0 editor, 1 tutor, 2 terminal — which tmux.conf's
 # M-1/M-2/M-3 and M-q bindings target directly.
-tmux split-window -v -p 25 -t "${SESSION}:MAIN.0" -c "$WORKDIR"
+tmux split-window -v -l "$BOTTOM_LINES" -t "${SESSION}:MAIN.0" -c "$WORKDIR"
 tmux split-window -h -t "${SESSION}:MAIN.1" -c "$WORKDIR"
 
 # pane 1 (bottom-left): tutor chat. NVIM_SOCKET tells chat.sh where to
