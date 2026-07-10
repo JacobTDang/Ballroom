@@ -41,8 +41,8 @@ WORKDIR="${WORKDIR:-/workspace}"
 # huge file can't blow up the request payload. Overridable for testing.
 MAX_CONTEXT_BYTES="${TUTOR_FILE_CONTEXT_MAX_BYTES:-8000}"
 
-# RPC socket for the editor window's nvim instance (set by entrypoint.sh
-# alongside the `nvim --listen` invocation in the editor window; see issue
+# RPC socket for the editor pane's nvim instance (set by entrypoint.sh
+# alongside the `nvim --listen` invocation in the editor pane; see issue
 # #24). Empty when unset/unreachable just means highlighting is silently
 # unavailable — the chat loop still works.
 NVIM_SOCKET="${NVIM_SOCKET:-}"

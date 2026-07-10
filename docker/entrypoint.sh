@@ -1,34 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Launches the 3-window tmux session: editor (nvim) / terminal (shell) /
-# tutor (chat CLI), each full-screen — switch with M-1/M-2/M-3 or
-# Ctrl-Tab (see tmux.conf). See interview_prep_mvp_spec.md Section 3.1.
+# Launches the practice session as a single tmux window split into three
+# panes: editor (nvim) full-width across the top, with tutor chat and a
+# terminal below it side by side — tutor under the problem statement,
+# terminal under the editor. Switch panes with M-1/M-2/M-3 or Ctrl-Tab
+# (see tmux.conf). See interview_prep_mvp_spec.md Section 3.1.
 
 SESSION="${SESSION_NAME:-practice}"
 WORKDIR="${WORKDIR:-/workspace}"
 TMUX_CONF="${TMUX_CONF:-/etc/practice/tmux.conf}"
 
-tmux -f "$TMUX_CONF" new-session -d -s "$SESSION" -n EDITOR -c "$WORKDIR"
+tmux -f "$TMUX_CONF" new-session -d -s "$SESSION" -n MAIN -c "$WORKDIR"
 
-# window 0: editor. Open directly into the solution file to implement,
-# not the netrw directory listing — glob rather than hardcode an
-# extension, since it varies by language (.go/.py/.cpp/.hpp). When the
-# exercise ships a problem.md (statement + examples + constraints — see
-# internal/verify's sibling authoring convention), open it as a
-# read-only left split so it reads like NeetCode's own two-pane layout,
-# with focus landing on the solution file for editing. Falls back to a
-# single-file open (or `nvim .` with no solution file at all, e.g.
-# sandbox mode) when there's no problem.md.
+# pane 0 (top, full width): editor. Open directly into the solution file
+# to implement, not the netrw directory listing — glob rather than
+# hardcode an extension, since it varies by language (.go/.py/.cpp/.hpp).
+# When the exercise ships a problem.md (statement + examples +
+# constraints — see internal/verify's sibling authoring convention),
+# open it as a read-only left split so it reads like NeetCode's own
+# two-pane layout, with focus landing on the solution file for editing.
+# Falls back to a single-file open (or `nvim .` with no solution file at
+# all, e.g. sandbox mode) when there's no problem.md.
 #
-# --listen exposes an RPC socket so the tutor window can drive
+# --listen exposes an RPC socket so the tutor pane can drive
 # highlights/notes in the running nvim instance (issue #24). The socket
 # path is a well-known /tmp location (shared by every process in the
 # container, regardless of WORKDIR) rather than something discovered via
-# tmux env propagation — we're already constructing both windows'
-# commands right here, so just pass it to both explicitly. rm -f first:
-# a stale socket file from a previous run in the same container would
-# otherwise make nvim refuse to bind.
+# tmux env propagation — we're already constructing every pane's command
+# right here, so just pass it to the ones that need it explicitly. rm -f
+# first: a stale socket file from a previous run in the same container
+# would otherwise make nvim refuse to bind.
 NVIM_SOCKET="${NVIM_SOCKET:-/tmp/ballroom-nvim.sock}"
 rm -f "$NVIM_SOCKET"
 SOLUTION_FILE=$(find "$WORKDIR" -maxdepth 1 -name 'solution.*' -type f | head -n1)
@@ -37,21 +39,27 @@ if [ -n "$SOLUTION_FILE" ] && [ -f "$PROBLEM_FILE" ]; then
   # -c arguments are Vim ex-commands, not shell — no shell quoting inside
   # them (paths are already fully resolved by this point, so this is safe
   # even though it wouldn't handle a path containing spaces).
-  tmux send-keys -t "${SESSION}:EDITOR" "nvim --listen '$NVIM_SOCKET' -c \"vsplit $PROBLEM_FILE\" -c 'set readonly nomodifiable' -c 'wincmd l' '$SOLUTION_FILE'" C-m
+  tmux send-keys -t "${SESSION}:MAIN.0" "nvim --listen '$NVIM_SOCKET' -c \"vsplit $PROBLEM_FILE\" -c 'set readonly nomodifiable' -c 'wincmd l' '$SOLUTION_FILE'" C-m
 elif [ -n "$SOLUTION_FILE" ]; then
-  tmux send-keys -t "${SESSION}:EDITOR" "nvim --listen '$NVIM_SOCKET' '$SOLUTION_FILE'" C-m
+  tmux send-keys -t "${SESSION}:MAIN.0" "nvim --listen '$NVIM_SOCKET' '$SOLUTION_FILE'" C-m
 else
-  tmux send-keys -t "${SESSION}:EDITOR" "nvim --listen '$NVIM_SOCKET' ." C-m
+  tmux send-keys -t "${SESSION}:MAIN.0" "nvim --listen '$NVIM_SOCKET' ." C-m
 fi
 
-# window 1: terminal
-tmux new-window -t "${SESSION}:1" -n TERMINAL -c "$WORKDIR"
-tmux send-keys -t "${SESSION}:TERMINAL" "/bin/bash" C-m
+# Split off a bottom row (25% of the window height) below the editor,
+# then split that row into tutor (left, under the problem statement) and
+# terminal (right, under the editor). Pane indices are assigned in
+# creation order — 0 editor, 1 tutor, 2 terminal — which tmux.conf's
+# M-1/M-2/M-3 and M-q bindings target directly.
+tmux split-window -v -p 25 -t "${SESSION}:MAIN.0" -c "$WORKDIR"
+tmux split-window -h -t "${SESSION}:MAIN.1" -c "$WORKDIR"
 
-# window 2: tutor chat. NVIM_SOCKET tells chat.sh where to reach the
-# editor window's RPC server (see above).
-tmux new-window -t "${SESSION}:2" -n TUTOR -c "$WORKDIR"
-tmux send-keys -t "${SESSION}:TUTOR" "NVIM_SOCKET='$NVIM_SOCKET' /usr/local/bin/tutor-chat.sh" C-m
+# pane 1 (bottom-left): tutor chat. NVIM_SOCKET tells chat.sh where to
+# reach the editor pane's RPC server (see above).
+tmux send-keys -t "${SESSION}:MAIN.1" "NVIM_SOCKET='$NVIM_SOCKET' /usr/local/bin/tutor-chat.sh" C-m
 
-tmux select-window -t "${SESSION}:EDITOR"
+# pane 2 (bottom-right): terminal
+tmux send-keys -t "${SESSION}:MAIN.2" "/bin/bash" C-m
+
+tmux select-pane -t "${SESSION}:MAIN.0"
 exec tmux attach -t "$SESSION"
