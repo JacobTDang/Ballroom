@@ -1,0 +1,11 @@
+{
+  "id": "bit-manipulation-05-python",
+  "problem_id": "bit-manipulation-05",
+  "title": "Missing Number",
+  "category": "bit-manipulation",
+  "language": "python",
+  "time_limit_min": 15,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}

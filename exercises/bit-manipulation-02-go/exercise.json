@@ -1,0 +1,11 @@
+{
+  "id": "bit-manipulation-02-go",
+  "problem_id": "bit-manipulation-02",
+  "title": "Number of 1 Bits",
+  "category": "bit-manipulation",
+  "language": "go",
+  "time_limit_min": 15,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}
