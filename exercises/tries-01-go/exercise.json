@@ -1,0 +1,11 @@
+{
+  "id": "tries-01-go",
+  "problem_id": "tries-01",
+  "title": "Implement Trie (Prefix Tree)",
+  "category": "tries",
+  "language": "go",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}
