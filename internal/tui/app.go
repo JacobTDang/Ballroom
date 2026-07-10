@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -81,6 +82,7 @@ type appStage int
 const (
 	stageMain appStage = iota
 	stageCategories
+	stageDSACategories
 	stageProblems
 	stageLanguage
 	stageStats
@@ -172,6 +174,12 @@ type appModel struct {
 	problems       []catalog.ProblemStatus
 	categories     []string
 	categoryCursor int
+
+	// stageDSACategories — second-level picker shown when the top-level
+	// selection is the grouped DSA entry, listing the NeetCode roadmap
+	// subcategories (Arrays & Hashing, Two Pointers, ...) it collapses.
+	dsaCategories     []string
+	dsaCategoryCursor int
 
 	// stageProblems
 	category         string
@@ -276,6 +284,8 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateMain(msg)
 		case stageCategories:
 			return m.updateCategories(msg)
+		case stageDSACategories:
+			return m.updateDSACategories(msg)
 		case stageProblems:
 			return m.updateProblems(msg)
 		case stageLanguage:
@@ -382,18 +392,72 @@ func (m appModel) loadModelPicker() (tea.Model, tea.Cmd) {
 	}
 }
 
+// distinctCategories collects the top-level practice-picker entries —
+// every NeetCode roadmap subcategory collapses into a single "dsa" entry
+// via catalog.TopLevelGroup, so DSA shows once no matter how many
+// subcategories have problems in them. Sorted by catalog.CategoryRank
+// (rather than left at first-encountered order) so DSA always sorts to
+// its own taxonomy position even though no exercise carries the literal
+// "dsa" category anymore — every DSA problem lives under a specific
+// subcategory like "two-pointers", which alone would otherwise anchor
+// the group whenever its first subcategory in the list happens to be.
 func distinctCategories(problems []catalog.ProblemStatus) []string {
 	var categories []string
 	seen := make(map[string]bool)
 	for _, p := range problems {
+		group := catalog.TopLevelGroup(p.Category)
+		if !seen[group] {
+			seen[group] = true
+			categories = append(categories, group)
+		}
+	}
+	sort.Slice(categories, func(i, j int) bool {
+		return catalog.CategoryRank(categories[i]) < catalog.CategoryRank(categories[j])
+	})
+	return categories
+}
+
+// distinctDSASubcategories collects the second-level picker entries shown
+// after selecting the top-level DSA group — the real NeetCode roadmap
+// categories (Arrays & Hashing, Two Pointers, ...), sorted by
+// catalog.CategoryRank to match the roadmap's own sequence.
+func distinctDSASubcategories(problems []catalog.ProblemStatus) []string {
+	var categories []string
+	seen := make(map[string]bool)
+	for _, p := range problems {
+		if !catalog.IsGroupedCategory(p.Category) {
+			continue
+		}
 		if !seen[p.Category] {
 			seen[p.Category] = true
 			categories = append(categories, p.Category)
 		}
 	}
+	sort.Slice(categories, func(i, j int) bool {
+		return catalog.CategoryRank(categories[i]) < catalog.CategoryRank(categories[j])
+	})
 	return categories
 }
 
+// groupCounts aggregates solved/total across every problem whose
+// top-level group matches group — used for the top-level picker's rows,
+// where DSA's count needs to sum across all its subcategories while an
+// ungrouped category (debug, ...) is its own group of one.
+func groupCounts(problems []catalog.ProblemStatus, group string) (solved, total int) {
+	for _, p := range problems {
+		if catalog.TopLevelGroup(p.Category) == group {
+			total++
+			if p.Solved {
+				solved++
+			}
+		}
+	}
+	return solved, total
+}
+
+// categoryCounts aggregates solved/total for an exact category match —
+// used by the second-level DSA subcategory picker, where each row is a
+// real leaf category rather than a top-level group.
 func categoryCounts(problems []catalog.ProblemStatus, category string) (solved, total int) {
 	for _, p := range problems {
 		if p.Category == category {
@@ -432,12 +496,45 @@ func (m appModel) updateCategories(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.categories) == 0 {
 			return m, nil
 		}
-		m.category = m.categories[m.categoryCursor]
+		selected := m.categories[m.categoryCursor]
+		if selected == exercise.CategoryDSA {
+			m.dsaCategories = distinctDSASubcategories(m.problems)
+			m.dsaCategoryCursor = 0
+			m.stage = stageDSACategories
+		} else {
+			m.category = selected
+			m.categoryProblems = filterByCategory(m.problems, selected)
+			m.problemCursor = 0
+			m.stage = stageProblems
+		}
+	case "q", "esc", "ctrl+c":
+		m.stage = stageMain
+	}
+	return m, nil
+}
+
+// --- stageDSACategories ---
+
+func (m appModel) updateDSACategories(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.dsaCategoryCursor > 0 {
+			m.dsaCategoryCursor--
+		}
+	case "down", "j":
+		if m.dsaCategoryCursor < len(m.dsaCategories)-1 {
+			m.dsaCategoryCursor++
+		}
+	case "enter":
+		if len(m.dsaCategories) == 0 {
+			return m, nil
+		}
+		m.category = m.dsaCategories[m.dsaCategoryCursor]
 		m.categoryProblems = filterByCategory(m.problems, m.category)
 		m.problemCursor = 0
 		m.stage = stageProblems
 	case "q", "esc", "ctrl+c":
-		m.stage = stageMain
+		m.stage = stageCategories
 	}
 	return m, nil
 }
@@ -462,7 +559,11 @@ func (m appModel) updateProblems(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.langCursor = 0
 		m.stage = stageLanguage
 	case "q", "esc", "ctrl+c":
-		m.stage = stageCategories
+		if catalog.IsGroupedCategory(m.category) {
+			m.stage = stageDSACategories
+		} else {
+			m.stage = stageCategories
+		}
 	}
 	return m, nil
 }
@@ -660,6 +761,8 @@ func (m appModel) renderRight() string {
 	switch m.stage {
 	case stageCategories:
 		return m.renderCategories()
+	case stageDSACategories:
+		return m.renderDSACategories()
 	case stageProblems:
 		return m.renderProblems()
 	case stageLanguage:
@@ -705,10 +808,34 @@ func (m appModel) renderCategories() string {
 	b.WriteString("\n\n")
 
 	for i, cat := range m.categories {
-		solved, total := categoryCounts(m.problems, cat)
+		solved, total := groupCounts(m.problems, cat)
 		label := fmt.Sprintf("%-16s", catalog.DisplayCategory(cat))
 		status := fmt.Sprintf("%d/%d solved", solved, total)
 		if i == m.categoryCursor {
+			b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s %s", label, status)))
+		} else {
+			b.WriteString(fmt.Sprintf("  %s %s", categoryStyle.Render(label), checkDimStyle.Render(status)))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(checkDimStyle.Render("↑/↓ move · enter select · q back"))
+	return b.String()
+}
+
+func (m appModel) renderDSACategories() string {
+	var b strings.Builder
+	b.WriteString(hintStyle.Render("DSA"))
+	b.WriteString("\n")
+	b.WriteString(checkDimStyle.Render("choose a topic"))
+	b.WriteString("\n\n")
+
+	for i, cat := range m.dsaCategories {
+		solved, total := categoryCounts(m.problems, cat)
+		label := fmt.Sprintf("%-26s", catalog.DisplayCategory(cat))
+		status := fmt.Sprintf("%d/%d solved", solved, total)
+		if i == m.dsaCategoryCursor {
 			b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s %s", label, status)))
 		} else {
 			b.WriteString(fmt.Sprintf("  %s %s", categoryStyle.Render(label), checkDimStyle.Render(status)))

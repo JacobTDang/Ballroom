@@ -78,6 +78,70 @@ func DisplayCategory(category string) string {
 	return strings.Join(words, " ")
 }
 
+// dsaSubcategories is the set of NeetCode roadmap categories that nest
+// under a single "DSA" entry in the practice picker, rather than being
+// their own top-level categories — DSA is the practice picker's way of
+// saying "algorithm problems, browse by topic", and every one of these
+// is exactly that.
+var dsaSubcategories = map[string]bool{
+	exercise.CategoryArraysHashing:   true,
+	exercise.CategoryTwoPointers:     true,
+	exercise.CategorySlidingWindow:   true,
+	exercise.CategoryStack:           true,
+	exercise.CategoryBinarySearch:    true,
+	exercise.CategoryLinkedList:      true,
+	exercise.CategoryTrees:           true,
+	exercise.CategoryTries:           true,
+	exercise.CategoryHeap:            true,
+	exercise.CategoryBacktracking:    true,
+	exercise.CategoryGraphs:          true,
+	exercise.CategoryAdvancedGraphs:  true,
+	exercise.CategoryDP1D:            true,
+	exercise.CategoryDP2D:            true,
+	exercise.CategoryGreedy:          true,
+	exercise.CategoryIntervals:       true,
+	exercise.CategoryMathGeometry:    true,
+	exercise.CategoryBitManipulation: true,
+}
+
+// TopLevelGroup returns the practice-picker top-level entry category
+// belongs under: exercise.CategoryDSA for any NeetCode roadmap
+// subcategory (Arrays & Hashing, Two Pointers, ...), or category itself
+// for anything not grouped (debug, concurrency, implementation,
+// ai-assisted).
+func TopLevelGroup(category string) string {
+	if dsaSubcategories[category] {
+		return exercise.CategoryDSA
+	}
+	return category
+}
+
+// IsGroupedCategory reports whether category is nested under a
+// top-level group (currently only DSA) rather than being its own
+// top-level practice-picker entry.
+func IsGroupedCategory(category string) bool {
+	return dsaSubcategories[category]
+}
+
+// CategoryRank returns category's position in the canonical taxonomy
+// order (categoryOrder) — exported so internal/tui can sort derived
+// category lists (the top-level practice picker, and DSA's subcategory
+// picker) consistently with FormatTable/FormatSummary without
+// duplicating the ordering itself.
+func CategoryRank(category string) int {
+	return categoryOrder[category]
+}
+
+// GroupOrder returns the sort rank of the top-level practice-picker
+// group category belongs to. Every NeetCode subcategory shares DSA's
+// rank, so they always sort together as one block at DSA's position —
+// this keeps DSA pinned first in the top-level list even though no
+// exercise carries the literal "dsa" category anymore (they all live
+// under a specific subcategory like "two-pointers").
+func GroupOrder(category string) int {
+	return categoryOrder[TopLevelGroup(category)]
+}
+
 // ExerciseStatus is one exercise plus its practice history summary.
 type ExerciseStatus struct {
 	Exercise   exercise.Exercise

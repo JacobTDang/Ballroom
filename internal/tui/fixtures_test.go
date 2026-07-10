@@ -26,12 +26,3 @@ func fakeStatusIn(category, id string) catalog.ExerciseStatus {
 	s.Exercise.Category = category
 	return s
 }
-
-func treeFixture() []catalog.ExerciseStatus {
-	return []catalog.ExerciseStatus{
-		fakeStatusIn("dsa", "two-pointers-01"),
-		fakeStatusIn("dsa", "two-pointers-01-cpp"),
-		fakeStatusIn("debug", "off-by-one-01-go"),
-		fakeStatusIn("debug", "off-by-one-01-cpp"),
-	}
-}

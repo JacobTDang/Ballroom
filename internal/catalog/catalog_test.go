@@ -13,6 +13,79 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
 
+func TestTopLevelGroup_NeetCodeSubcategoriesCollapseToDSA(t *testing.T) {
+	subcategories := []string{
+		exercise.CategoryArraysHashing,
+		exercise.CategoryTwoPointers,
+		exercise.CategorySlidingWindow,
+		exercise.CategoryStack,
+		exercise.CategoryBinarySearch,
+		exercise.CategoryLinkedList,
+		exercise.CategoryTrees,
+		exercise.CategoryTries,
+		exercise.CategoryHeap,
+		exercise.CategoryBacktracking,
+		exercise.CategoryGraphs,
+		exercise.CategoryAdvancedGraphs,
+		exercise.CategoryDP1D,
+		exercise.CategoryDP2D,
+		exercise.CategoryGreedy,
+		exercise.CategoryIntervals,
+		exercise.CategoryMathGeometry,
+		exercise.CategoryBitManipulation,
+	}
+	for _, cat := range subcategories {
+		if got := TopLevelGroup(cat); got != exercise.CategoryDSA {
+			t.Errorf("TopLevelGroup(%q) = %q, want %q", cat, got, exercise.CategoryDSA)
+		}
+		if !IsGroupedCategory(cat) {
+			t.Errorf("IsGroupedCategory(%q) = false, want true", cat)
+		}
+	}
+}
+
+func TestTopLevelGroup_UngroupedCategoriesAreTheirOwnGroup(t *testing.T) {
+	ungrouped := []string{
+		exercise.CategoryDebug,
+		exercise.CategoryConcurrency,
+		exercise.CategoryImplementation,
+		exercise.CategoryAIAssisted,
+	}
+	for _, cat := range ungrouped {
+		if got := TopLevelGroup(cat); got != cat {
+			t.Errorf("TopLevelGroup(%q) = %q, want %q (itself)", cat, got, cat)
+		}
+		if IsGroupedCategory(cat) {
+			t.Errorf("IsGroupedCategory(%q) = true, want false", cat)
+		}
+	}
+}
+
+func TestGroupOrder_EveryNeetCodeSubcategorySharesDSARank(t *testing.T) {
+	dsaRank := CategoryRank(exercise.CategoryDSA)
+	subcategories := []string{
+		exercise.CategoryArraysHashing, exercise.CategoryTwoPointers, exercise.CategoryBitManipulation,
+	}
+	for _, cat := range subcategories {
+		if got := GroupOrder(cat); got != dsaRank {
+			t.Errorf("GroupOrder(%q) = %d, want %d (DSA's rank)", cat, got, dsaRank)
+		}
+	}
+}
+
+func TestGroupOrder_SortsDSAAheadOfOtherTopLevelCategories(t *testing.T) {
+	// Regression: once no exercise carries the literal "dsa" category
+	// (every DSA problem lives under a real NeetCode subcategory), a
+	// naive first-encountered-order dedup would let DSA drift to
+	// wherever its first subcategory happens to land — which sorts
+	// after debug/concurrency/implementation/ai-assisted in
+	// categoryOrder. GroupOrder must keep DSA pinned to its own rank
+	// regardless of which subcategory anchors it.
+	if got := GroupOrder(exercise.CategoryArraysHashing); got >= CategoryRank(exercise.CategoryDebug) {
+		t.Errorf("GroupOrder(arrays-hashing) = %d, want less than debug's rank (%d)", got, CategoryRank(exercise.CategoryDebug))
+	}
+}
+
 func TestDisplayCategory_NeetCodeCategoriesGetHumanReadableLabels(t *testing.T) {
 	cases := map[string]string{
 		exercise.CategoryDSA:             "DSA",
