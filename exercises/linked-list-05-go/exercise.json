@@ -1,0 +1,11 @@
+{
+  "id": "linked-list-05-go",
+  "problem_id": "linked-list-05",
+  "title": "Copy List with Random Pointer",
+  "category": "linked-list",
+  "language": "go",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}

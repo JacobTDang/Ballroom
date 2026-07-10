@@ -1,0 +1,46 @@
+#include <cassert>
+#include <cstdio>
+#include <vector>
+
+struct ListNode {
+    int val;
+    ListNode* next;
+    ListNode() : val(0), next(nullptr) {}
+    ListNode(int x) : val(x), next(nullptr) {}
+    ListNode(int x, ListNode* next) : val(x), next(next) {}
+};
+
+void ReorderList(ListNode* head);
+
+ListNode* buildList(const std::vector<int>& vals) {
+    ListNode dummy;
+    ListNode* cur = &dummy;
+    for (int v : vals) {
+        cur->next = new ListNode(v);
+        cur = cur->next;
+    }
+    return dummy.next;
+}
+
+std::vector<int> toVector(ListNode* head) {
+    std::vector<int> out;
+    for (ListNode* n = head; n != nullptr; n = n->next) {
+        out.push_back(n->val);
+    }
+    return out;
+}
+
+void check(std::vector<int> in, std::vector<int> want) {
+    ListNode* head = buildList(in);
+    ReorderList(head);
+    assert(toVector(head) == want);
+}
+
+int main() {
+    check({1, 2, 3, 4}, {1, 4, 2, 3});
+    check({1, 2, 3, 4, 5}, {1, 5, 2, 4, 3});
+    check({1}, {1});
+    check({1, 2}, {1, 2});
+    printf("all assertions passed\n");
+    return 0;
+}
