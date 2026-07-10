@@ -1,0 +1,11 @@
+{
+  "id": "sliding-window-06-go",
+  "problem_id": "sliding-window-06",
+  "title": "Sliding Window Maximum",
+  "category": "sliding-window",
+  "language": "go",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}

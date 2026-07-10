@@ -1,0 +1,11 @@
+{
+  "id": "sliding-window-02-python",
+  "problem_id": "sliding-window-02",
+  "title": "Longest Substring Without Repeating Characters",
+  "category": "sliding-window",
+  "language": "python",
+  "time_limit_min": 20,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}
