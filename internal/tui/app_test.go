@@ -55,7 +55,7 @@ func fakeRecentAttempts(attempts []tracker.Attempt, err error) func() {
 
 func practiceFixture() []catalog.ExerciseStatus {
 	return []catalog.ExerciseStatus{
-		fakeStatusIn("dsa", "two-pointers-01"),
+		fakeStatusIn("two-pointers", "two-pointers-01"),
 		fakeStatusIn("debug", "off-by-one-01"),
 	}
 }
@@ -260,18 +260,18 @@ func TestAppModel_Categories_DownStopsAtLast(t *testing.T) {
 	}
 }
 
-func TestAppModel_Categories_EnterFiltersProblemsAndAdvances(t *testing.T) {
+func TestAppModel_Categories_EnterOnDSAGoesToDSASubcategories(t *testing.T) {
 	m := categoriesFixture(t)
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // dsa is first
 	if cmd != nil {
 		t.Error("expected no external command")
 	}
 	got := newM.(appModel)
-	if got.stage != stageProblems {
-		t.Fatalf("stage = %v, want stageProblems", got.stage)
+	if got.stage != stageDSACategories {
+		t.Fatalf("stage = %v, want stageDSACategories", got.stage)
 	}
-	if len(got.categoryProblems) != 1 || got.categoryProblems[0].ProblemID != "two-pointers-01" {
-		t.Errorf("categoryProblems = %+v, want just two-pointers-01", got.categoryProblems)
+	if len(got.dsaCategories) != 1 || got.dsaCategories[0] != "two-pointers" {
+		t.Errorf("dsaCategories = %v, want [two-pointers]", got.dsaCategories)
 	}
 }
 
@@ -297,11 +297,65 @@ func TestAppModel_RenderCategories_ShowsDSAUppercase(t *testing.T) {
 	}
 }
 
+// --- stageDSACategories ---
+
+func dsaCategoriesFixture(t *testing.T) appModel {
+	t.Helper()
+	m := categoriesFixture(t)
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // dsa -> stageDSACategories
+	return newM.(appModel)
+}
+
+func TestAppModel_DSACategories_DownStopsAtLast(t *testing.T) {
+	m := dsaCategoriesFixture(t)
+	for i := 0; i < 10; i++ {
+		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = newM.(appModel)
+	}
+	if m.dsaCategoryCursor != len(m.dsaCategories)-1 {
+		t.Errorf("dsaCategoryCursor = %d, want %d", m.dsaCategoryCursor, len(m.dsaCategories)-1)
+	}
+}
+
+func TestAppModel_DSACategories_EnterFiltersProblemsAndAdvances(t *testing.T) {
+	m := dsaCategoriesFixture(t)
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // two-pointers is the only subcategory
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	got := newM.(appModel)
+	if got.stage != stageProblems {
+		t.Fatalf("stage = %v, want stageProblems", got.stage)
+	}
+	if len(got.categoryProblems) != 1 || got.categoryProblems[0].ProblemID != "two-pointers-01" {
+		t.Errorf("categoryProblems = %+v, want just two-pointers-01", got.categoryProblems)
+	}
+}
+
+func TestAppModel_DSACategories_QGoesBackToCategories(t *testing.T) {
+	m := dsaCategoriesFixture(t)
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	if newM.(appModel).stage != stageCategories {
+		t.Error("expected q to return to stageCategories")
+	}
+}
+
+func TestAppModel_RenderDSACategories_ShowsSubcategoryName(t *testing.T) {
+	m := dsaCategoriesFixture(t)
+	out := stripAnsiTUI(m.View())
+	if !strings.Contains(out, "Two Pointers") {
+		t.Errorf("expected the subcategory list to show %q, got:\n%s", "Two Pointers", out)
+	}
+}
+
 // --- stageProblems ---
 
 func problemsFixture(t *testing.T) appModel {
 	t.Helper()
-	m := categoriesFixture(t)
+	m := dsaCategoriesFixture(t)
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	return newM.(appModel)
 }
@@ -321,19 +375,35 @@ func TestAppModel_Problems_EnterAdvancesToLanguage(t *testing.T) {
 	}
 }
 
-func TestAppModel_Problems_QGoesBackToCategories(t *testing.T) {
+func TestAppModel_Problems_QGoesBackToDSACategoriesWhenGrouped(t *testing.T) {
 	m := problemsFixture(t)
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
-	if newM.(appModel).stage != stageCategories {
-		t.Error("expected q to return to stageCategories")
+	if newM.(appModel).stage != stageDSACategories {
+		t.Error("expected q to return to stageDSACategories for a grouped (NeetCode) category")
+	}
+}
+
+func TestAppModel_Problems_QGoesBackToCategoriesWhenUngrouped(t *testing.T) {
+	m := categoriesFixture(t)
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown}) // move to "debug" (ungrouped)
+	m = newM.(appModel)
+	newM2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // debug -> stageProblems directly
+	m = newM2.(appModel)
+	if m.stage != stageProblems {
+		t.Fatalf("stage = %v, want stageProblems", m.stage)
+	}
+
+	newM3, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if newM3.(appModel).stage != stageCategories {
+		t.Error("expected q to return directly to stageCategories for an ungrouped category")
 	}
 }
 
 func TestAppModel_RenderProblems_ShowsDisplayCategoryAsHeader(t *testing.T) {
 	m := problemsFixture(t)
 	out := stripAnsiTUI(m.View())
-	if !strings.Contains(out, "DSA") {
-		t.Errorf("expected the problems header to show %q, got:\n%s", "DSA", out)
+	if !strings.Contains(out, "Two Pointers") {
+		t.Errorf("expected the problems header to show %q, got:\n%s", "Two Pointers", out)
 	}
 }
 
@@ -732,7 +802,7 @@ func TestNewAppModel_DefaultsToStageMain(t *testing.T) {
 func TestNewAppModel_ResumeAtStageProblems_PreloadsCategory(t *testing.T) {
 	defer fakeCatalogList(practiceFixture(), nil)()
 
-	m := newAppModel(config.Config{}, appResume{stage: stageProblems, category: "dsa"})
+	m := newAppModel(config.Config{}, appResume{stage: stageProblems, category: "two-pointers"})
 	if m.stage != stageProblems {
 		t.Fatalf("stage = %v, want stageProblems", m.stage)
 	}
