@@ -1,0 +1,11 @@
+{
+  "id": "binary-search-06-go",
+  "problem_id": "binary-search-06",
+  "title": "Time Based Key-Value Store",
+  "category": "binary-search",
+  "language": "go",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}
