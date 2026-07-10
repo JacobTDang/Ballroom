@@ -1,0 +1,11 @@
+{
+  "id": "trees-15-go",
+  "problem_id": "trees-15",
+  "title": "Serialize and Deserialize Binary Tree",
+  "category": "trees",
+  "language": "go",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}
