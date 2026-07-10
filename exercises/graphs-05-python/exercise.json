@@ -1,0 +1,11 @@
+{
+  "id": "graphs-05-python",
+  "problem_id": "graphs-05",
+  "title": "Rotting Oranges",
+  "category": "graphs",
+  "language": "python",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}
