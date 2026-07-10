@@ -1,0 +1,11 @@
+{
+  "id": "advanced-graphs-02-cpp",
+  "problem_id": "advanced-graphs-02",
+  "title": "Min Cost to Connect All Points",
+  "category": "advanced-graphs",
+  "language": "cpp",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "clang++ -std=c++17 -O0 -g -o /tmp/t solution.cpp hidden_test.cpp && /tmp/t"
+}
