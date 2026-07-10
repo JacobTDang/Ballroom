@@ -1,0 +1,11 @@
+{
+  "id": "graphs-13-cpp",
+  "problem_id": "graphs-13",
+  "title": "Word Ladder",
+  "category": "graphs",
+  "language": "cpp",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "clang++ -std=c++17 -O0 -g -o /tmp/t solution.cpp hidden_test.cpp && /tmp/t"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "graphs-13-python",
+  "problem_id": "graphs-13",
+  "title": "Word Ladder",
+  "category": "graphs",
+  "language": "python",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}

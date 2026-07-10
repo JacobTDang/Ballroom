@@ -1,0 +1,11 @@
+{
+  "id": "graphs-07-go",
+  "problem_id": "graphs-07",
+  "title": "Surrounded Regions",
+  "category": "graphs",
+  "language": "go",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}
