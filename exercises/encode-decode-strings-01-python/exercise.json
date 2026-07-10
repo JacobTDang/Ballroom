@@ -1,0 +1,11 @@
+{
+  "id": "encode-decode-strings-01-python",
+  "problem_id": "encode-decode-strings-01",
+  "title": "Encode and Decode Strings",
+  "category": "arrays-hashing",
+  "language": "python",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}
