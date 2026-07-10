@@ -1,0 +1,11 @@
+{
+  "id": "backtracking-07-python",
+  "problem_id": "backtracking-07",
+  "title": "Palindrome Partitioning",
+  "category": "backtracking",
+  "language": "python",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}
