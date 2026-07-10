@@ -1,0 +1,11 @@
+{
+  "id": "tries-03-python",
+  "problem_id": "tries-03",
+  "title": "Word Search II",
+  "category": "tries",
+  "language": "python",
+  "time_limit_min": 35,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}
