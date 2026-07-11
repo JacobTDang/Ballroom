@@ -1,11 +1,50 @@
 package tutor
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 )
+
+// lastTestResultFile is the well-known dotfile internal/session's
+// writeLastTestResult writes into the workspace after every submit.
+// Duplicated as a literal here (rather than importing internal/session
+// for one constant) matching this codebase's convention of local
+// duplication for small pieces over a cross-package dependency — see
+// internal/verify's copyTree comment for the same rationale.
+const lastTestResultFile = ".ballroom-last-test-result.json"
+
+// lastTestResult mirrors the JSON shape internal/session writes.
+type lastTestResult struct {
+	Result      string    `json:"result"`
+	Output      string    `json:"output"`
+	TestCommand string    `json:"test_command"`
+	RecordedAt  time.Time `json:"recorded_at"`
+}
+
+// readLastTestResult returns the most recent submit's test result from
+// workDir, or (zero, false, nil) if none exists yet — haven't submitted
+// this session, or sandbox mode (which never runs test_command) — an
+// expected state, not an error. A malformed file (exists but won't
+// parse) IS a real error, unlike a missing file.
+func readLastTestResult(workDir string) (lastTestResult, bool, error) {
+	data, err := os.ReadFile(filepath.Join(workDir, lastTestResultFile))
+	if os.IsNotExist(err) {
+		return lastTestResult{}, false, nil
+	}
+	if err != nil {
+		return lastTestResult{}, false, fmt.Errorf("tutor: read last test result: %w", err)
+	}
+
+	var result lastTestResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return lastTestResult{}, false, fmt.Errorf("tutor: parse last test result: %w", err)
+	}
+	return result, true, nil
+}
 
 // buildFileContext returns the active solution.* file's contents
 // (truncated to maxBytes, with a trailing marker if the file is larger),

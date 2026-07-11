@@ -53,9 +53,41 @@ func newReadProblemStatementTool(cfg Config) (tool.InvokableTool, error) {
 	return t, nil
 }
 
+type readTestOutputOutput struct {
+	Available   bool   `json:"available" jsonschema:"description=whether a test result exists yet"`
+	Result      string `json:"result,omitempty" jsonschema:"description=pass or fail"`
+	Output      string `json:"output,omitempty" jsonschema:"description=the raw test command output"`
+	TestCommand string `json:"test_command,omitempty" jsonschema:"description=the shell command that was run"`
+}
+
+// newReadTestOutputTool lets the model read the result of the user's
+// most recent `ballroom submit` — see internal/session's
+// writeLastTestResult, which produces the file this reads.
+func newReadTestOutputTool(cfg Config) (tool.InvokableTool, error) {
+	fn := func(_ context.Context, _ noInput) (readTestOutputOutput, error) {
+		result, ok, err := readLastTestResult(cfg.WorkDir)
+		if err != nil {
+			return readTestOutputOutput{}, fmt.Errorf("read test output: %w", err)
+		}
+		if !ok {
+			return readTestOutputOutput{Available: false}, nil
+		}
+		return readTestOutputOutput{
+			Available:   true,
+			Result:      result.Result,
+			Output:      result.Output,
+			TestCommand: result.TestCommand,
+		}, nil
+	}
+	t, err := utils.InferTool("read_test_output", "Read the pass/fail result and raw output from the user's most recent test submission, if they've submitted yet.", fn)
+	if err != nil {
+		return nil, fmt.Errorf("tutor: infer read_test_output tool: %w", err)
+	}
+	return t, nil
+}
+
 // buildTools assembles every tool the tutor agent has access to. Grows as
-// later milestones add read_test_output, highlight_lines, and
-// read_cursor_position.
+// later milestones add highlight_lines and read_cursor_position.
 func buildTools(cfg Config) ([]tool.BaseTool, error) {
 	readSolution, err := newReadSolutionFileTool(cfg)
 	if err != nil {
@@ -65,5 +97,9 @@ func buildTools(cfg Config) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []tool.BaseTool{readSolution, readProblem}, nil
+	readTestOutput, err := newReadTestOutputTool(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return []tool.BaseTool{readSolution, readProblem, readTestOutput}, nil
 }

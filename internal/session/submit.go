@@ -7,6 +7,7 @@ package session
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,22 @@ import (
 
 	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
+
+// lastTestResultFile is the well-known dotfile written into a workspace
+// after every submit, holding the raw test output the tutor's
+// read_test_output tool reads from (internal/tutor). Living directly in
+// the workspace mirrors how the tutor already finds solution.*/problem.md
+// there — no DB schema change, and it's naturally scoped to just this
+// exercise run.
+const lastTestResultFile = ".ballroom-last-test-result.json"
+
+// lastTestResult is the JSON shape written to lastTestResultFile.
+type lastTestResult struct {
+	Result      string    `json:"result"`
+	Output      string    `json:"output"`
+	TestCommand string    `json:"test_command"`
+	RecordedAt  time.Time `json:"recorded_at"`
+}
 
 // Config describes one submit invocation. All paths are as seen from
 // inside the container.
@@ -45,6 +62,13 @@ func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, err
 
 	result, output := runTestCommand(cfg)
 	fmt.Fprintf(stdout, "\nresult: %s\n%s\n", result, output)
+
+	if err := writeLastTestResult(cfg, result, output); err != nil {
+		fmt.Fprintf(stdout, "warning: could not save test output for the tutor: %v\n", err)
+		// Not fatal — same graceful-degradation philosophy as the rest of
+		// the tutor-adjacent code. A submission should still get logged
+		// to the tracker DB even if this write fails.
+	}
 
 	notes := promptNotes(stdin, stdout)
 
@@ -103,6 +127,27 @@ func runTestCommand(cfg Config) (result string, output string) {
 		result = tracker.ResultFail
 	}
 	return result, string(out)
+}
+
+// writeLastTestResult persists result/output to lastTestResultFile in
+// the workspace so the tutor's read_test_output tool has something to
+// read after this submit — see internal/tutor for the reader.
+func writeLastTestResult(cfg Config, result, output string) error {
+	data, err := json.Marshal(lastTestResult{
+		Result:      result,
+		Output:      output,
+		TestCommand: cfg.TestCommand,
+		RecordedAt:  time.Now(),
+	})
+	if err != nil {
+		return fmt.Errorf("session: marshal last test result: %w", err)
+	}
+
+	path := filepath.Join(cfg.WorkspaceDir, lastTestResultFile)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("session: write last test result: %w", err)
+	}
+	return nil
 }
 
 func promptNotes(stdin io.Reader, stdout io.Writer) string {
