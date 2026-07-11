@@ -195,5 +195,22 @@ func buildTools(cfg Config) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []tool.BaseTool{readSolution, readProblem, readTestOutput, highlightLines, readCursorPosition}, nil
+
+	// Wrap every tool so a failure (malformed model-generated arguments,
+	// an out-of-bounds highlight range, an unreachable nvim socket that
+	// somehow still errors, ...) becomes a string result fed back to the
+	// model instead of aborting the whole turn — replaces
+	// tutor/chat.sh's process_highlights bash-level fallthrough case.
+	raw := []tool.BaseTool{readSolution, readProblem, readTestOutput, highlightLines, readCursorPosition}
+	wrapped := make([]tool.BaseTool, len(raw))
+	for i, t := range raw {
+		wrapped[i] = utils.WrapToolWithErrorHandler(t, toolErrorHandler)
+	}
+	return wrapped, nil
+}
+
+// toolErrorHandler is the shared ErrorHandler every tool is wrapped
+// with in buildTools.
+func toolErrorHandler(_ context.Context, err error) string {
+	return fmt.Sprintf("tool error: %v", err)
 }

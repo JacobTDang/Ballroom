@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/cloudwego/eino/components/tool"
 )
 
 func TestReadSolutionFileTool_ReturnsFileContents(t *testing.T) {
@@ -280,5 +283,41 @@ func TestBuildTools_ReturnsAllFiveTools(t *testing.T) {
 		if !names[want] {
 			t.Errorf("buildTools missing tool %q, got names %v", want, names)
 		}
+	}
+}
+
+// TestBuildTools_MalformedArgumentsHandledGracefully proves buildTools'
+// utils.WrapToolWithErrorHandler wrapping actually converts a tool
+// failure into a string result instead of a hard error — replaces
+// tutor/chat.sh's process_highlights bash-level fallthrough case for
+// malformed model output. Uses highlight_lines with a wrong-typed
+// "start" field (a string where an int is expected), which fails to
+// JSON-unmarshal into highlightLinesInput inside InvokableRun.
+func TestBuildTools_MalformedArgumentsHandledGracefully(t *testing.T) {
+	tools, err := buildTools(Config{WorkDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("buildTools: %v", err)
+	}
+
+	var highlightTool tool.InvokableTool
+	for _, tl := range tools {
+		info, err := tl.Info(context.Background())
+		if err != nil {
+			t.Fatalf("tool.Info: %v", err)
+		}
+		if info.Name == "highlight_lines" {
+			highlightTool = tl.(tool.InvokableTool)
+		}
+	}
+	if highlightTool == nil {
+		t.Fatal("highlight_lines tool not found in buildTools output")
+	}
+
+	out, err := highlightTool.InvokableRun(context.Background(), `{"file":"solution.go","start":"not-a-number","end":1,"note":"x"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun returned a hard error %v, want it wrapped into a string result", err)
+	}
+	if !strings.Contains(out, "tool error") {
+		t.Errorf("result = %q, want it to mention the tool error instead of silently succeeding", out)
 	}
 }
