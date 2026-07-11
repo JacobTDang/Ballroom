@@ -9,13 +9,24 @@ const (
 
 	fullAssistPrompt = "You are a full-assist coding interview tutor. Answer directly and help however the user asks, including writing code on request."
 
-	// toolsInstruction is appended to every mode's prompt — unlike
+	// toolsInstruction is prepended to every mode's prompt — unlike
 	// tutor/chat.sh's HIGHLIGHT_INSTRUCTIONS, this doesn't need to
 	// describe a text directive syntax; each tool's own JSON-schema
 	// description (see tools.go) is what teaches the model how to call
 	// it. This just nudges the model to actually use them rather than
 	// asking the user to paste code or guessing at problem details.
-	toolsInstruction = " You have tools to see the user's actual code, the problem statement, their last test run, and their cursor position, and to highlight lines directly in their editor with a note. Use them whenever they'd help you give a grounded answer instead of guessing — don't ask the user to paste code you can just read yourself."
+	//
+	// Placed BEFORE the mode-specific rule text (not appended after, as
+	// originally written) and explicit that calling a tool never
+	// conflicts with any rule that follows — cmd/tutor-eval found the
+	// long, strict syntax-only/hints-first prompts were making the model
+	// hesitate to call tools at all (skipping them, or emitting a fake
+	// tool-call-shaped reply as plain text instead of a real tool call),
+	// as if it read tool use as being in tension with the restriction.
+	// Leading with permission-to-use-tools before the restriction, tested
+	// via cmd/tutor-eval, fixed this without weakening the restriction
+	// itself (which was already reliable — 3/3 on every refusal check).
+	toolsInstruction = "You have tools to read the user's actual code, the problem statement, their last test run, and their cursor position, and to highlight lines in their editor with a note. Always use a tool instead of guessing or asking the user to paste something you can just read yourself. Calling a tool is just gathering information — it never conflicts with any rule below, even in a restricted mode. "
 
 	// comprehensionCheckInstruction drives the one-time check (see
 	// runComprehensionCheck in tutor.go). Unlike the bash version, this
@@ -30,11 +41,11 @@ const (
 func systemPromptForMode(mode string) string {
 	switch mode {
 	case exercise.TutorModeSyntaxOnly:
-		return syntaxOnlyPrompt + toolsInstruction
+		return toolsInstruction + syntaxOnlyPrompt
 	case exercise.TutorModeHintsFirst:
-		return hintsFirstPrompt + toolsInstruction
+		return toolsInstruction + hintsFirstPrompt
 	default:
-		return fullAssistPrompt + toolsInstruction
+		return toolsInstruction + fullAssistPrompt
 	}
 }
 
@@ -44,4 +55,12 @@ func systemPromptForMode(mode string) string {
 // there's nothing to check comprehension of.
 func wantsComprehensionCheck(mode string) bool {
 	return mode != exercise.TutorModeSyntaxOnly
+}
+
+// SystemPromptForMode is systemPromptForMode, exported for
+// cmd/tutor-eval — evaluating mode behavior (does syntax-only actually
+// refuse, does hints-first actually withhold) needs the tutor's real
+// production prompts, not a reimplementation that could drift from them.
+func SystemPromptForMode(mode string) string {
+	return systemPromptForMode(mode)
 }
