@@ -2,7 +2,9 @@ package tutor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
@@ -86,8 +88,92 @@ func newReadTestOutputTool(cfg Config) (tool.InvokableTool, error) {
 	return t, nil
 }
 
-// buildTools assembles every tool the tutor agent has access to. Grows as
-// later milestones add highlight_lines and read_cursor_position.
+type highlightLinesInput struct {
+	File  string `json:"file" jsonschema:"description=filename to highlight (e.g. solution.go) -- basename is enough, matches what read_solution_file/read_cursor_position return"`
+	Start int    `json:"start" jsonschema:"description=1-indexed start line (inclusive)"`
+	End   int    `json:"end" jsonschema:"description=1-indexed end line (inclusive) -- same as start to highlight a single line"`
+	Note  string `json:"note" jsonschema:"description=a short note to attach to the highlighted lines, shown in the user's editor"`
+}
+
+type highlightLinesOutput struct {
+	Status string `json:"status" jsonschema:"description=ok on success, or a note that no editor is currently attached"`
+}
+
+// newHighlightLinesTool lets the model highlight a range of lines with a
+// note directly in the user's editor pane (docker/nvim/lua/ballroom_highlight.lua),
+// instead of the previous approach of asking the model to emit a magic
+// text string in its reply for a regex to scrape out. file/note are
+// model-controlled, so escaping (nvimrpc.go's escapeVimSingleQuoted) is
+// load-bearing here — see nvimrpc_test.go's live-nvim injection tests.
+func newHighlightLinesTool(cfg Config) (tool.InvokableTool, error) {
+	fn := func(ctx context.Context, in highlightLinesInput) (highlightLinesOutput, error) {
+		expr := highlightExpr(in.File, in.Start, in.End, in.Note)
+		out, err := remoteExpr(ctx, cfg.NvimSocket, expr)
+		if err != nil {
+			return highlightLinesOutput{}, err
+		}
+		if out == "" {
+			return highlightLinesOutput{Status: "no editor is currently attached, highlight not shown"}, nil
+		}
+		if strings.HasPrefix(out, "ballroom_highlight error:") {
+			return highlightLinesOutput{}, fmt.Errorf("%s", out)
+		}
+		return highlightLinesOutput{Status: out}, nil
+	}
+	t, err := utils.InferTool("highlight_lines", "Highlight a range of lines in the user's solution file with a short note, visible directly in their editor.", fn)
+	if err != nil {
+		return nil, fmt.Errorf("tutor: infer highlight_lines tool: %w", err)
+	}
+	return t, nil
+}
+
+type cursorPositionOutput struct {
+	Available  bool   `json:"available" jsonschema:"description=whether an editor is currently attached"`
+	File       string `json:"file,omitempty" jsonschema:"description=basename of the file currently focused"`
+	Line       int    `json:"line,omitempty" jsonschema:"description=1-indexed cursor line"`
+	Col        int    `json:"col,omitempty" jsonschema:"description=1-indexed cursor column"`
+	TotalLines int    `json:"total_lines,omitempty" jsonschema:"description=total lines in the focused file"`
+}
+
+// newReadCursorPositionTool lets the model see roughly where the user is
+// currently looking/working in the editor, rather than only ever seeing
+// the whole file dumped every turn. The underlying expression
+// (nvimrpc.go's cursorPositionExpr) is static, not model-controlled, so
+// unlike highlight_lines there's no injection surface here.
+func newReadCursorPositionTool(cfg Config) (tool.InvokableTool, error) {
+	fn := func(ctx context.Context, _ noInput) (cursorPositionOutput, error) {
+		out, err := remoteExpr(ctx, cfg.NvimSocket, cursorPositionExpr())
+		if err != nil {
+			return cursorPositionOutput{}, err
+		}
+		if out == "" {
+			return cursorPositionOutput{Available: false}, nil
+		}
+		var pos struct {
+			File       string `json:"file"`
+			Line       int    `json:"line"`
+			Col        int    `json:"col"`
+			TotalLines int    `json:"total_lines"`
+		}
+		if err := json.Unmarshal([]byte(out), &pos); err != nil {
+			return cursorPositionOutput{}, fmt.Errorf("tutor: parse cursor position: %w", err)
+		}
+		return cursorPositionOutput{
+			Available:  true,
+			File:       pos.File,
+			Line:       pos.Line,
+			Col:        pos.Col,
+			TotalLines: pos.TotalLines,
+		}, nil
+	}
+	t, err := utils.InferTool("read_cursor_position", "See where the user's cursor currently is in the editor: filename, line, and column.", fn)
+	if err != nil {
+		return nil, fmt.Errorf("tutor: infer read_cursor_position tool: %w", err)
+	}
+	return t, nil
+}
+
+// buildTools assembles every tool the tutor agent has access to.
 func buildTools(cfg Config) ([]tool.BaseTool, error) {
 	readSolution, err := newReadSolutionFileTool(cfg)
 	if err != nil {
@@ -101,5 +187,13 @@ func buildTools(cfg Config) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []tool.BaseTool{readSolution, readProblem, readTestOutput}, nil
+	highlightLines, err := newHighlightLinesTool(cfg)
+	if err != nil {
+		return nil, err
+	}
+	readCursorPosition, err := newReadCursorPositionTool(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return []tool.BaseTool{readSolution, readProblem, readTestOutput, highlightLines, readCursorPosition}, nil
 }
