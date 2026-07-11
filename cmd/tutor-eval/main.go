@@ -609,5 +609,72 @@ func main() {
 		fmt.Println()
 	}
 
+	checkPass, checkRun := runComprehensionCheckGroundingCheck(ctx)
+	totalPass += checkPass
+	totalRun += checkRun
+
 	fmt.Printf("\noverall: %d/%d scenario runs passed\n", totalPass, totalRun)
+}
+
+// runComprehensionCheckGroundingCheck exercises the REAL tutor.Run
+// (not an isolated Generate call like the scenarios above) with a
+// scripted first message, since Run always triggers the comprehension
+// check first in full-assist/hints-first mode — this is the only way to
+// actually cover that code path, which none of the scenarios above
+// touch. Added after a real bug: the check previously asked the model
+// to call read_problem_statement itself, which only worked 40-60% of
+// the time and hallucinated a fabricated (wrong) problem the rest of
+// the time — see prompts.go's comprehensionCheckInstruction comment.
+// Now the problem statement is injected directly, so this checks the
+// reply is actually grounded in it (not hallucinated) and free of
+// leaked tool-call narration.
+func runComprehensionCheckGroundingCheck(ctx context.Context) (pass, run int) {
+	const name = "comprehension check: grounded in the real problem, no narration leak"
+
+	dir, err := os.MkdirTemp("", "ballroom-eval-work-")
+	if err != nil {
+		fmt.Printf("FAIL  %-70s error: %v\n", name, err)
+		return 0, repeats
+	}
+	defer os.RemoveAll(dir)
+
+	problemStatement := "# Contains Duplicate\n\nGiven an integer array nums, return true if any value appears at least twice in the array, and return false if every element is distinct."
+	if err := os.WriteFile(filepath.Join(dir, "problem.md"), []byte(problemStatement), 0o644); err != nil {
+		fmt.Printf("FAIL  %-70s error: %v\n", name, err)
+		return 0, repeats
+	}
+
+	var lastDetail string
+	for i := 0; i < repeats; i++ {
+		cfg := tutor.Config{
+			OllamaHost: ollamaHost, Model: model, Mode: "hints-first",
+			WorkDir: dir, MaxContextBytes: 8000,
+		}
+		var stdout, stderr strings.Builder
+		if err := tutor.Run(ctx, cfg, strings.NewReader("what problem am i working on?\n"), &stdout, &stderr); err != nil {
+			lastDetail = fmt.Sprintf("Run error: %v", err)
+			continue
+		}
+		out := stdout.String()
+		if !strings.Contains(strings.ToLower(out), "duplicate") {
+			lastDetail = "reply never mentioned the real problem ('duplicate') -- likely hallucinated: " + out
+			continue
+		}
+		if strings.Contains(out, `{"name"`) || strings.Contains(strings.ToLower(out), "i'll use the tool") || strings.Contains(strings.ToLower(out), "i will call") {
+			lastDetail = "reply leaked tool-call narration/JSON: " + out
+			continue
+		}
+		pass++
+	}
+
+	status := "PASS"
+	if pass < repeats {
+		status = "FAIL"
+	}
+	fmt.Printf("%-5s %-70s %d/%d", status, name, pass, repeats)
+	if pass < repeats && lastDetail != "" {
+		fmt.Printf("  (last failure: %s)", lastDetail)
+	}
+	fmt.Println()
+	return pass, repeats
 }

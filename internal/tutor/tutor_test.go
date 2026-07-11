@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -178,6 +180,38 @@ func TestRun_ComprehensionCheckIsolatesRealQuestion(t *testing.T) {
 	}
 }
 
+func TestRun_ComprehensionCheckInjectsProblemStatementDirectly(t *testing.T) {
+	mock := newSequencedOllama(t, "restated problem + questions")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeFullAssist
+	cfg.WorkDir = t.TempDir()
+
+	want := "# Two Sum\n\nReturn indices of the two numbers that add up to target."
+	if err := os.WriteFile(filepath.Join(cfg.WorkDir, "problem.md"), []byte(want), 0o644); err != nil {
+		t.Fatalf("write problem.md: %v", err)
+	}
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("what's the problem?\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	reqs := mock.allRequests()
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request (the comprehension check), got %d", len(reqs))
+	}
+
+	found := false
+	for _, m := range reqs[0].Messages {
+		if strings.Contains(m.Content, want) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("comprehension check request never included the injected problem statement %q: %+v", want, reqs[0].Messages)
+	}
+}
+
 func TestRun_ComprehensionCheckSkippedForSyntaxOnly(t *testing.T) {
 	mock := newSequencedOllama(t, "direct reply")
 	cfg := testConfig(mock.URL)
@@ -217,10 +251,12 @@ func TestRun_ComprehensionCheckHistoryPersistsBothTurns(t *testing.T) {
 
 	// Second request's history should include the check's exchange —
 	// persisted using the real first question as the user turn, per
-	// runComprehensionCheck's doc comment — followed by the second line.
+	// runComprehensionCheck's doc comment — followed by the ephemeral
+	// hint-count note (hints-first mode, see turnMessages) and the
+	// second line.
 	second := reqs[1].Messages
-	if len(second) != 4 {
-		t.Fatalf("second request: expected [system, user1, assistant1, user2] = 4 messages, got %d: %+v", len(second), second)
+	if len(second) != 5 {
+		t.Fatalf("second request: expected [system, user1, assistant1, hint-note, user2] = 5 messages, got %d: %+v", len(second), second)
 	}
 	if second[1].Content != "real question" {
 		t.Errorf("second request messages[1] = %q, want the real first question %q", second[1].Content, "real question")
@@ -228,7 +264,49 @@ func TestRun_ComprehensionCheckHistoryPersistsBothTurns(t *testing.T) {
 	if second[2].Content != "restated + questions" {
 		t.Errorf("second request messages[2] = %q, want the check's reply", second[2].Content)
 	}
-	if second[3].Content != "follow up" {
-		t.Errorf("second request messages[3] = %q, want %q", second[3].Content, "follow up")
+	if second[3].Role != "system" || !strings.Contains(second[3].Content, "1st help request") {
+		t.Errorf("second request messages[3] = %+v, want an ephemeral system note about the 1st help request", second[3])
+	}
+	if second[4].Content != "follow up" {
+		t.Errorf("second request messages[4] = %q, want %q", second[4].Content, "follow up")
+	}
+}
+
+func TestTurnMessages_NonHintsFirstModeHasNoNote(t *testing.T) {
+	for _, mode := range []string{exercise.TutorModeSyntaxOnly, exercise.TutorModeFullAssist} {
+		msgs := turnMessages(mode, 1, "hello")
+		if len(msgs) != 1 {
+			t.Errorf("mode %s: turnMessages returned %d messages, want 1 (just the user message)", mode, len(msgs))
+			continue
+		}
+		if msgs[0].Content != "hello" {
+			t.Errorf("mode %s: messages[0].Content = %q, want %q", mode, msgs[0].Content, "hello")
+		}
+	}
+}
+
+func TestTurnMessages_HintsFirstFirstRequestNotesFirstAsk(t *testing.T) {
+	msgs := turnMessages(exercise.TutorModeHintsFirst, 1, "help")
+	if len(msgs) != 2 {
+		t.Fatalf("turnMessages returned %d messages, want 2 (note + user message)", len(msgs))
+	}
+	if msgs[0].Role != "system" || !strings.Contains(msgs[0].Content, "1st help request") {
+		t.Errorf("messages[0] = %+v, want a system note mentioning the 1st help request", msgs[0])
+	}
+	if msgs[1].Content != "help" {
+		t.Errorf("messages[1].Content = %q, want %q", msgs[1].Content, "help")
+	}
+}
+
+func TestTurnMessages_HintsFirstRepeatRequestNotesCount(t *testing.T) {
+	msgs := turnMessages(exercise.TutorModeHintsFirst, 3, "still stuck")
+	if len(msgs) != 2 {
+		t.Fatalf("turnMessages returned %d messages, want 2 (note + user message)", len(msgs))
+	}
+	if msgs[0].Role != "system" || !strings.Contains(msgs[0].Content, "#3") {
+		t.Errorf("messages[0] = %+v, want a system note mentioning request #3", msgs[0])
+	}
+	if !strings.Contains(msgs[0].Content, "don't ask them to confirm") {
+		t.Errorf("messages[0].Content = %q, want it to explicitly tell the model not to ask the user to confirm", msgs[0].Content)
 	}
 }
