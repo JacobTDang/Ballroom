@@ -2,6 +2,7 @@ package session
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,6 +128,39 @@ func TestSubmit_TimesOutIfTestsNeverRevealed(t *testing.T) {
 	_, err := Submit(cfg, strings.NewReader("\n"), &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected timeout error when tests are never revealed, got nil")
+	}
+}
+
+func TestSubmit_WritesLastTestResultFile(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.TestCommand = "echo hello-from-test"
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	if _, err := Submit(cfg, strings.NewReader("\n"), &bytes.Buffer{}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(cfg.WorkspaceDir, lastTestResultFile))
+	if err != nil {
+		t.Fatalf("read last test result file: %v", err)
+	}
+
+	var got lastTestResult
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal last test result: %v", err)
+	}
+	if got.Result != tracker.ResultPass {
+		t.Errorf("Result = %q, want %q", got.Result, tracker.ResultPass)
+	}
+	if !strings.Contains(got.Output, "hello-from-test") {
+		t.Errorf("Output = %q, want it to contain the command's output", got.Output)
+	}
+	if got.TestCommand != cfg.TestCommand {
+		t.Errorf("TestCommand = %q, want %q", got.TestCommand, cfg.TestCommand)
+	}
+	if got.RecordedAt.IsZero() {
+		t.Error("RecordedAt is zero, want a real timestamp")
 	}
 }
 
