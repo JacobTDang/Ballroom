@@ -1,7 +1,6 @@
 # Go
 /practice
 /verify-exercises
-/tutor-spike
 *.test
 *.out
 
