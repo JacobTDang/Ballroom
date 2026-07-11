@@ -13,9 +13,13 @@ const defaultDockerImage = "ballroom-practice"
 
 // DefaultTutorModel is the Ollama model used when nothing has been
 // persisted to settings.json yet (first run, before the user has ever
-// picked a model). Must match tutor/chat.sh's own fallback so the two
-// stay in sync.
-const DefaultTutorModel = "qwen2.5-coder:7b"
+// picked a model). Must support Ollama's structured tool_calls response
+// field, since the tutor agent (internal/tutor) is built around real
+// tool calling — confirmed via cmd/tutor-spike and cmd/tutor-eval that
+// the previous default, qwen2.5-coder:7b, does NOT: it emits
+// tool-call-shaped JSON as plain text content instead of a real
+// structured call, so switched to llama3.1:8b, which does.
+const DefaultTutorModel = "llama3.1:8b"
 
 // DeepSeekCoderV2LiteModel is a second tutor model confirmed to work
 // end-to-end (preflight check, TUTOR_MODEL wiring, and a real chat
@@ -29,6 +33,11 @@ const DefaultTutorModel = "qwen2.5-coder:7b"
 // const exists purely so the verified tag is documented and typo-proof
 // (e.g. for scripting a pull, or referencing in tests) rather than
 // re-typed from memory.
+//
+// NOT re-verified against the tool-calling requirement above (see
+// DefaultTutorModel) — this was confirmed back when the tutor was a
+// single plain chat call with no tools. Treat it as unverified for the
+// current agent until checked with cmd/tutor-eval.
 const DeepSeekCoderV2LiteModel = "deepseek-coder-v2:16b-lite-instruct-q4_K_M"
 
 // Qwen25Coder14BModel is a second tutor model confirmed to work end-to-end
@@ -43,6 +52,12 @@ const DeepSeekCoderV2LiteModel = "deepseek-coder-v2:16b-lite-instruct-q4_K_M"
 // first. This const exists purely so the verified tag is documented and
 // typo-proof (e.g. for scripting a pull, or referencing in tests) rather
 // than re-typed from memory.
+//
+// NOT re-verified against the tool-calling requirement above (see
+// DefaultTutorModel) — this was confirmed back when the tutor was a
+// single plain chat call with no tools, and qwen2.5-coder:7b (same
+// family) is confirmed NOT to do real tool calling. Treat it as
+// unverified for the current agent until checked with cmd/tutor-eval.
 //
 // Hardware note: this is a meaningfully larger model than
 // DefaultTutorModel (9.0GB on disk vs. ~4.7GB for the 7B default).

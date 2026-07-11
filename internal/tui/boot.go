@@ -308,8 +308,9 @@ func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, waitForBuildLine(lineCh, errCh)
 		}
 		// The configured tutor model isn't pulled — fall back to pulling
-		// the default (qwen 7B) live right here, same "don't leave you
-		// stuck, actually fix it" treatment as the image-build step
+		// the default (config.DefaultTutorModel) live right here, same
+		// "don't leave you stuck, actually fix it" treatment as the
+		// image-build step
 		// above. Gated on Ollama itself being reachable so this doesn't
 		// also attempt (and immediately fail) a pull when the real
 		// problem is Ollama not running at all.
@@ -395,9 +396,9 @@ func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // RunBoot shows the boot screen and blocks until the user presses Enter
 // (proceed=true) or quits (proceed=false). The returned Config may differ
 // from the one passed in: if the configured tutor model wasn't pulled,
-// boot falls back to pulling the default (qwen 7B) live and switches to
-// it for this run only — the persisted setting is left untouched, so a
-// future launch still tries the real pick first.
+// boot falls back to pulling the default (config.DefaultTutorModel) live
+// and switches to it for this run only — the persisted setting is left
+// untouched, so a future launch still tries the real pick first.
 func RunBoot(cfg config.Config) (result config.Config, proceed bool, err error) {
 	final, err := tea.NewProgram(newBootModel(cfg), tea.WithAltScreen()).Run()
 	if err != nil {

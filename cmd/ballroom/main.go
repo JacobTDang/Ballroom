@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 
 	"github.com/JacobTDang/Ballroom/internal/config"
@@ -11,6 +13,7 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/orchestrator"
 	"github.com/JacobTDang/Ballroom/internal/session"
 	"github.com/JacobTDang/Ballroom/internal/tui"
+	"github.com/JacobTDang/Ballroom/internal/tutor"
 )
 
 func main() {
@@ -34,6 +37,8 @@ func main() {
 		exitOnErr(submitCmd())
 	case "return":
 		exitOnErr(returnCmd())
+	case "tutor":
+		exitOnErr(tutorCmd())
 	default:
 		fmt.Fprintf(os.Stderr, "ballroom: unknown command %q\n\n", args[0])
 		printUsage(os.Stderr)
@@ -57,6 +62,7 @@ Usage:
   ballroom practice <id>       Practice a specific exercise by id
   ballroom sandbox             Free practice, no grading, persists across sessions
   ballroom submit              Submit your solution (run this inside an active session)
+  ballroom tutor               Start the tutor chat (run this inside an active session)
   ballroom return              Return to the host homepage (run this inside an active session)
   ballroom help | -h | --help  Show this help
 
@@ -195,4 +201,45 @@ func submitCmd() error {
 	}
 	fmt.Printf("logged attempt #%d\n", attempt.ID)
 	return nil
+}
+
+// tutorCmd is `ballroom tutor`, launched in the tutor pane by
+// docker/entrypoint.sh (env vars below match what it sets — see
+// NVIM_SOCKET/OLLAMA_HOST/TUTOR_MODEL/PRACTICE_TUTOR_MODE there, plus
+// WORKDIR which every pane shares). Defaults mirror tutor/chat.sh's own
+// fallbacks so a standalone run (e.g. local testing outside a real
+// session) behaves the same way.
+func tutorCmd() error {
+	ollamaHost := os.Getenv("OLLAMA_HOST")
+	if ollamaHost == "" {
+		ollamaHost = "http://host.docker.internal:11434"
+	}
+	model := os.Getenv("TUTOR_MODEL")
+	if model == "" {
+		model = config.DefaultTutorModel
+	}
+	mode := os.Getenv("PRACTICE_TUTOR_MODE")
+	if mode == "" {
+		mode = exercise.TutorModeFullAssist
+	}
+	workDir := os.Getenv("WORKDIR")
+	if workDir == "" {
+		workDir = "/workspace"
+	}
+	maxContextBytes := 8000
+	if raw := os.Getenv("TUTOR_FILE_CONTEXT_MAX_BYTES"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			maxContextBytes = n
+		}
+	}
+
+	cfg := tutor.Config{
+		OllamaHost:      ollamaHost,
+		Model:           model,
+		Mode:            mode,
+		WorkDir:         workDir,
+		NvimSocket:      os.Getenv("NVIM_SOCKET"),
+		MaxContextBytes: maxContextBytes,
+	}
+	return tutor.Run(context.Background(), cfg, os.Stdin, os.Stdout, os.Stderr)
 }
