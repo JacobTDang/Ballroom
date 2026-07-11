@@ -12,10 +12,11 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 )
 
-// tutorChatRequest/sequencedOllama are independent of chat_test.go's
-// mockOllama (which tests tutor/chat.sh and is deleted once the bash
-// implementation is cut over) — self-contained on purpose so this file
-// doesn't need to change when that one goes away.
+// tutorChatRequest/sequencedOllama are the package's Ollama mock server
+// for Go-native tests — used here and by agent_test.go. Originally kept
+// independent of chat_test.go's now-deleted mockOllama (which tested
+// tutor/chat.sh, the bash implementation this package replaced) so this
+// file wouldn't need to change when that one went away.
 type tutorChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`

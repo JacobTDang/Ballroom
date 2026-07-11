@@ -75,9 +75,9 @@ fi
 tmux split-window -v -l "$BOTTOM_LINES" -t "${SESSION}:MAIN.0" -c "$WORKDIR"
 tmux split-window -h -t "${SESSION}:MAIN.1" -c "$WORKDIR"
 
-# pane 1 (bottom-left): tutor chat. NVIM_SOCKET tells chat.sh where to
-# reach the editor pane's RPC server (see above).
-tmux send-keys -t "${SESSION}:MAIN.1" "NVIM_SOCKET='$NVIM_SOCKET' /usr/local/bin/tutor-chat.sh" C-m
+# pane 1 (bottom-left): tutor chat. NVIM_SOCKET tells the tutor agent
+# where to reach the editor pane's RPC server (see above).
+tmux send-keys -t "${SESSION}:MAIN.1" "NVIM_SOCKET='$NVIM_SOCKET' /usr/local/bin/ballroom tutor" C-m
 
 # pane 2 (bottom-right): terminal
 tmux send-keys -t "${SESSION}:MAIN.2" "/bin/bash" C-m
