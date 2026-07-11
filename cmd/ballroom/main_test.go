@@ -29,7 +29,7 @@ func captureUsage(t *testing.T) string {
 func TestPrintUsage_MentionsEverySubcommand(t *testing.T) {
 	out := captureUsage(t)
 	for _, want := range []string{
-		"ballroom", "home", "practice <id>", "sandbox", "submit", "return", "help",
+		"ballroom", "home", "practice <id>", "sandbox", "submit", "tutor", "return", "help",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("usage output missing %q:\n%s", want, out)
