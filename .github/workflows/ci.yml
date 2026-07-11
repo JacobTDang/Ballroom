@@ -71,19 +71,27 @@ jobs:
       - name: shellcheck
         run: shellcheck docker/entrypoint.sh tutor/chat.sh tutor/chat_test.sh
 
-  # tutor/chat.sh's own test suite (issues #22, #23, #24, #25): file
-  # context injection, the comprehension check, highlight-directive
-  # parsing, and the live nvim RPC checks (escaping/injection safety,
-  # toggle) — the latter need a real nvim binary, hence installing it
-  # here rather than in shellcheck, which is lint-only.
+  # tutor/chat.sh's own test suite (issues #22, #23, #24, #25) and the
+  # in-progress Go rewrite's internal/tutor suite (same coverage, being
+  # ported piece by piece — see the tutor rewrite plan): file context
+  # injection, the comprehension check, highlight-directive parsing, and
+  # the live nvim RPC checks (escaping/injection safety, toggle) — the
+  # latter need a real nvim binary, hence installing it here rather than
+  # in shellcheck, which is lint-only. Both suites run here until the
+  # bash implementation is retired (cutover milestone), at which point
+  # this job drops back to Go-only.
   tutor:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
       - name: install neovim
-        # Without a real nvim binary, tutor/chat_test.sh's live RPC checks
-        # (the actual verification that untrusted directive content can't
-        # break out of the --remote-expr call — see
+        # Without a real nvim binary, the live RPC checks (the actual
+        # verification that untrusted directive/tool-argument content
+        # can't break out of the --remote-expr call — see
         # docker/nvim/lua/ballroom_highlight.lua) silently skip instead of
         # actually running. Installing it here is what makes that coverage
         # real in CI rather than only when a contributor happens to have
@@ -91,6 +99,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y neovim
       - name: tutor/chat.sh tests
         run: bash tutor/chat_test.sh
+      - name: internal/tutor tests
+        run: go test -v ./internal/tutor/...
 
   docker-build:
     runs-on: ubuntu-latest
