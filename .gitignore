@@ -1,6 +1,7 @@
 # Go
 /practice
 /verify-exercises
+/tutor-eval
 *.test
 *.out
 
