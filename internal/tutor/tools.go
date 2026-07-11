@@ -214,3 +214,10 @@ func buildTools(cfg Config) ([]tool.BaseTool, error) {
 func toolErrorHandler(_ context.Context, err error) string {
 	return fmt.Sprintf("tool error: %v", err)
 }
+
+// BuildTools is buildTools, exported for cmd/tutor-eval — evaluating
+// whether the model actually calls tools correctly needs the tutor's
+// real tool implementations, not stand-ins.
+func BuildTools(cfg Config) ([]tool.BaseTool, error) {
+	return buildTools(cfg)
+}
