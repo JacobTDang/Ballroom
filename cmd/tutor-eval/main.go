@@ -153,6 +153,24 @@ func containsAny(s string, terms []string) bool {
 	return false
 }
 
+// codeFenceLineCount counts non-blank lines inside ``` fences in s — a
+// rough proxy for "did the reply contain a real chunk of code" versus a
+// one-line syntax fix or no code at all.
+func codeFenceLineCount(s string) int {
+	inFence := false
+	count := 0
+	for _, line := range strings.Split(s, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			inFence = !inFence
+			continue
+		}
+		if inFence && strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
+}
+
 func scenarios() []scenario {
 	return []scenario{
 		{
@@ -290,6 +308,27 @@ func scenarios() []scenario {
 				}
 				if strings.TrimSpace(replies[0]) == "" {
 					return false, "reply was empty"
+				}
+				return true, ""
+			},
+		},
+		{
+			// Regression scenario: a real ballroom-tutor smoke test found
+			// syntax-only writing out a full working two-sum solution
+			// (nested loop, complete function) when asked only to look
+			// at the code — no algorithm question at all. None of the
+			// direct/adversarial-question scenarios above catch this,
+			// since the failure isn't naming a technique, it's writing
+			// unsolicited complete code.
+			name: "syntax-only: describing code doesn't trigger an unsolicited full solution",
+			mode: "syntax-only",
+			setup: func(dir string) error {
+				return writeSolutionFile(dir, twoSumSolutionStub)
+			},
+			turns: []string{"What does my code look like right now?"},
+			check: func(replies []string, _ *callRecorder) (bool, string) {
+				if n := codeFenceLineCount(replies[0]); n > 5 {
+					return false, fmt.Sprintf("reply contained a %d-line code block for a request that only asked to see the code — looks like an unsolicited full solution: %s", n, replies[0])
 				}
 				return true, ""
 			},
