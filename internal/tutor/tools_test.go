@@ -80,13 +80,74 @@ func TestReadProblemStatementTool_ReturnsProblemMd(t *testing.T) {
 	}
 }
 
-func TestBuildTools_ReturnsBothReadOnlyTools(t *testing.T) {
+func TestReadTestOutputTool_ReturnsResultWhenPresent(t *testing.T) {
+	dir := t.TempDir()
+	data, err := json.Marshal(lastTestResult{
+		Result:      "fail",
+		Output:      "FAIL: something broke",
+		TestCommand: "python3 -m pytest -q",
+	})
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, lastTestResultFile), data, 0o644); err != nil {
+		t.Fatalf("write last test result file: %v", err)
+	}
+
+	tl, err := newReadTestOutputTool(Config{WorkDir: dir})
+	if err != nil {
+		t.Fatalf("newReadTestOutputTool: %v", err)
+	}
+
+	out, err := tl.InvokableRun(context.Background(), "{}")
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+
+	var result readTestOutputOutput
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("unmarshal tool output %q: %v", out, err)
+	}
+	if !result.Available {
+		t.Error("Available = false, want true")
+	}
+	if result.Result != "fail" {
+		t.Errorf("Result = %q, want %q", result.Result, "fail")
+	}
+	if result.Output != "FAIL: something broke" {
+		t.Errorf("Output = %q, want %q", result.Output, "FAIL: something broke")
+	}
+}
+
+func TestReadTestOutputTool_NoResultReturnsUnavailable(t *testing.T) {
+	dir := t.TempDir() // never submitted
+
+	tl, err := newReadTestOutputTool(Config{WorkDir: dir})
+	if err != nil {
+		t.Fatalf("newReadTestOutputTool: %v", err)
+	}
+
+	out, err := tl.InvokableRun(context.Background(), "{}")
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+
+	var result readTestOutputOutput
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("unmarshal tool output %q: %v", out, err)
+	}
+	if result.Available {
+		t.Error("Available = true, want false when no submission has happened yet")
+	}
+}
+
+func TestBuildTools_ReturnsAllReadOnlyTools(t *testing.T) {
 	tools, err := buildTools(Config{WorkDir: t.TempDir(), MaxContextBytes: 8000})
 	if err != nil {
 		t.Fatalf("buildTools: %v", err)
 	}
-	if len(tools) != 2 {
-		t.Fatalf("buildTools returned %d tools, want 2", len(tools))
+	if len(tools) != 3 {
+		t.Fatalf("buildTools returned %d tools, want 3", len(tools))
 	}
 
 	names := make(map[string]bool)
@@ -97,7 +158,7 @@ func TestBuildTools_ReturnsBothReadOnlyTools(t *testing.T) {
 		}
 		names[info.Name] = true
 	}
-	for _, want := range []string{"read_solution_file", "read_problem_statement"} {
+	for _, want := range []string{"read_solution_file", "read_problem_statement", "read_test_output"} {
 		if !names[want] {
 			t.Errorf("buildTools missing tool %q, got names %v", want, names)
 		}

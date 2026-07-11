@@ -1,10 +1,12 @@
 package tutor
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildFileContext_ReturnsExactContents(t *testing.T) {
@@ -95,5 +97,69 @@ func TestReadProblemStatement_MissingFileReturnsEmpty(t *testing.T) {
 	got := readProblemStatement(dir)
 	if got != "" {
 		t.Errorf("readProblemStatement = %q, want empty string when problem.md is missing", got)
+	}
+}
+
+func TestReadLastTestResult_ReturnsWrittenResult(t *testing.T) {
+	dir := t.TempDir()
+	recordedAt := time.Date(2026, 7, 10, 18, 4, 11, 0, time.UTC)
+	data, err := json.Marshal(lastTestResult{
+		Result:      "pass",
+		Output:      "ok\nPASS",
+		TestCommand: "go test ./...",
+		RecordedAt:  recordedAt,
+	})
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, lastTestResultFile), data, 0o644); err != nil {
+		t.Fatalf("write last test result file: %v", err)
+	}
+
+	got, ok, err := readLastTestResult(dir)
+	if err != nil {
+		t.Fatalf("readLastTestResult: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	if got.Result != "pass" {
+		t.Errorf("Result = %q, want %q", got.Result, "pass")
+	}
+	if got.Output != "ok\nPASS" {
+		t.Errorf("Output = %q, want %q", got.Output, "ok\nPASS")
+	}
+	if got.TestCommand != "go test ./..." {
+		t.Errorf("TestCommand = %q, want %q", got.TestCommand, "go test ./...")
+	}
+	if !got.RecordedAt.Equal(recordedAt) {
+		t.Errorf("RecordedAt = %v, want %v", got.RecordedAt, recordedAt)
+	}
+}
+
+func TestReadLastTestResult_MissingFileReturnsNotAvailable(t *testing.T) {
+	dir := t.TempDir() // never submitted, or sandbox mode
+
+	got, ok, err := readLastTestResult(dir)
+	if err != nil {
+		t.Fatalf("readLastTestResult: %v", err)
+	}
+	if ok {
+		t.Errorf("ok = true, want false for a missing file (got %+v)", got)
+	}
+}
+
+func TestReadLastTestResult_MalformedFileReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, lastTestResultFile), []byte("not json"), 0o644); err != nil {
+		t.Fatalf("write malformed file: %v", err)
+	}
+
+	_, ok, err := readLastTestResult(dir)
+	if err == nil {
+		t.Fatal("expected an error for a malformed (but present) result file, got nil")
+	}
+	if ok {
+		t.Error("ok = true, want false alongside the error")
 	}
 }
