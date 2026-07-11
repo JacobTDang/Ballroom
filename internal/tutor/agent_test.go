@@ -10,10 +10,10 @@ import (
 // TestAgent_RoundTripsThroughMockOllama proves the eino wiring itself
 // (newChatModel -> newAgent -> Generate) actually reaches an Ollama
 // /api/chat endpoint and returns its reply — no tools yet, that's
-// covered once the real tools exist (see tools_test.go). Reuses the
-// mockOllama helper from chat_test.go (same package).
+// covered once the real tools exist (see tools_test.go). Reuses
+// sequencedOllama from tutor_test.go (same package).
 func TestAgent_RoundTripsThroughMockOllama(t *testing.T) {
-	mock := newMockOllama(t, "hello from the mock")
+	mock := newSequencedOllama(t, "hello from the mock")
 	ctx := context.Background()
 
 	cfg := Config{OllamaHost: mock.URL, Model: "test-model"}
