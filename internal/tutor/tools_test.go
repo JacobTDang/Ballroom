@@ -214,6 +214,37 @@ func TestHighlightLinesTool_OutOfBoundsRangeReturnsError(t *testing.T) {
 	}
 }
 
+// TestHighlightLinesTool_ToleratesQuotedNumberArguments guards against a
+// real bug found during M8 cutover manual testing: llama3.1:8b
+// intermittently emits tool-call arguments with an integer field quoted
+// as a JSON string (e.g. "end":"4" instead of "end":4). Go's
+// encoding/json rejects that as a type mismatch by default — this
+// confirms flexibleInt's custom UnmarshalJSON tolerates it.
+func TestHighlightLinesTool_ToleratesQuotedNumberArguments(t *testing.T) {
+	socket := startTestNvim(t)
+
+	tl, err := newHighlightLinesTool(Config{NvimSocket: socket})
+	if err != nil {
+		t.Fatalf("newHighlightLinesTool: %v", err)
+	}
+
+	// start/end as JSON strings, not numbers — the exact shape observed
+	// from the model in practice.
+	rawIn := `{"file":"test.txt","start":"1","end":"1","note":"quoted numbers"}`
+	out, err := tl.InvokableRun(context.Background(), rawIn)
+	if err != nil {
+		t.Fatalf("InvokableRun with quoted-number arguments: %v", err)
+	}
+
+	var result highlightLinesOutput
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("unmarshal tool output %q: %v", out, err)
+	}
+	if result.Status != "ok" {
+		t.Errorf("Status = %q, want %q", result.Status, "ok")
+	}
+}
+
 func TestReadCursorPositionTool_ReturnsPositionAgainstLiveNvim(t *testing.T) {
 	socket := startTestNvim(t)
 

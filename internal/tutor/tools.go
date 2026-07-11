@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -88,11 +89,43 @@ func newReadTestOutputTool(cfg Config) (tool.InvokableTool, error) {
 	return t, nil
 }
 
+// flexibleInt unmarshals from either a JSON number or a JSON string
+// containing digits. Found via manual testing (M8 cutover): llama3.1:8b
+// intermittently emits tool-call arguments with an integer field quoted
+// as a string (e.g. "end":"4" instead of "end":4) — roughly 1 in 5-6
+// highlight_lines calls in isolated repro testing. Go's encoding/json
+// rejects that as a type mismatch by default, which without this would
+// surface as a spurious tool error even though the call was otherwise
+// well-formed. Confirmed via cmd/tutor-debug-repro (throwaway, not
+// committed) that this fix alone takes the failure rate to 0/16 across
+// both a fresh conversation and one with prior history — the earlier
+// hypothesis that conversation history was the cause was wrong; this
+// was the real root cause the whole time.
+type flexibleInt int
+
+func (fi *flexibleInt) UnmarshalJSON(data []byte) error {
+	var n int
+	if err := json.Unmarshal(data, &n); err == nil {
+		*fi = flexibleInt(n)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return fmt.Errorf("flexibleInt: not a number or numeric string: %s", data)
+	}
+	parsed, err := strconv.Atoi(s)
+	if err != nil {
+		return fmt.Errorf("flexibleInt: %q is not a valid integer: %w", s, err)
+	}
+	*fi = flexibleInt(parsed)
+	return nil
+}
+
 type highlightLinesInput struct {
-	File  string `json:"file" jsonschema:"description=filename to highlight (e.g. solution.go) -- basename is enough, matches what read_solution_file/read_cursor_position return"`
-	Start int    `json:"start" jsonschema:"description=1-indexed start line (inclusive)"`
-	End   int    `json:"end" jsonschema:"description=1-indexed end line (inclusive) -- same as start to highlight a single line"`
-	Note  string `json:"note" jsonschema:"description=a short note to attach to the highlighted lines, shown in the user's editor"`
+	File  string      `json:"file" jsonschema:"description=filename to highlight (e.g. solution.go) -- basename is enough, matches what read_solution_file/read_cursor_position return"`
+	Start flexibleInt `json:"start" jsonschema:"description=1-indexed start line (inclusive)"`
+	End   flexibleInt `json:"end" jsonschema:"description=1-indexed end line (inclusive) -- same as start to highlight a single line"`
+	Note  string      `json:"note" jsonschema:"description=a short note to attach to the highlighted lines, shown in the user's editor"`
 }
 
 type highlightLinesOutput struct {
@@ -107,7 +140,7 @@ type highlightLinesOutput struct {
 // load-bearing here — see nvimrpc_test.go's live-nvim injection tests.
 func newHighlightLinesTool(cfg Config) (tool.InvokableTool, error) {
 	fn := func(ctx context.Context, in highlightLinesInput) (highlightLinesOutput, error) {
-		expr := highlightExpr(in.File, in.Start, in.End, in.Note)
+		expr := highlightExpr(in.File, int(in.Start), int(in.End), in.Note)
 		out, err := remoteExpr(ctx, cfg.NvimSocket, expr)
 		if err != nil {
 			return highlightLinesOutput{}, err
