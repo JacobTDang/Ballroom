@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,14 +33,59 @@ import (
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/JacobTDang/Ballroom/internal/config"
 	"github.com/JacobTDang/Ballroom/internal/tutor"
 )
 
 const (
 	ollamaHost = "http://localhost:11434"
-	model      = "llama3.1:8b" // see cmd/tutor-spike's finding: qwen2.5-coder:7b doesn't do real tool calling here
-	repeats    = 3
+	// repeats was 3 for most of this project's life — raised to 8 after
+	// a separate real-sample-size repro (12 sessions x 4 turns, tracked
+	// in tutor.go's leakedToolCallPattern doc comment) found a failure
+	// rate that only showed up with more than 3 samples: a true ~15-20%
+	// per-turn rate still shows "PASS 3/3" close to half the time by
+	// chance. See feedback_llm_tool_calling_quirks (project memory):
+	// verify real sample size before trusting a small-n clean run.
+	repeats = 8
+
+	// evalRequestTimeout bounds each HTTP request runScenario's own
+	// chat model makes. This tool builds its own ollama.ChatModelConfig
+	// independently of internal/tutor/agent.go's newChatModel (which
+	// carries its own ollamaRequestTimeout) — a real gap found live: a
+	// full eval run genuinely hung for over an hour on a single stuck
+	// request with ~0% CPU while Ollama itself was still reachable,
+	// with nothing to time it out and recover.
+	evalRequestTimeout = 120 * time.Second
 )
+
+// model is the Ollama model tag every scenario runs against. Resolved
+// once at startup by resolveModel — never a hardcoded literal here, so
+// this tool always evaluates whatever model the app itself would
+// actually use, not a value that silently drifts from a real session's
+// (see resolveModel's doc comment for the exact resolution order).
+var model string
+
+// resolveModel decides which model to evaluate, in priority order:
+//  1. TUTOR_EVAL_MODEL env var, for testing a candidate model without
+//     touching the app's own persisted selection.
+//  2. Whatever's currently selected in the real app — config.Load()
+//     reads the same settings.json the TUI's model picker writes to
+//     (internal/config.Settings.TutorModel), so running this with no
+//     env var evaluates exactly the model a real practice session would
+//     actually launch the tutor with.
+//  3. config.DefaultTutorModel, config.Load()'s own fallback when
+//     nothing has ever been persisted (first run) — never re-declared
+//     here, so there's exactly one source of truth for the default.
+func resolveModel() (string, error) {
+	if m := os.Getenv("TUTOR_EVAL_MODEL"); m != "" {
+		return m, nil
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return "", fmt.Errorf("resolve model: %w", err)
+	}
+	return cfg.TutorModel, nil
+}
 
 // forbiddenTechniqueTerms mirrors hints-first's "don't name the
 // technique" rule and syntax-only's "don't discuss algorithms at all"
@@ -183,6 +229,38 @@ func scenarios() []scenario {
 			check: func(_ []string, rec *callRecorder) (bool, string) {
 				if !rec.called("read_solution_file") {
 					return false, "read_solution_file was not called"
+				}
+				return true, ""
+			},
+		},
+		{
+			// prompts.go's toolsInstruction added a short clause telling
+			// the model not to trust a file it read earlier in the
+			// conversation, since the user may have changed it since --
+			// this checks the model actually acts on that: re-reading on
+			// a follow-up that says the code changed, not answering from
+			// memory of the first read. This harness can't mutate the
+			// file mid-scenario (setup only runs once, before all
+			// turns), so it checks call *count* across both turns
+			// instead of the file's returned content actually differing.
+			name: "tool-call: re-reads the solution file on a follow-up implying it changed, not just the first ask",
+			mode: "full-assist",
+			setup: func(dir string) error {
+				return writeSolutionFile(dir, twoSumSolutionStub)
+			},
+			turns: []string{
+				"What does my code look like right now?",
+				"I just updated my function to add a nested loop -- does it look right now?",
+			},
+			check: func(_ []string, rec *callRecorder) (bool, string) {
+				count := 0
+				for _, c := range rec.calls {
+					if c == "read_solution_file" {
+						count++
+					}
+				}
+				if count < 2 {
+					return false, fmt.Sprintf("read_solution_file was called %d time(s) across 2 turns asking about current code state -- want it re-read on the follow-up, not answered from memory of the first read: %v", count, rec.calls)
 				}
 				return true, ""
 			},
@@ -348,6 +426,63 @@ func scenarios() []scenario {
 			},
 		},
 		{
+			// Every mode-constraint scenario above is 1-2 turns. A
+			// separate real-sample-size repro (tracked in tutor.go's
+			// leakedToolCallPattern doc comment) found llama3.1:8b's
+			// tool-calling reliability measurably degrades across a
+			// longer conversation (0/12 leaked at turn 1, up to 5/12 by
+			// turn 4) — there's no reason to assume mode enforcement is
+			// immune to the same drift, and nothing before this checked
+			// it. Several benign syntax turns first, then the real
+			// refusal check.
+			name: "syntax-only: still refuses an algorithm question after several turns of benign syntax chat",
+			mode: "syntax-only",
+			setup: func(dir string) error {
+				return writeSolutionFile(dir, twoSumSolutionStub)
+			},
+			turns: []string{
+				"Is there a syntax error in this Go code: `func f() { return }`?",
+				"What does `:=` mean in Go?",
+				"Is `nums []int` valid syntax for a function parameter?",
+				"What's the difference between `var x int` and `x := 0`?",
+				"What algorithm should I use to solve this two-sum problem efficiently?",
+			},
+			check: func(replies []string, _ *callRecorder) (bool, string) {
+				last := replies[len(replies)-1]
+				if containsAny(last, forbiddenTechniqueTerms) {
+					return false, "reply named a forbidden technique after several benign turns: " + last
+				}
+				if !strings.Contains(last, syntaxOnlyRefusal) {
+					return false, "reply did not use the fixed refusal sentence after several benign turns: " + last
+				}
+				return true, ""
+			},
+		},
+		{
+			// Same long-conversation-drift concern as the syntax-only
+			// scenario above, for hints-first's "don't name the
+			// technique on the first real stuck-point ask" rule.
+			name: "hints-first: still withholds technique name on first real stuck-point ask after several benign turns",
+			mode: "hints-first",
+			setup: func(dir string) error {
+				return writeProblemFile(dir, twoSumProblem)
+			},
+			turns: []string{
+				"hi",
+				"what's this problem asking?",
+				"can you restate the constraints for me?",
+				"what should the function return if there's no valid pair?",
+				"I'm stuck on this two-sum problem, not sure how to approach it.",
+			},
+			check: func(replies []string, _ *callRecorder) (bool, string) {
+				last := replies[len(replies)-1]
+				if containsAny(last, forbiddenTechniqueTerms) {
+					return false, "first real stuck-point ask named a forbidden technique after several benign turns: " + last
+				}
+				return true, ""
+			},
+		},
+		{
 			name: "hints-first: withholds technique name on first ask, reveals on second",
 			mode: "hints-first",
 			setup: func(dir string) error {
@@ -484,7 +619,14 @@ func startEvalNvim() (socket string, cleanup func(), err error) {
 }
 
 // runScenario runs sc once (all its turns, on a fresh agent/history) and
-// reports pass/fail.
+// reports pass/fail. Each turn is built via tutor.TurnMessages (not a
+// bare schema.UserMessage) so hints-first scenarios get the real
+// ephemeral hint-count note hintsFirstPrompt (prompts.go) tells the
+// model to trust — a real gap found live: without it, a hints-first
+// scenario's own eval numbers (5-6/8) looked far worse than real
+// production reliability (15/16 in a direct real-Ollama repro through
+// tutor.go's actual Run loop), because the eval wasn't testing the real
+// code path, just something that reads similarly to a human.
 func runScenario(ctx context.Context, sc scenario, nvimSocket string) (bool, string, error) {
 	workDir, err := os.MkdirTemp("", "ballroom-eval-work-")
 	if err != nil {
@@ -523,7 +665,7 @@ func runScenario(ctx context.Context, sc scenario, nvimSocket string) (bool, str
 		tools[i] = &recordingTool{InvokableTool: t.(tool.InvokableTool), name: info.Name, recorder: rec}
 	}
 
-	cm, err := ollama.NewChatModel(ctx, &ollama.ChatModelConfig{BaseURL: ollamaHost, Model: model})
+	cm, err := ollama.NewChatModel(ctx, &ollama.ChatModelConfig{BaseURL: ollamaHost, Model: model, Timeout: evalRequestTimeout})
 	if err != nil {
 		return false, "", fmt.Errorf("new chat model: %w", err)
 	}
@@ -537,13 +679,27 @@ func runScenario(ctx context.Context, sc scenario, nvimSocket string) (bool, str
 
 	history := []*schema.Message{schema.SystemMessage(tutor.SystemPromptForMode(sc.mode))}
 	var replies []string
-	for _, turn := range sc.turns {
-		requestMessages := append(append([]*schema.Message{}, history...), schema.UserMessage(turn))
-		reply, err := agent.Generate(ctx, requestMessages)
+	for i, turn := range sc.turns {
+		// helpRequestCount = i+1: every scenario turn here is a real
+		// (non-comprehension-check) turn, same as tutor.go's Run loop
+		// counting one-indexed from the first real turn.
+		requestMessages := append(append([]*schema.Message{}, history...), tutor.TurnMessages(sc.mode, i+1, turn)...)
+		// tutor.GenerateWithLeakRetry, not a bare agent.Generate — a
+		// real gap found live: calling agent.Generate directly here
+		// showed a hints-first scenario failing ~25% of the time on a
+		// leaked fake tool-call JSON, a failure mode that can't reach a
+		// real user (tutor.go's Run always retries/falls back to an
+		// honest message) but was muddying this eval's signal by
+		// reporting it as a raw scenario failure anyway.
+		reply, err := tutor.GenerateWithLeakRetry(ctx, agent, requestMessages, io.Discard)
 		if err != nil {
 			return false, "", fmt.Errorf("agent.Generate: %w", err)
 		}
 		replies = append(replies, reply.Content)
+		// Persist only the clean (user, reply) pair, not the ephemeral
+		// hint-count note -- matches tutor.go's Run loop, which
+		// recomputes the note fresh from helpRequestCount each turn
+		// rather than ever persisting it into history.
 		history = append(history, schema.UserMessage(turn), schema.AssistantMessage(reply.Content, nil))
 	}
 
@@ -551,12 +707,43 @@ func runScenario(ctx context.Context, sc scenario, nvimSocket string) (bool, str
 	return ok, detail, nil
 }
 
+// filterScenarios keeps only scenarios whose name contains substr —
+// substr == "" keeps everything. Lets a manual run target just the
+// scenarios under active investigation (e.g. `go run ./cmd/tutor-eval
+// hints-first`) instead of re-running the whole ~15-20 scenario suite,
+// which can take a long time at repeats=8.
+func filterScenarios(all []scenario, substr string) []scenario {
+	if substr == "" {
+		return all
+	}
+	var out []scenario
+	for _, sc := range all {
+		if strings.Contains(sc.name, substr) {
+			out = append(out, sc)
+		}
+	}
+	return out
+}
+
 func main() {
 	ctx := context.Background()
 
+	var err error
+	model, err = resolveModel()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "tutor-eval:", err)
+		os.Exit(1)
+	}
+
+	var nameFilter string
+	if len(os.Args) > 1 {
+		nameFilter = os.Args[1]
+	}
+	scenariosToRun := filterScenarios(scenarios(), nameFilter)
+
 	var nvimSocket string
 	needsNvim := false
-	for _, sc := range scenarios() {
+	for _, sc := range scenariosToRun {
 		if sc.needsNvim {
 			needsNvim = true
 			break
@@ -572,10 +759,10 @@ func main() {
 		}
 	}
 
-	fmt.Printf("tutor-eval: model=%s host=%s repeats=%d\n\n", model, ollamaHost, repeats)
+	fmt.Printf("tutor-eval: model=%s host=%s repeats=%d filter=%q\n\n", model, ollamaHost, repeats, nameFilter)
 
 	var totalPass, totalRun int
-	for _, sc := range scenarios() {
+	for _, sc := range scenariosToRun {
 		if sc.needsNvim && nvimSocket == "" {
 			fmt.Printf("SKIP  %-70s (no live nvim available)\n", sc.name)
 			continue
@@ -609,9 +796,11 @@ func main() {
 		fmt.Println()
 	}
 
-	checkPass, checkRun := runComprehensionCheckGroundingCheck(ctx)
-	totalPass += checkPass
-	totalRun += checkRun
+	if nameFilter == "" || strings.Contains("comprehension check: grounded in the real problem, no narration leak", nameFilter) {
+		checkPass, checkRun := runComprehensionCheckGroundingCheck(ctx)
+		totalPass += checkPass
+		totalRun += checkRun
+	}
 
 	fmt.Printf("\noverall: %d/%d scenario runs passed\n", totalPass, totalRun)
 }
