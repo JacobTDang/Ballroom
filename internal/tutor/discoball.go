@@ -30,10 +30,11 @@ var discoBallFS embed.FS
 // on-screen footprint. Shrunk to 6x6 (3 rendered lines) at one point to
 // make the indicator less prominent, but that was tuned while Kitty
 // (a real image, crisp at any size) was still the renderer actually in
-// use live — once the box feature forced ANSI on unconditionally
-// (thinkingdisplay.go's boxInScrollRegion), 6x6 read as an
-// undifferentiated color blob in real live testing, not a ball. Back to
-// 10x10 (5 rendered lines), the last size confirmed live to still look
+// use live — a since-reverted change briefly forced ANSI whenever the
+// box was active (thinkingdisplay.go's newThinkingDisplay), and 6x6 read
+// as an undifferentiated color blob under that path in real live
+// testing, not a ball. Back to 10x10 (5 rendered lines), the last size
+// confirmed live to still look
 // like a ball (that round's feedback was "too big/prominent", not
 // "unrecognizable") — prioritizing recognizable over compact.
 const (

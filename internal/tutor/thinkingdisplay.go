@@ -104,24 +104,22 @@ type thinkingDisplay struct {
 // for every turn (including ones where the model never calls a tool at
 // all), matching "an animation for when the tutor is thinking" literally.
 //
-// boxInScrollRegion forces the ANSI renderer even when Kitty is
-// available — a real bug found live, not theorized: with the anchored
-// input box active (a DECSTBM-confined scroll region), the ball visibly
-// intersected with conversation text during ordinary turns, not just on
-// resize. The Kitty graphics protocol was designed assuming a normal,
-// full-screen-scrolling terminal; whether a placed image correctly
-// scrolls along with a DECSTBM-confined region the way text does, or
-// stays visually fixed while text scrolls past/through it, isn't
-// something verifiable from this environment (it needs a real Kitty
-// terminal). The ANSI renderer is fully verified working correctly
-// inside the box across many real multi-turn tests, so this removes
-// Kitty as a variable for that combination specifically rather than
-// keep guessing at undocumented protocol behavior. Kitty rendering is
-// unaffected when no box is active (already proven working live,
-// unrelated to this bug).
-func newThinkingDisplay(w io.Writer, boxInScrollRegion bool) *thinkingDisplay {
+// Always prefers Kitty when available, box or not. An earlier version
+// forced the ANSI renderer whenever the anchored input box was active,
+// out of an unverified worry that a Kitty-placed image might not scroll
+// correctly along with a DECSTBM-confined region the way text does —
+// diagnosed at a point when the box itself still had real structural
+// bugs (scrollbox.go's reconfigureAt/returnToScroll), so it's not
+// actually confirmed the intersection symptom was Kitty-specific rather
+// than one of those. With the box now fixed and reverified live, this
+// reverts to Kitty so the ball shows the real sprite (full detail)
+// instead of the coarser ANSI approximation — re-verify live whether
+// the intersection symptom reappears now that the box itself is solid;
+// if it does, that's real evidence it's genuinely a Kitty/DECSTBM
+// interaction, not a misdiagnosis.
+func newThinkingDisplay(w io.Writer) *thinkingDisplay {
 	var ball discoBallRenderer = ansiBallRenderer{}
-	if kittyAvailable() && !boxInScrollRegion {
+	if kittyAvailable() {
 		ball = kittyBallRenderer{}
 	}
 	d := &thinkingDisplay{w: w, ball: ball, stop: make(chan struct{})}

@@ -155,7 +155,7 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 
 		if comprehensionCheckPending {
 			comprehensionCheckPending = false
-			if runComprehensionCheck(ctx, agent, cfg.OllamaHost, cfg.WorkDir, line, &history, stdout, stderr, box != nil) {
+			if runComprehensionCheck(ctx, agent, cfg.OllamaHost, cfg.WorkDir, line, &history, stdout, stderr) {
 				continue
 			}
 			// Couldn't reach Ollama for the check — fall through and
@@ -165,7 +165,7 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 
 		helpRequestCount++
 		requestMessages := append(append([]*schema.Message{}, history...), turnMessages(cfg.Mode, helpRequestCount, line)...)
-		display := newThinkingDisplay(stdout, box != nil)
+		display := newThinkingDisplay(stdout)
 		reply, err := generateWithLeakRetry(ctx, agent, requestMessages, display)
 		display.finish()
 		if err != nil {
@@ -269,7 +269,7 @@ func generateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*
 // discarded, since this is a headless CLI diagnostic) thinking-display
 // animation writes — pass io.Discard.
 func GenerateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*schema.Message, w io.Writer) (*schema.Message, error) {
-	display := newThinkingDisplay(w, false) // headless CLI diagnostic, no box ever
+	display := newThinkingDisplay(w)
 	reply, err := generateWithLeakRetry(ctx, agent, messages, display)
 	display.finish()
 	return reply, err
@@ -352,14 +352,14 @@ func TurnMessages(mode string, helpRequestCount int, line string) []*schema.Mess
 // true. Returns false if Ollama couldn't be reached, so the caller
 // falls through to handling userFirstMessage normally instead of
 // dropping it.
-func runComprehensionCheck(ctx context.Context, agent *react.Agent, ollamaHost, workDir, userFirstMessage string, history *[]*schema.Message, stdout, stderr io.Writer, boxInScrollRegion bool) bool {
+func runComprehensionCheck(ctx context.Context, agent *react.Agent, ollamaHost, workDir, userFirstMessage string, history *[]*schema.Message, stdout, stderr io.Writer) bool {
 	checkMessages := append([]*schema.Message{}, (*history)...)
 	if problem := readProblemStatement(workDir); problem != "" {
 		checkMessages = append(checkMessages, schema.SystemMessage("The exercise's problem statement:\n\n"+problem))
 	}
 	checkMessages = append(checkMessages, schema.SystemMessage(comprehensionCheckInstruction), schema.UserMessage(userFirstMessage))
 
-	display := newThinkingDisplay(stdout, boxInScrollRegion)
+	display := newThinkingDisplay(stdout)
 	reply, err := generateWithLeakRetry(ctx, agent, checkMessages, display)
 	display.finish()
 	if err != nil {
