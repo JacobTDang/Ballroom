@@ -116,18 +116,34 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 	comprehensionCheckPending := wantsComprehensionCheck(cfg.Mode)
 	helpRequestCount := 0
 
+	// drainResize applies a pending resize signal (if any) to the box's
+	// dimensions, non-blocking, a no-op when box is nil. Called at the
+	// top of the loop (before showPrompt) AND again right before a
+	// reply prints (both here and inside runComprehensionCheck) — a
+	// real gap found live via user screenshot: agent.Generate can run
+	// for many seconds against a real model, and a resize landing
+	// during that wait was only ever drained on the *next* loop
+	// iteration, so that turn's reply printed against the box's stale,
+	// pre-resize dimensions — producing exactly the kind of garbled,
+	// overlapping text a size mismatch between the confined scroll
+	// region and the real terminal causes. The signal channel is
+	// buffered (watchResize) so nothing is lost while waiting, only
+	// delayed; this just drains it at more points instead of one.
+	drainResize := func() {
+		if box == nil {
+			return
+		}
+		select {
+		case <-pendingResize:
+			box.reconfigure()
+		default:
+		}
+	}
+
 	scanner := bufio.NewScanner(stdin)
 	for {
 		if box != nil {
-			// Drain any pending resize signal and reconfigure before
-			// showing the next prompt — see Run's doc comment for why
-			// this happens here rather than from watchResize's own
-			// goroutine.
-			select {
-			case <-pendingResize:
-				box.reconfigure()
-			default:
-			}
+			drainResize()
 			box.showPrompt()
 		} else {
 			fmt.Fprint(stdout, "> ")
@@ -153,7 +169,7 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 
 		if comprehensionCheckPending {
 			comprehensionCheckPending = false
-			if runComprehensionCheck(ctx, agent, cfg.OllamaHost, cfg.WorkDir, line, &history, stdout, stderr) {
+			if runComprehensionCheck(ctx, agent, cfg.OllamaHost, cfg.WorkDir, line, &history, stdout, stderr, drainResize) {
 				continue
 			}
 			// Couldn't reach Ollama for the check — fall through and
@@ -179,6 +195,7 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 			continue
 		}
 
+		drainResize()
 		fmt.Fprintln(stdout, reply.Content)
 
 		// Persist only the clean (user, assistant reply) pair — no
@@ -341,7 +358,14 @@ func TurnMessages(mode string, helpRequestCount int, line string) []*schema.Mess
 // true. Returns false if Ollama couldn't be reached, so the caller
 // falls through to handling userFirstMessage normally instead of
 // dropping it.
-func runComprehensionCheck(ctx context.Context, agent *react.Agent, ollamaHost, workDir, userFirstMessage string, history *[]*schema.Message, stdout, stderr io.Writer) bool {
+//
+// drainResize is called right before the reply prints, same as Run's
+// own main-loop call — this check's own agent.Generate call is exactly
+// as susceptible to the resize-during-generation gap drainResize fixes
+// (see its doc comment in Run), and it happens to be the very first
+// Generate call of a session, so it's a likely place for a user to
+// resize their terminal while waiting.
+func runComprehensionCheck(ctx context.Context, agent *react.Agent, ollamaHost, workDir, userFirstMessage string, history *[]*schema.Message, stdout, stderr io.Writer, drainResize func()) bool {
 	checkMessages := append([]*schema.Message{}, (*history)...)
 	if problem := readProblemStatement(workDir); problem != "" {
 		checkMessages = append(checkMessages, schema.SystemMessage("The exercise's problem statement:\n\n"+problem))
@@ -356,6 +380,7 @@ func runComprehensionCheck(ctx context.Context, agent *react.Agent, ollamaHost, 
 		return false
 	}
 
+	drainResize()
 	fmt.Fprintln(stdout, reply.Content)
 
 	*history = append(*history, schema.UserMessage(userFirstMessage), schema.AssistantMessage(reply.Content, nil))

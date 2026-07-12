@@ -233,6 +233,29 @@ func TestInputBox_ReconfigureAt_RowCountChangeClearsScreen(t *testing.T) {
 	}
 }
 
+func TestInputBox_ReconfigureAt_EndsWithCursorAtScrollRegionBottomNotInsideTheBox(t *testing.T) {
+	// drawBorders' own absolute positioning leaves the cursor at the
+	// bottom border row -- reconfigureAt must reposition afterward the
+	// same way setup() already does, or a caller that reconfigures and
+	// then prints directly (tutor.go's drainResize, called right before
+	// printing a reply) ends up printing into the box instead of the
+	// scroll region. A real bug found live via a mid-generation resize:
+	// the reply printed mixed in with the box's bottom border characters.
+	var buf bytes.Buffer
+	box, err := newInputBoxAt(&buf, 24, 80)
+	if err != nil {
+		t.Fatalf("newInputBoxAt: %v", err)
+	}
+	buf.Reset()
+
+	box.reconfigureAt(40, 120)
+
+	want := "\033[37;1H\033[2K"
+	if got := buf.String(); !strings.HasSuffix(got, want) {
+		t.Errorf("reconfigureAt output %q does not end with %q (cursor left inside the box instead of at the scroll region's bottom row)", got, want)
+	}
+}
+
 func TestInputBox_ReconfigureAt_ColsOnlyChangeRedrawsSameRowsWithoutClearingScreen(t *testing.T) {
 	// A pure width change (rows unchanged) does NOT clear the whole
 	// screen: the box stays at the same physical rows (no reflow risk,

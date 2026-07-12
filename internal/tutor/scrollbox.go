@@ -241,6 +241,24 @@ func (b *inputBox) reconfigureAt(rows, cols int) {
 	}
 	fmt.Fprintf(b.w, "\033[1;%dr", b.regionBottom)
 	b.drawBorders()
+	// drawBorders' own absolute cursor positioning leaves the cursor
+	// inside the box (wherever it last wrote, the bottom border row) —
+	// same issue setup() already had to fix (see its doc comment), but
+	// missed here originally. Every existing call site happened to
+	// paper over it: reconfigure is only ever called right before
+	// showPrompt(), which does its own absolute positioning regardless
+	// of where drawBorders left the cursor. That stopped being true once
+	// a caller needed to reconfigure and then print a reply directly
+	// (tutor.go's drainResize, called right before printing) — a real
+	// bug found live via user screenshot: a resize landing mid-generation
+	// (agent.Generate can run for many seconds) left the reply printing
+	// into the box's bottom border row instead of the scroll region,
+	// producing garbled text mixed with border characters. Repositioning
+	// to the bottom of the (possibly new) scroll region and clearing it
+	// — the same target/clear box.returnToScroll() already uses before
+	// its own caller prints — makes reconfigureAt safe to call directly
+	// before printing, not just before showPrompt.
+	fmt.Fprintf(b.w, "\033[%d;1H\033[2K", b.regionBottom)
 }
 
 // reconfigure re-queries the real terminal size and, if it changed,
