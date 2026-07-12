@@ -20,7 +20,7 @@ func TestThinkingDisplay_AnimatesImmediatelyEvenWithNoToolCalls(t *testing.T) {
 	// call.
 	t.Setenv("KITTY_WINDOW_ID", "") // force the ANSI renderer — this test checks its specific escape codes
 	var buf bytes.Buffer
-	d := newThinkingDisplay(&buf)
+	d := newThinkingDisplay(&buf, false)
 	d.finish()
 
 	// The ball's whole visual signal is carried in the truecolor
@@ -35,7 +35,7 @@ func TestThinkingDisplay_AnimatesImmediatelyEvenWithNoToolCalls(t *testing.T) {
 func TestThinkingDisplay_ToolNamesAccumulateInOutput(t *testing.T) {
 	t.Setenv("KITTY_WINDOW_ID", "")
 	var buf bytes.Buffer
-	d := newThinkingDisplay(&buf)
+	d := newThinkingDisplay(&buf, false)
 
 	ctx := context.Background()
 	d.onStart(ctx, &callbacks.RunInfo{Name: "read_solution_file"}, &tool.CallbackInput{})
@@ -54,7 +54,7 @@ func TestThinkingDisplay_ToolNamesAccumulateInOutput(t *testing.T) {
 func TestThinkingDisplay_ShowsArgumentSummaryForHighlightLines(t *testing.T) {
 	t.Setenv("KITTY_WINDOW_ID", "")
 	var buf bytes.Buffer
-	d := newThinkingDisplay(&buf)
+	d := newThinkingDisplay(&buf, false)
 
 	input := &tool.CallbackInput{ArgumentsInJSON: `{"file":"solution.go","start":4,"end":6,"note":"off by one"}`}
 	d.onStart(context.Background(), &callbacks.RunInfo{Name: "highlight_lines"}, input)
@@ -69,7 +69,7 @@ func TestThinkingDisplay_ShowsArgumentSummaryForHighlightLines(t *testing.T) {
 func TestThinkingDisplay_OnEndMarksTheRightEntryDoneRegardlessOfOrder(t *testing.T) {
 	t.Setenv("KITTY_WINDOW_ID", "")
 	var buf bytes.Buffer
-	d := newThinkingDisplay(&buf)
+	d := newThinkingDisplay(&buf, false)
 
 	ctx1 := d.onStart(context.Background(), &callbacks.RunInfo{Name: "read_solution_file"}, &tool.CallbackInput{})
 	ctx2 := d.onStart(context.Background(), &callbacks.RunInfo{Name: "read_problem_statement"}, &tool.CallbackInput{})
@@ -104,7 +104,7 @@ func TestThinkingDisplay_OnEndMarksTheRightEntryDoneRegardlessOfOrder(t *testing
 func TestThinkingDisplay_ConcurrentToolCallsRaceSafe(t *testing.T) {
 	t.Setenv("KITTY_WINDOW_ID", "")
 	var buf bytes.Buffer
-	d := newThinkingDisplay(&buf)
+	d := newThinkingDisplay(&buf, false)
 
 	names := []string{"read_solution_file", "read_problem_statement", "read_cursor_position"}
 	var wg sync.WaitGroup
@@ -130,7 +130,7 @@ func TestThinkingDisplay_ConcurrentToolCallsRaceSafe(t *testing.T) {
 func TestThinkingDisplay_FinishIsIdempotent(t *testing.T) {
 	t.Setenv("KITTY_WINDOW_ID", "")
 	var buf bytes.Buffer
-	d := newThinkingDisplay(&buf)
+	d := newThinkingDisplay(&buf, false)
 	d.finish()
 	d.finish() // must not panic (closing d.stop twice)
 }
@@ -167,7 +167,7 @@ func TestRenderDot_DoneEntryHoldsSteadyAcrossFrames(t *testing.T) {
 func TestNewThinkingDisplay_UsesAnsiRendererWithoutKitty(t *testing.T) {
 	t.Setenv("KITTY_WINDOW_ID", "")
 	var buf bytes.Buffer
-	d := newThinkingDisplay(&buf)
+	d := newThinkingDisplay(&buf, false)
 	defer d.finish()
 
 	if _, ok := d.ball.(ansiBallRenderer); !ok {
@@ -179,11 +179,32 @@ func TestNewThinkingDisplay_UsesKittyRendererWhenAvailable(t *testing.T) {
 	t.Setenv("KITTY_WINDOW_ID", "1")
 	t.Setenv("TMUX", "")
 	var buf bytes.Buffer
-	d := newThinkingDisplay(&buf)
+	d := newThinkingDisplay(&buf, false)
 	defer d.finish()
 
 	if _, ok := d.ball.(kittyBallRenderer); !ok {
 		t.Errorf("ball = %T, want kittyBallRenderer", d.ball)
+	}
+}
+
+// TestNewThinkingDisplay_ForcesAnsiWhenBoxActiveEvenWithKittyAvailable is
+// a regression test for a real bug found live: with the anchored input
+// box active (a DECSTBM-confined scroll region), the Kitty-rendered ball
+// visibly intersected with conversation text during ordinary turns —
+// whether a placed Kitty image correctly scrolls along with a
+// DECSTBM-confined region the way text does isn't verifiable outside a
+// real Kitty terminal, so boxInScrollRegion=true forces the
+// fully-verified ANSI renderer instead, removing Kitty as a variable
+// for that specific combination.
+func TestNewThinkingDisplay_ForcesAnsiWhenBoxActiveEvenWithKittyAvailable(t *testing.T) {
+	t.Setenv("KITTY_WINDOW_ID", "1")
+	t.Setenv("TMUX", "")
+	var buf bytes.Buffer
+	d := newThinkingDisplay(&buf, true)
+	defer d.finish()
+
+	if _, ok := d.ball.(ansiBallRenderer); !ok {
+		t.Errorf("ball = %T, want ansiBallRenderer even though Kitty is available, since a box is active", d.ball)
 	}
 }
 
@@ -196,7 +217,7 @@ func TestThinkingDisplay_UsesRelativeCursorUpMathNotSaveRestore(t *testing.T) {
 	// the display never regresses back to DECSC/DECRC.
 	t.Setenv("KITTY_WINDOW_ID", "")
 	var buf bytes.Buffer
-	d := newThinkingDisplay(&buf)
+	d := newThinkingDisplay(&buf, false)
 
 	ctx := d.onStart(context.Background(), &callbacks.RunInfo{Name: "read_solution_file"}, &tool.CallbackInput{})
 	d.onEnd(ctx, &callbacks.RunInfo{Name: "read_solution_file"}, &tool.CallbackOutput{})
@@ -221,7 +242,7 @@ func TestThinkingDisplay_ToolCallsPrintBeforeTheBall(t *testing.T) {
 	// redraw segment and check ordering only within that.
 	t.Setenv("KITTY_WINDOW_ID", "")
 	var buf bytes.Buffer
-	d := newThinkingDisplay(&buf)
+	d := newThinkingDisplay(&buf, false)
 	d.onStart(context.Background(), &callbacks.RunInfo{Name: "read_solution_file"}, &tool.CallbackInput{})
 	d.finish()
 
@@ -249,7 +270,7 @@ func TestThinkingDisplay_FinishClosesTheBallRenderer(t *testing.T) {
 	t.Setenv("KITTY_WINDOW_ID", "1")
 	t.Setenv("TMUX", "")
 	var buf bytes.Buffer
-	d := newThinkingDisplay(&buf)
+	d := newThinkingDisplay(&buf, false)
 	d.finish()
 
 	if !strings.Contains(buf.String(), "a=d") {
@@ -260,7 +281,7 @@ func TestThinkingDisplay_FinishClosesTheBallRenderer(t *testing.T) {
 func TestThinkingDisplay_CallbackHandlerFiresOnStartAndOnEnd(t *testing.T) {
 	t.Setenv("KITTY_WINDOW_ID", "")
 	var buf bytes.Buffer
-	d := newThinkingDisplay(&buf)
+	d := newThinkingDisplay(&buf, false)
 	h := d.callbackHandler()
 
 	info := &callbacks.RunInfo{Name: "read_solution_file", Component: "Tool"}

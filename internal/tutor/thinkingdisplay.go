@@ -103,9 +103,25 @@ type thinkingDisplay struct {
 // old toolCallDisplay, which only activated on a tool call, this runs
 // for every turn (including ones where the model never calls a tool at
 // all), matching "an animation for when the tutor is thinking" literally.
-func newThinkingDisplay(w io.Writer) *thinkingDisplay {
+//
+// boxInScrollRegion forces the ANSI renderer even when Kitty is
+// available — a real bug found live, not theorized: with the anchored
+// input box active (a DECSTBM-confined scroll region), the ball visibly
+// intersected with conversation text during ordinary turns, not just on
+// resize. The Kitty graphics protocol was designed assuming a normal,
+// full-screen-scrolling terminal; whether a placed image correctly
+// scrolls along with a DECSTBM-confined region the way text does, or
+// stays visually fixed while text scrolls past/through it, isn't
+// something verifiable from this environment (it needs a real Kitty
+// terminal). The ANSI renderer is fully verified working correctly
+// inside the box across many real multi-turn tests, so this removes
+// Kitty as a variable for that combination specifically rather than
+// keep guessing at undocumented protocol behavior. Kitty rendering is
+// unaffected when no box is active (already proven working live,
+// unrelated to this bug).
+func newThinkingDisplay(w io.Writer, boxInScrollRegion bool) *thinkingDisplay {
 	var ball discoBallRenderer = ansiBallRenderer{}
-	if kittyAvailable() {
+	if kittyAvailable() && !boxInScrollRegion {
 		ball = kittyBallRenderer{}
 	}
 	d := &thinkingDisplay{w: w, ball: ball, stop: make(chan struct{})}
