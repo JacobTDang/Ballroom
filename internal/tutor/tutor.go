@@ -13,7 +13,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"regexp"
 
+	"github.com/cloudwego/eino/compose"
+	agentopt "github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 
@@ -55,7 +59,46 @@ type Config struct {
 // file into every request; the model calls read_solution_file (and the
 // other 4 tools) itself when it decides it needs to, which is the whole
 // point of this rewrite over the old regex-directive approach.
+//
+// Where the real terminal supports it, input happens in a bordered box
+// anchored at the bottom of the pane (internal/tutor/scrollbox.go), with
+// conversation scrolling above it — the same technique Claude Code's
+// own CLI uses. This was tried once before and reverted after breaking
+// live (garbled, overlapping text) — root-caused via a real tmux repro
+// (not just a raw pty, which never caught it) to inputBox.setup() never
+// clearing the screen before drawing: a pane always has *something* on
+// it already (at minimum the shell prompt from right before this
+// program started), and a bare cursor-home doesn't erase that, so
+// shorter new lines left old content dangling. Fixed in setup() itself
+// (see its doc comment) and reverified through the real docker/tmux.conf,
+// a split-pane layout, real typed input, pane switching, and a
+// status-bar refresh boundary — not just a fresh empty terminal — before
+// being wired back in here.
+//
+// newInputBox fails whenever stdin isn't a real terminal (tests,
+// cmd/tutor-eval) or the terminal is too short; box is nil in that case
+// and every use below is guarded so the session runs exactly as it did
+// before this feature existed.
+//
+// The box's dimensions are captured once at construction — a resized
+// terminal window would otherwise leave it operating on stale
+// dimensions indefinitely, found live as a real bug (user report: "it
+// happens when I readjust the size of the terminal"). watchResize
+// subscribes to SIGWINCH; this loop drains that channel once per turn
+// (a safe point between this goroutine's own writes) and calls
+// box.reconfigure() there, rather than reconfiguring from a background
+// goroutine, which could otherwise interleave with this loop's own
+// unsynchronized stdout writes and corrupt output.
 func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Writer) error {
+	box, boxErr := newInputBox(stdout)
+	var pendingResize chan os.Signal
+	if boxErr == nil {
+		defer box.close()
+		var stopWatch func()
+		pendingResize, stopWatch = watchResize()
+		defer stopWatch()
+	}
+
 	fmt.Fprintf(stdout, "tutor (%s, mode=%s) — connected to %s. Ctrl-D to exit.\n", cfg.Model, cfg.Mode, cfg.OllamaHost)
 
 	cm, err := newChatModel(ctx, cfg)
@@ -77,13 +120,37 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 
 	scanner := bufio.NewScanner(stdin)
 	for {
-		fmt.Fprint(stdout, "> ")
+		if box != nil {
+			// Drain any pending resize signal and reconfigure before
+			// showing the next prompt — see Run's doc comment for why
+			// this happens here rather than from watchResize's own
+			// goroutine.
+			select {
+			case <-pendingResize:
+				box.reconfigure()
+			default:
+			}
+			box.showPrompt()
+		} else {
+			fmt.Fprint(stdout, "> ")
+		}
 		if !scanner.Scan() {
 			break
 		}
 		line := scanner.Text()
 		if line == "" {
 			continue
+		}
+		if box != nil {
+			// The box's content row is about to be reused for the next
+			// prompt, so nothing else preserves what was just typed —
+			// echo it into the scrolling region as part of the
+			// permanent conversation history. In the box == nil (plain
+			// prompt) path, the terminal's own cooked-mode echo already
+			// put "> line" in the real scrollback, so this must not
+			// also run there or the line would print twice.
+			box.returnToScroll()
+			fmt.Fprintf(stdout, "> %s\n", line)
 		}
 
 		if comprehensionCheckPending {
@@ -98,9 +165,21 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 
 		helpRequestCount++
 		requestMessages := append(append([]*schema.Message{}, history...), turnMessages(cfg.Mode, helpRequestCount, line)...)
-		reply, err := agent.Generate(ctx, requestMessages)
+		display := newThinkingDisplay(stdout)
+		reply, err := generateWithLeakRetry(ctx, agent, requestMessages, display)
+		display.finish()
 		if err != nil {
-			fmt.Fprintf(stderr, "tutor: could not reach %s\n", cfg.OllamaHost)
+			// The real err is included, not just cfg.OllamaHost -- a
+			// real bug found live: "could not reach" reads as a network
+			// problem, but the actual cause is just as often a real API
+			// rejection (e.g. Ollama returning 400 "does not support
+			// tools" for a model that was picked without real
+			// tool-calling support) that has nothing to do with
+			// reachability at all. Showing only the generic message
+			// sent a live debugging session chasing a nonexistent
+			// Docker-networking problem instead of straight to the
+			// actual cause.
+			fmt.Fprintf(stderr, "tutor: could not reach %s: %v\n", cfg.OllamaHost, err)
 			continue
 		}
 
@@ -115,6 +194,85 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 
 	fmt.Fprintln(stdout)
 	return nil
+}
+
+// leakedToolCallPattern matches a reply that describes a tool call as
+// literal JSON text in Content instead of the model making a real eino
+// tool_calls invocation — e.g. `{"name": "read_solution_file", "parameters": {}}`
+// showing up as part of the assistant's visible reply. prompts.go's
+// toolsInstruction already tells the model never to do this, but a
+// real-sample-size repro (12 sessions x 4 turns each against
+// llama3.1:8b) found the leak rate climbs as a conversation goes on
+// regardless: 0/12 on turn 1, up to 5/12 by turn 4. In every observed
+// case the tool name and arguments were well-formed and real (never a
+// hallucinated tool) — the model correctly decided what to call, it
+// just wrote that decision out as text instead of actually calling it.
+// Chasing this further with prompt wording alone risks repeating a
+// known regression (see toolsInstruction's doc comment: a longer
+// instruction fixed a related narration case but measurably hurt
+// tool-calling on unrelated tools) — this is handled as model output
+// the caller must detect and recover from instead.
+var leakedToolCallPattern = regexp.MustCompile(`\{"name"\s*:\s*"[a-zA-Z_]+"`)
+
+func looksLikeLeakedToolCall(content string) bool {
+	return leakedToolCallPattern.MatchString(content)
+}
+
+// leakedToolCallRetryNote is appended as an ephemeral system message
+// (never persisted to history, same pattern as turnMessages' hint-count
+// note) when generateWithLeakRetry needs a second attempt.
+const leakedToolCallRetryNote = "Your last reply described calling a tool by writing out JSON like {\"name\": ...} instead of actually calling it. Try again: call the tool for real this time. Your reply must not contain any JSON or description of what tool you're using — only your real answer, written after you actually have the tool's result."
+
+// leakedToolCallFallbackReply is shown when even the retry leaks (or
+// the retry itself can't reach Ollama) — the user must never be shown
+// raw tool-call JSON, so this is an honest admission instead of a
+// second garbled attempt.
+const leakedToolCallFallbackReply = "Sorry, I wasn't able to get a grounded answer for that just now — could you try asking again?"
+
+// generateWithLeakRetry wraps agent.Generate with one retry: if the
+// model leaks a fake tool-call JSON blob into its reply instead of
+// making a real tool call (see leakedToolCallPattern), retries once
+// with a corrective note, and falls back to an honest message rather
+// than ever showing the user raw tool-call JSON. The leaked reply is
+// never added to messages/history beyond this one retry attempt, so it
+// can't bias later turns toward repeating the same pattern.
+func generateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*schema.Message, display *thinkingDisplay) (*schema.Message, error) {
+	reply, err := agent.Generate(ctx, messages, agentopt.WithComposeOptions(compose.WithCallbacks(display.callbackHandler())))
+	if err != nil {
+		return nil, err
+	}
+	if !looksLikeLeakedToolCall(reply.Content) {
+		return reply, nil
+	}
+
+	retryMessages := append(append([]*schema.Message{}, messages...),
+		schema.AssistantMessage(reply.Content, nil),
+		schema.SystemMessage(leakedToolCallRetryNote),
+	)
+	retryReply, err := agent.Generate(ctx, retryMessages, agentopt.WithComposeOptions(compose.WithCallbacks(display.callbackHandler())))
+	if err == nil && !looksLikeLeakedToolCall(retryReply.Content) {
+		return retryReply, nil
+	}
+	return schema.AssistantMessage(leakedToolCallFallbackReply, nil), nil
+}
+
+// GenerateWithLeakRetry is generateWithLeakRetry, exported for
+// cmd/tutor-eval — evaluating tool-calling/mode behavior needs the
+// tutor's real protected Generate path, not a bare agent.Generate call
+// that can fail in ways a real session (which always goes through this)
+// never would surface to a user. A real, newly-found gap: without this,
+// cmd/tutor-eval's own runs showed a hints-first scenario failing ~25%
+// of the time on a leaked fake tool-call JSON — a failure mode that
+// can't actually reach a real user, since Run() always retries and
+// falls back to an honest message instead, but the eval was reporting
+// it as a raw scenario failure anyway. w is where the (normally
+// discarded, since this is a headless CLI diagnostic) thinking-display
+// animation writes — pass io.Discard.
+func GenerateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*schema.Message, w io.Writer) (*schema.Message, error) {
+	display := newThinkingDisplay(w)
+	reply, err := generateWithLeakRetry(ctx, agent, messages, display)
+	display.finish()
+	return reply, err
 }
 
 // turnMessages returns the messages appended to history for one real
@@ -144,13 +302,24 @@ func turnMessages(mode string, helpRequestCount int, line string) []*schema.Mess
 	return []*schema.Message{schema.SystemMessage(note), schema.UserMessage(line)}
 }
 
-// runComprehensionCheck issues one isolated Generate call asking the
-// agent ONLY to restate the problem and ask clarifying questions —
-// deliberately never including userFirstMessage, so there's nothing
-// concrete for the model to answer instead of doing the check (port of
-// tutor/chat.sh's run_comprehension_check; see its header comment for
-// why this is enforced here rather than left to a prompt instruction the
-// model might ignore).
+// TurnMessages is turnMessages, exported for cmd/tutor-eval — a real
+// gap found live: cmd/tutor-eval's runScenario built each turn as a
+// bare schema.UserMessage(turn), never including the hint-count note
+// hintsFirstPrompt (prompts.go) explicitly tells the model to trust.
+// That made a hints-first scenario's own eval numbers (5-6/8) look far
+// worse than real production reliability (15/16 in a direct real-Ollama
+// repro through the actual Run() loop) — the eval wasn't testing the
+// real code path.
+func TurnMessages(mode string, helpRequestCount int, line string) []*schema.Message {
+	return turnMessages(mode, helpRequestCount, line)
+}
+
+// runComprehensionCheck issues one isolated Generate call that responds
+// to the user's real first message and asks the agent to restate the
+// problem and ask clarifying questions (port of tutor/chat.sh's
+// run_comprehension_check; see its header comment for why this is
+// enforced here rather than left to a prompt instruction the model
+// might ignore).
 //
 // The problem statement is injected directly as ephemeral context
 // (readProblemStatement, not a tool call) rather than leaving the model
@@ -166,22 +335,37 @@ func turnMessages(mode string, helpRequestCount int, line string) []*schema.Mess
 // session's first exchange) to get reliably right, and with the content
 // provided directly there's nothing left to call.
 //
-// On success, appends (userFirstMessage, reply) to *history — the
-// caller's real message is the persisted turn, so history reads
-// naturally even though it was never sent to the model in this request —
-// and returns true. Returns false if Ollama couldn't be reached, so the
-// caller falls through to handling userFirstMessage normally instead of
+// userFirstMessage is included as a real user turn (an earlier version
+// deliberately excluded it) — a real bug found live: excluding it meant
+// literally any first message, including a plain "hi", got the exact
+// same canned restate-and-ask-questions reply with no acknowledgment of
+// what the user actually said. comprehensionCheckInstruction (prompts.go)
+// now tells the model to respond to it. Routed through
+// generateWithLeakRetry and given a thinkingDisplay for the same reason
+// every other turn is: this call can leak fake tool-call JSON exactly
+// like any other (cmd/tutor-eval's grounding check already tested for
+// this here, but nothing actually protected it before), and on
+// llama3.1:8b a silent multi-second call with no display looks like a
+// hang.
+//
+// On success, appends (userFirstMessage, reply) to *history and returns
+// true. Returns false if Ollama couldn't be reached, so the caller
+// falls through to handling userFirstMessage normally instead of
 // dropping it.
 func runComprehensionCheck(ctx context.Context, agent *react.Agent, ollamaHost, workDir, userFirstMessage string, history *[]*schema.Message, stdout, stderr io.Writer) bool {
 	checkMessages := append([]*schema.Message{}, (*history)...)
 	if problem := readProblemStatement(workDir); problem != "" {
 		checkMessages = append(checkMessages, schema.SystemMessage("The exercise's problem statement:\n\n"+problem))
 	}
-	checkMessages = append(checkMessages, schema.UserMessage(comprehensionCheckInstruction))
+	checkMessages = append(checkMessages, schema.SystemMessage(comprehensionCheckInstruction), schema.UserMessage(userFirstMessage))
 
-	reply, err := agent.Generate(ctx, checkMessages)
+	display := newThinkingDisplay(stdout)
+	reply, err := generateWithLeakRetry(ctx, agent, checkMessages, display)
+	display.finish()
 	if err != nil {
-		fmt.Fprintf(stderr, "tutor: could not reach %s\n", ollamaHost)
+		// See Run's identical fix for why the real err is included, not
+		// just ollamaHost.
+		fmt.Fprintf(stderr, "tutor: could not reach %s: %v\n", ollamaHost, err)
 		return false
 	}
 

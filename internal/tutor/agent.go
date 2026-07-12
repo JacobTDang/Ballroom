@@ -3,6 +3,7 @@ package tutor
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/cloudwego/eino-ext/components/model/ollama"
 	"github.com/cloudwego/eino/components/model"
@@ -11,6 +12,19 @@ import (
 	"github.com/cloudwego/eino/flow/agent/react"
 )
 
+// ollamaRequestTimeout bounds each individual HTTP request the chat
+// model makes to Ollama — a react.Agent turn can make several of these
+// sequentially (model call, execute tools, model call again, ...), so
+// this is a per-request bound, not a whole-turn one. Without it, a
+// stalled Ollama server would hang a request (and by extension the
+// whole synchronous tutor turn loop) indefinitely, with no way to
+// recover short of killing the process. Generous — llama3.1:8b on CPU
+// genuinely can take tens of seconds for a longer generation — this is
+// meant to catch a truly stuck request, not a merely slow one. A var,
+// not a const, so tests can shrink it rather than waiting out the real
+// duration.
+var ollamaRequestTimeout = 120 * time.Second
+
 // newChatModel builds the Ollama-backed chat model the agent calls.
 // Temperature matches tutor/chat.sh's previous options.temperature — kept
 // low so the tutor's tone/behavior stays consistent across turns rather
@@ -18,6 +32,7 @@ import (
 func newChatModel(ctx context.Context, cfg Config) (*ollama.ChatModel, error) {
 	cm, err := ollama.NewChatModel(ctx, &ollama.ChatModelConfig{
 		BaseURL: cfg.OllamaHost,
+		Timeout: ollamaRequestTimeout,
 		Model:   cfg.Model,
 		Options: &ollama.Options{Temperature: 0.2},
 	})

@@ -7,12 +7,23 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 )
+
+// ansiPattern/stripAnsi strip terminal escape sequences (cursor
+// movement, color) out of captured stdout so tests can assert on the
+// visible text content — shared by discoball_test.go, thinkingdisplay_test.go,
+// and this file's own Run-level integration tests.
+var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+
+func stripAnsi(s string) string {
+	return ansiPattern.ReplaceAllString(s, "")
+}
 
 // tutorChatRequest/sequencedOllama are the package's Ollama mock server
 // for Go-native tests — used here and by agent_test.go. Originally kept
@@ -105,6 +116,135 @@ func TestRun_PrintsAssistantReply(t *testing.T) {
 	}
 }
 
+func TestRun_ShowsToolCallIndicatorBeforeTheFinalReply(t *testing.T) {
+	// newToolCallOllama (toolcheck_test.go) simulates a real tool_calls
+	// response for its first request, then a plain-text reply for its
+	// second — driving Run() through an actual read_solution_file call
+	// via the agent, not a synthetic call into toolCallDisplay directly.
+	mock := newToolCallOllama(t, "read_solution_file")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly // skip the comprehension check for a single-turn test
+	cfg.WorkDir = t.TempDir()
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("what does my code look like?\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got := stripAnsi(stdout.String())
+	toolIdx := strings.Index(got, "read_solution_file")
+	replyIdx := strings.Index(got, "pong received")
+	if toolIdx == -1 {
+		t.Fatalf("expected a read_solution_file indicator in stdout, got:\n%s", got)
+	}
+	if replyIdx == -1 {
+		t.Fatalf("expected the final reply in stdout, got:\n%s", got)
+	}
+	if toolIdx > replyIdx {
+		t.Errorf("expected the tool-call indicator before the final reply, got:\n%s", got)
+	}
+}
+
+func TestLooksLikeLeakedToolCall_DetectsRawJSONShape(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"bare JSON", `{"name": "read_solution_file", "parameters": {}}`, true},
+		{"prose then JSON", "To answer this, I need to check your code.\n\n" + `{"name": "read_cursor_position", "parameters": {}}`, true},
+		{"hallucinated tool name still matches the shape", `{"name": "read_user_code", "parameters": {}}`, true},
+		{"clean reply", "your code looks fine to me", false},
+		{"empty", "", false},
+	}
+	for _, c := range cases {
+		if got := looksLikeLeakedToolCall(c.content); got != c.want {
+			t.Errorf("%s: looksLikeLeakedToolCall(%q) = %v, want %v", c.name, c.content, got, c.want)
+		}
+	}
+}
+
+func TestRun_RetriesWhenReplyLeaksFakeToolCallJSON(t *testing.T) {
+	mock := newSequencedOllama(t, `{"name": "read_solution_file", "parameters": {}}`, "your code looks fine")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly // skip the comprehension check for a single-turn test
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("what does my code look like?\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got := stdout.String()
+	if strings.Contains(got, `{"name"`) {
+		t.Errorf("stdout still contains leaked tool-call JSON: %q", got)
+	}
+	if !strings.Contains(got, "your code looks fine") {
+		t.Errorf("stdout = %q, want the retry's clean reply", got)
+	}
+	if n := len(mock.allRequests()); n != 2 {
+		t.Errorf("requests = %d, want exactly 2 (original + one retry)", n)
+	}
+}
+
+func TestRun_FallsBackToHonestMessageWhenRetryAlsoLeaks(t *testing.T) {
+	mock := newSequencedOllama(t, `{"name": "read_solution_file", "parameters": {}}`, `{"name": "read_cursor_position", "parameters": {}}`)
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("where is my cursor?\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got := stdout.String()
+	if strings.Contains(got, `{"name"`) {
+		t.Errorf("stdout still contains leaked tool-call JSON: %q", got)
+	}
+	if !strings.Contains(got, leakedToolCallFallbackReply) {
+		t.Errorf("stdout = %q, want the honest fallback message", got)
+	}
+}
+
+func TestRun_DoesNotRetryWhenReplyIsClean(t *testing.T) {
+	mock := newSequencedOllama(t, "the answer is 42")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("question\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if n := len(mock.allRequests()); n != 1 {
+		t.Errorf("requests = %d, want exactly 1 (no retry for a clean reply)", n)
+	}
+}
+
+func TestRun_LeakedReplyNeverPersistedToHistory(t *testing.T) {
+	mock := newSequencedOllama(t, `{"name": "read_solution_file", "parameters": {}}`, "your code looks fine", "second reply")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	var stdout, stderr strings.Builder
+	input := "what does my code look like?\nanother question\n"
+	if err := Run(context.Background(), cfg, strings.NewReader(input), &stdout, &stderr); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	reqs := mock.allRequests()
+	if len(reqs) != 3 {
+		t.Fatalf("requests = %d, want exactly 3 (leaked original + retry + second turn)", len(reqs))
+	}
+	// The second turn's request carries history from the first turn --
+	// confirm the leaked (never-shown) reply isn't in it, only the
+	// clean retry reply.
+	for _, m := range reqs[2].Messages {
+		if strings.Contains(m.Content, `{"name"`) {
+			t.Errorf("second turn's request carries leaked JSON in history: %+v", reqs[2].Messages)
+		}
+	}
+}
+
 func TestRun_RetainsConversationHistory(t *testing.T) {
 	mock := newSequencedOllama(t, "assistant-reply-1", "assistant-reply-2")
 	cfg := testConfig(mock.URL)
@@ -152,14 +292,84 @@ func TestRun_HandlesUnreachableHostGracefully(t *testing.T) {
 	}
 }
 
-func TestRun_ComprehensionCheckIsolatesRealQuestion(t *testing.T) {
-	mock := newSequencedOllama(t, "restated problem + questions", "real answer")
+// TestRun_ErrorMessageIncludesRealUnderlyingDetail is a regression test
+// for a real bug found live: a model picked without real tool-calling
+// support made Ollama reject every request with 400 "does not support
+// tools" -- but the generic "could not reach <host>" message swallowed
+// that detail entirely and read exactly like a network/Docker
+// connectivity problem, sending a live debugging session down the wrong
+// path. The real error must be visible, not just the host.
+func TestRun_ErrorMessageIncludesRealUnderlyingDetail(t *testing.T) {
+	// Ollama's own real error responses are JSON with an "error" field
+	// (see eino-contrib/ollama/api's checkError), not a plain-text body
+	// -- matching that shape here so the client actually decodes the
+	// message instead of failing on JSON unmarshal first.
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"does not support tools"}`))
+	}))
+	defer mock.Close()
+
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("hello\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run should exit cleanly even on a request error, got error: %v", err)
+	}
+	got := stderr.String()
+	if !strings.Contains(got, "could not reach") {
+		t.Errorf("stderr = %q, want the generic message preserved", got)
+	}
+	if !strings.Contains(got, "does not support tools") {
+		t.Errorf("stderr = %q, want the real underlying error detail included, not just the generic host message", got)
+	}
+}
+
+// TestRun_ComprehensionCheckErrorMessageIncludesRealUnderlyingDetail is
+// the comprehension-check path's counterpart to
+// TestRun_ErrorMessageIncludesRealUnderlyingDetail -- runComprehensionCheck
+// has its own separate "could not reach" call site with the same bug.
+func TestRun_ComprehensionCheckErrorMessageIncludesRealUnderlyingDetail(t *testing.T) {
+	// Ollama's own real error responses are JSON with an "error" field
+	// (see eino-contrib/ollama/api's checkError), not a plain-text body
+	// -- matching that shape here so the client actually decodes the
+	// message instead of failing on JSON unmarshal first.
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"does not support tools"}`))
+	}))
+	defer mock.Close()
+
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeFullAssist // wants the comprehension check
 
-	secretQuestion := "what is the secret algorithm here"
 	var stdout, stderr strings.Builder
-	if err := Run(context.Background(), cfg, strings.NewReader(secretQuestion+"\n"), &stdout, &stderr); err != nil {
+	if err := Run(context.Background(), cfg, strings.NewReader("hi\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run should exit cleanly even on a request error, got error: %v", err)
+	}
+	got := stderr.String()
+	if !strings.Contains(got, "could not reach") {
+		t.Errorf("stderr = %q, want the generic message preserved", got)
+	}
+	if !strings.Contains(got, "does not support tools") {
+		t.Errorf("stderr = %q, want the real underlying error detail included, not just the generic host message", got)
+	}
+}
+
+func TestRun_ComprehensionCheckIncludesUsersRealFirstMessage(t *testing.T) {
+	// A real bug found live: an earlier version of runComprehensionCheck
+	// deliberately excluded the user's actual first message from the
+	// request, so literally any first message -- including a plain
+	// "hi" -- got back the exact same canned restate-and-ask-questions
+	// reply with no acknowledgment of what the user said.
+	mock := newSequencedOllama(t, "hey! restated problem + questions")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeFullAssist // wants the comprehension check
+
+	greeting := "hi"
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader(greeting+"\n"), &stdout, &stderr); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -169,14 +379,55 @@ func TestRun_ComprehensionCheckIsolatesRealQuestion(t *testing.T) {
 	}
 
 	checkReq := reqs[0]
+	found := false
 	for _, m := range checkReq.Messages {
-		if strings.Contains(m.Content, secretQuestion) {
-			t.Errorf("comprehension check request contained the user's real question %q — isolation broken: %+v", secretQuestion, checkReq.Messages)
+		if m.Content == greeting {
+			found = true
 		}
 	}
+	if !found {
+		t.Errorf("comprehension check request never included the user's real first message %q: %+v", greeting, checkReq.Messages)
+	}
 
-	if !strings.Contains(stdout.String(), "restated problem + questions") {
+	if !strings.Contains(stdout.String(), "hey! restated problem + questions") {
 		t.Errorf("stdout = %q, want the comprehension check's reply printed", stdout.String())
+	}
+}
+
+func TestRun_ComprehensionCheckRetriesWhenReplyLeaksFakeToolCallJSON(t *testing.T) {
+	mock := newSequencedOllama(t, `{"name": "read_problem_statement", "parameters": {}}`, "clean restated problem + questions")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeFullAssist
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("hi\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got := stdout.String()
+	if strings.Contains(got, `{"name"`) {
+		t.Errorf("stdout still contains leaked tool-call JSON: %q", got)
+	}
+	if !strings.Contains(got, "clean restated problem + questions") {
+		t.Errorf("stdout = %q, want the retry's clean reply", got)
+	}
+	if n := len(mock.allRequests()); n != 2 {
+		t.Errorf("requests = %d, want exactly 2 (original comprehension check + one retry)", n)
+	}
+}
+
+func TestRun_ComprehensionCheckShowsThinkingDisplay(t *testing.T) {
+	mock := newSequencedOllama(t, "restated problem + questions")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeFullAssist
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("hi\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), "\033[2K") {
+		t.Errorf("stdout has no thinkingDisplay redraw output, want a display shown during the comprehension check")
 	}
 }
 

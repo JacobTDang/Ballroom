@@ -37,7 +37,20 @@ const (
 	// "quoted-number tool argument" bug (see tools.go's flexibleInt):
 	// that was a real tool call with a malformed field; this is no real
 	// tool call being made at all, just talking about making one.
-	toolsInstruction = "You have tools to read the user's actual code, the problem statement, their last test run, and their cursor position, and to highlight lines in their editor with a note. Always use a tool instead of guessing or asking the user to paste something you can just read yourself. Calling a tool is just gathering information — it never conflicts with any rule below, even in a restricted mode. Call tools directly and silently, never narrate them (e.g. never say 'I'll use the tool X') — the user only sees your final answer. "
+	//
+	// "or trusting what you read earlier" is a small addition, not a
+	// new sentence: history (tutor.go's Run) only ever persists clean
+	// (user, reply) text pairs, never which tool was called or what it
+	// returned, so nothing else tells the model a file it read three
+	// turns ago may be stale — and this app's whole point is the user
+	// actively editing code between tutor messages. Kept as a clause on
+	// the existing sentence rather than a new one deliberately: this
+	// project's own testing already found a longer toolsInstruction
+	// measurably regresses general tool-calling even when the addition
+	// fixes a real bug (see the narration case just above) — verified
+	// via cmd/tutor-eval that this specific short addition doesn't
+	// repeat that regression before it was kept.
+	toolsInstruction = "You have tools to read the user's actual code, the problem statement, their last test run, and their cursor position, and to highlight lines in their editor with a note. Always use a tool instead of guessing, asking the user to paste something you can just read yourself, or trusting what you read earlier in this conversation — it may have changed since. Calling a tool is just gathering information — it never conflicts with any rule below, even in a restricted mode. Call tools directly and silently, never narrate them (e.g. never say 'I'll use the tool X') — the user only sees your final answer. "
 
 	// comprehensionCheckInstruction drives the one-time check (see
 	// runComprehensionCheck in tutor.go), which injects the problem
@@ -50,7 +63,17 @@ const (
 	// instruction doesn't ask for a tool call at all, which is exactly
 	// why it's shorter than earlier drafts of this same instruction —
 	// there's nothing left to call.
-	comprehensionCheckInstruction = "Using the problem statement above, restate the problem in your own words in 1-2 sentences and ask 1-2 short clarifying questions about it (constraints, edge cases, expected output). Do not ask the user anything about your own conversation state (e.g. whether this is their first question) — that is tracked for you separately. Do not answer, hint, or give code yet."
+	//
+	// The "respond to it naturally first" sentence exists because an
+	// earlier version of runComprehensionCheck never even sent the
+	// user's real first message to the model at all (deliberately, to
+	// keep this high-stakes call single-purpose) — a real bug found
+	// live: literally any first message, including a plain "hi", got
+	// back the exact same canned restate-and-ask-questions reply with
+	// no acknowledgment of what the user actually said. The message is
+	// included now (see runComprehensionCheck), so this instruction
+	// tells the model what to do with it.
+	comprehensionCheckInstruction = "Respond to the user's next message naturally first (briefly, if it's just a greeting or small talk). Then, using the problem statement above, restate the problem in your own words in 1-2 sentences and ask 1-2 short clarifying questions about it (constraints, edge cases, expected output). Do not ask the user anything about your own conversation state (e.g. whether this is their first question) — that is tracked for you separately. Do not answer, hint, or give code yet."
 )
 
 // systemPromptForMode returns the tutor's persona/rules for mode,

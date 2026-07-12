@@ -3,6 +3,7 @@ package tutor
 import (
 	"bytes"
 	"context"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -123,6 +124,59 @@ func TestRemoteExpr_NonexistentSocketReturnsEmptyNoError(t *testing.T) {
 	}
 	if out != "" {
 		t.Errorf("result = %q, want empty string when socket doesn't exist", out)
+	}
+}
+
+// TestRemoteExpr_TimesOutIfNvimHangs simulates a blocking nvim prompt
+// (e.g. a swap-file recovery dialog) — without remoteExprTimeout, this
+// would hang indefinitely and, by extension, freeze the whole
+// synchronous tutor turn loop. Uses a stand-in shell script (via the
+// nvimCommand package var) instead of a real nvim instance, which can't
+// easily be made to hang on demand.
+func TestRemoteExpr_TimesOutIfNvimHangs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SKIP: needs a POSIX shell script standing in for nvim")
+	}
+
+	scriptDir := t.TempDir()
+	script := filepath.Join(scriptDir, "fake-nvim")
+	// `exec sleep 30`, not a bare `sleep 30` -- exec replaces the shell
+	// process image instead of forking a child. A bare `sleep 30` would
+	// fork, and killing the (now-dead) parent shell on timeout would
+	// leave the orphaned sleep still holding the stdout/stderr pipes
+	// open, so cmd.Wait() would block on it regardless -- not
+	// representative of the real nvim binary, which doesn't fork like
+	// this for a --remote-expr client call.
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatalf("write fake nvim script: %v", err)
+	}
+
+	socketDir, err := os.MkdirTemp("", "ballroom-nvim-timeout-test-")
+	if err != nil {
+		t.Fatalf("create scratch socket dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
+	socket := filepath.Join(socketDir, "s.sock")
+	l, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("create fake socket: %v", err)
+	}
+	defer l.Close()
+
+	origCommand, origTimeout := nvimCommand, remoteExprTimeout
+	nvimCommand = script
+	remoteExprTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { nvimCommand, remoteExprTimeout = origCommand, origTimeout })
+
+	start := time.Now()
+	_, err = remoteExpr(context.Background(), socket, "1+1")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected an error when nvim hangs past remoteExprTimeout")
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("remoteExpr took %v to return, want it to time out quickly (~%v)", elapsed, remoteExprTimeout)
 	}
 }
 
