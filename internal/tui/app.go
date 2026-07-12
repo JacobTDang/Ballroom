@@ -119,7 +119,18 @@ const (
 	stageProblems
 	stageLanguage
 	stageStats
+	// stageSettings is the Local (Ollama) / API (OpenRouter) provider
+	// choice — the Settings menu entry's landing screen. Routes to
+	// stageModelPicker (Local) or stageAPIModelEntry (API).
+	stageSettings
 	stageModelPicker
+	// stageAPIModelEntry asks for a bare OpenRouter model slug (no
+	// OpenRouterModelPrefix needed — provider is already established by
+	// the point this shows) when Settings -> API is chosen. Enter
+	// delegates to the same selectModelOrPromptForKey handleModelEnter
+	// already uses for a directly-typed openrouter: tag in the local
+	// picker.
+	stageAPIModelEntry
 	// stageOpenRouterKeyEntry asks for an OpenRouter API key the first
 	// time an OpenRouterModelPrefix-prefixed model is picked with none
 	// available yet (settings.json nor OPENROUTER_API_KEY) — see
@@ -156,16 +167,16 @@ const (
 	menuPractice menuChoice = iota
 	menuSandbox
 	menuStats
-	menuModelPicker
+	menuSettings
 )
 
-var menuLabels = []string{"Practice", "Sandbox", "Stats", "Model"}
+var menuLabels = []string{"Practice", "Sandbox", "Stats", "Settings"}
 
 var menuDescriptions = []string{
 	"Pick a category and work through exercises",
 	"Free practice, no grading, persists across sessions",
 	"See your progress across categories",
-	"Choose which Ollama model tutors your sessions",
+	"Choose your tutor's model — local (Ollama) or API (OpenRouter)",
 }
 
 // menuRightColWidth is the fixed content width of the right column —
@@ -236,6 +247,12 @@ type appModel struct {
 	// stageStats
 	statsStatuses []catalog.ExerciseStatus
 	statsRecent   []tracker.Attempt
+
+	// stageSettings
+	settingsCursor int // 0 = Local (Ollama), 1 = API (OpenRouter)
+
+	// stageAPIModelEntry
+	apiModelInput string
 
 	// stageModelPicker
 	modelLoading  bool
@@ -365,8 +382,12 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateLanguage(msg)
 		case stageStats:
 			return m.updateStats(msg)
+		case stageSettings:
+			return m.updateSettings(msg)
 		case stageModelPicker:
 			return m.updateModelPicker(msg)
+		case stageAPIModelEntry:
+			return m.updateAPIModelEntry(msg)
 		case stageOpenRouterKeyEntry:
 			return m.updateOpenRouterKeyEntry(msg)
 		}
@@ -407,8 +428,8 @@ func (m appModel) chooseMain() (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case menuStats:
 		return m.loadStats(), nil
-	case menuModelPicker:
-		return m.loadModelPicker()
+	case menuSettings:
+		return m.loadSettings()
 	}
 	return m, nil
 }
@@ -448,6 +469,15 @@ func (m appModel) loadStats() appModel {
 	m.statsRecent = recent
 	m.stage = stageStats
 	return m
+}
+
+// loadSettings enters stageSettings, the Local/API provider choice —
+// unlike loadModelPicker/loadStats, this needs no data fetch, so it's
+// synchronous (no tea.Cmd).
+func (m appModel) loadSettings() (tea.Model, tea.Cmd) {
+	m.stage = stageSettings
+	m.settingsCursor = 0
+	return m, nil
 }
 
 func (m appModel) loadModelPicker() (tea.Model, tea.Cmd) {
@@ -676,6 +706,71 @@ func (m appModel) updateStats(tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// --- stageSettings ---
+
+// updateSettings handles the Local (Ollama) / API (OpenRouter) provider
+// choice — a plain 2-item list, same up/down/enter shape as every other
+// short list in this program.
+func (m appModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.settingsCursor > 0 {
+			m.settingsCursor--
+		}
+		return m, nil
+	case tea.KeyDown:
+		if m.settingsCursor < 1 {
+			m.settingsCursor++
+		}
+		return m, nil
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.stage = stageMain
+		return m, nil
+	case tea.KeyEnter:
+		if m.settingsCursor == 0 {
+			return m.loadModelPicker()
+		}
+		m.stage = stageAPIModelEntry
+		m.apiModelInput = ""
+		return m, nil
+	}
+	return m, nil
+}
+
+// --- stageAPIModelEntry ---
+
+// updateAPIModelEntry handles a single-line unmasked text input for a
+// bare OpenRouter model slug — same rune/backspace shape as
+// updateOpenRouterKeyEntry's key input, unmasked since a model slug
+// isn't a secret. Enter delegates to selectModelOrPromptForKey (already
+// built for handleModelEnter's directly-typed openrouter: path), which
+// handles both "key already available" and "no key yet" correctly
+// without any new logic needed here.
+func (m appModel) updateAPIModelEntry(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.stage = stageSettings
+		m.apiModelInput = ""
+		return m, nil
+	case tea.KeyBackspace:
+		if len(m.apiModelInput) > 0 {
+			m.apiModelInput = m.apiModelInput[:len(m.apiModelInput)-1]
+		}
+		return m, nil
+	case tea.KeyEnter:
+		slug := strings.TrimSpace(m.apiModelInput)
+		if slug == "" {
+			return m, nil
+		}
+		m.apiModelInput = ""
+		return m.selectModelOrPromptForKey(tutor.OpenRouterModelPrefix + slug)
+	case tea.KeyRunes:
+		m.apiModelInput += string(msg.Runes)
+		return m, nil
+	}
+	return m, nil
+}
+
 // --- stageModelPicker ---
 
 func (m appModel) updateModelPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -707,7 +802,9 @@ func (m appModel) updateModelPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyEsc, tea.KeyCtrlC:
-		m.stage = stageMain
+		// Back to the provider choice, not stageMain — stageModelPicker
+		// is only reachable via Settings -> Local now.
+		m.stage = stageSettings
 		return m, nil
 	case tea.KeyEnter:
 		return m.handleModelEnter()
@@ -717,7 +814,7 @@ func (m appModel) updateModelPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// every rune (including "q") feeds the filter/custom tag
 		// instead, since it might be part of a real model name.
 		if m.modelFilter == "" && string(msg.Runes) == "q" {
-			m.stage = stageMain
+			m.stage = stageSettings
 			return m, nil
 		}
 		m.modelFilter += string(msg.Runes)
@@ -866,7 +963,11 @@ func (m appModel) selectModel(name string) (tea.Model, tea.Cmd) {
 func (m appModel) updateOpenRouterKeyEntry(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlC:
-		m.stage = stageModelPicker
+		// Back to the provider choice, not stageModelPicker — a single
+		// consistent "cancel returns to Settings" behavior regardless of
+		// whether this stage was reached via typing openrouter: directly
+		// in the local picker or via the newer Settings -> API path.
+		m.stage = stageSettings
 		m.openRouterPendingModel = ""
 		m.openRouterKeyInput = ""
 		return m, nil
@@ -915,8 +1016,12 @@ func (m appModel) renderRight() string {
 		return m.renderLanguage()
 	case stageStats:
 		return m.renderStats()
+	case stageSettings:
+		return m.renderSettings()
 	case stageModelPicker:
 		return m.renderModelPicker()
+	case stageAPIModelEntry:
+		return m.renderAPIModelEntry()
 	case stageOpenRouterKeyEntry:
 		return m.renderOpenRouterKeyEntry()
 	default:
@@ -1107,6 +1212,54 @@ func (m appModel) renderStats() string {
 
 	b.WriteString("\n")
 	b.WriteString(checkDimStyle.Render("press any key to go back"))
+	return b.String()
+}
+
+// settingsOptionLabels/settingsOptionDescriptions back updateSettings'
+// 2-item list and renderSettings' rendering of it — kept together so
+// the list and its descriptions can't drift out of sync.
+var (
+	settingsOptionLabels = []string{"Local (Ollama)", "API (OpenRouter)"}
+	settingsOptionDescs  = []string{
+		"Pick from models pulled on this machine",
+		"Use a hosted model via an OpenRouter API key",
+	}
+)
+
+func (m appModel) renderSettings() string {
+	var b strings.Builder
+	b.WriteString(hintStyle.Render("Settings"))
+	b.WriteString("\n")
+	b.WriteString(checkDimStyle.Render(fmt.Sprintf("currently: %s", m.cfg.TutorModel)))
+	b.WriteString("\n\n")
+
+	for i, label := range settingsOptionLabels {
+		if i == m.settingsCursor {
+			b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s", label)))
+			b.WriteString("\n  " + menuSubtitleStyle.Render(settingsOptionDescs[i]))
+		} else {
+			b.WriteString(fmt.Sprintf("  %s", label))
+		}
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString(checkDimStyle.Render("↑/↓ move · enter select · esc back"))
+	return b.String()
+}
+
+// renderAPIModelEntry's input is unmasked (unlike
+// renderOpenRouterKeyEntry's) — a model slug isn't a secret.
+func (m appModel) renderAPIModelEntry() string {
+	var b strings.Builder
+	b.WriteString(hintStyle.Render("OpenRouter model"))
+	b.WriteString("\n")
+	b.WriteString(checkDimStyle.Render("enter a model slug, e.g. anthropic/claude-3.5-sonnet"))
+	b.WriteString("\n\n")
+
+	b.WriteString(fmt.Sprintf("%s%s", checkDimStyle.Render("› "), m.apiModelInput))
+	b.WriteString("\n\n")
+
+	b.WriteString(checkDimStyle.Render("enter confirm · esc cancel"))
 	return b.String()
 }
 

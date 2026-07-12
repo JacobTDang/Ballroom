@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/JacobTDang/Ballroom/internal/config"
@@ -39,6 +40,8 @@ func main() {
 		exitOnErr(returnCmd())
 	case "tutor":
 		exitOnErr(tutorCmd())
+	case "config":
+		exitOnErr(configCmd(args[1:]))
 	default:
 		fmt.Fprintf(os.Stderr, "ballroom: unknown command %q\n\n", args[0])
 		printUsage(os.Stderr)
@@ -64,12 +67,17 @@ Usage:
   ballroom submit              Submit your solution (run this inside an active session)
   ballroom tutor               Start the tutor chat (run this inside an active session)
   ballroom return              Return to the host homepage (run this inside an active session)
+  ballroom config set-model <tag>   Set the tutor model (a local Ollama tag, or an
+                                     openrouter:<slug> API model) without opening the TUI
+  ballroom config set-key <key>     Set the OpenRouter API key used by openrouter: models
   ballroom help | -h | --help  Show this help
 
 Examples:
   ballroom
   ballroom practice two-pointers-01-go
   ballroom sandbox
+  ballroom config set-model openrouter:anthropic/claude-3.5-sonnet
+  ballroom config set-key sk-...
 
 Reset the sandbox volume:
   docker volume rm ballroom-sandbox
@@ -248,4 +256,98 @@ func tutorCmd() error {
 		MaxContextBytes: maxContextBytes,
 	}
 	return tutor.Run(context.Background(), cfg, os.Stdin, os.Stdout, os.Stderr)
+}
+
+// checkToolCallingFn is a var (not a direct call) so tests can
+// substitute a fake instead of making a real LLM round-trip — same
+// indirection pattern internal/tui/app.go uses for the identical
+// reason.
+var checkToolCallingFn = tutor.CheckToolCalling
+
+// hostOllamaAddr is where the CLI itself (running on the host, unlike
+// tutorCmd's Model/OllamaHost above, which run inside the practice
+// container) reaches Ollama — same value as internal/tui/boot.go's own
+// unexported ollamaHost const; not worth exporting across packages just
+// for this one reuse.
+const hostOllamaAddr = "http://localhost:11434"
+
+// configCmd is `ballroom config`, a non-interactive alternative to the
+// TUI's Settings tab (internal/tui/app.go) for switching the tutor
+// model or OpenRouter API key without opening the picker — useful for
+// scripting, or just a faster path when you already know exactly what
+// you want to set.
+func configCmd(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: ballroom config set-model <tag> | ballroom config set-key <key>")
+	}
+	switch args[0] {
+	case "set-model":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: ballroom config set-model <tag>")
+		}
+		return setModelCmd(args[1])
+	case "set-key":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: ballroom config set-key <key>")
+		}
+		return setKeyCmd(args[1])
+	default:
+		return fmt.Errorf("ballroom config: unknown subcommand %q", args[0])
+	}
+}
+
+// setModelCmd persists tag as the tutor model, preserving the existing
+// OpenRouterAPIKey (config.Settings is saved as a whole struct, so
+// dropping this would silently wipe a previously-set key — the same
+// bug class fixed in the TUI's selectModel when OpenRouter support was
+// added). Then, unlike the TUI (which validates tool-calling support
+// asynchronously via a background tea.Cmd to stay responsive), checks
+// synchronously — a one-shot CLI command has no event loop to keep
+// responsive, so there's no reason not to just wait for the real
+// answer before printing it.
+func setModelCmd(tag string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if err := config.SaveSettings(cfg.SettingsPath(), config.Settings{
+		TutorModel:       tag,
+		OpenRouterAPIKey: cfg.OpenRouterAPIKey,
+	}); err != nil {
+		return err
+	}
+	fmt.Printf("tutor model set to %s\n", tag)
+
+	if strings.HasPrefix(tag, tutor.OpenRouterModelPrefix) && cfg.OpenRouterAPIKey == "" {
+		fmt.Println("warning: no OpenRouter API key configured yet -- run `ballroom config set-key <key>` or export OPENROUTER_API_KEY")
+		return nil
+	}
+
+	supported, err := checkToolCallingFn(hostOllamaAddr, tag, cfg.OpenRouterAPIKey)
+	switch {
+	case err != nil:
+		fmt.Printf("warning: checking whether %s supports real tool calling failed: %v\n", tag, err)
+	case !supported:
+		fmt.Printf("warning: %s may not support real tool calling -- the tutor may not be able to read your code, problem, or tests reliably\n", tag)
+	}
+	return nil
+}
+
+// setKeyCmd persists key as the OpenRouter API key, preserving the
+// existing TutorModel (same round-trip concern as setModelCmd, in the
+// other direction). Never prompts interactively for anything and never
+// echoes the key back -- it's a secret.
+func setKeyCmd(key string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if err := config.SaveSettings(cfg.SettingsPath(), config.Settings{
+		TutorModel:       cfg.TutorModel,
+		OpenRouterAPIKey: key,
+	}); err != nil {
+		return err
+	}
+	fmt.Println("OpenRouter API key saved")
+	return nil
 }
