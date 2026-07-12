@@ -73,7 +73,20 @@ const (
 	// no acknowledgment of what the user actually said. The message is
 	// included now (see runComprehensionCheck), so this instruction
 	// tells the model what to do with it.
-	comprehensionCheckInstruction = "Respond to the user's next message naturally first (briefly, if it's just a greeting or small talk). Then, using the problem statement above, restate the problem in your own words in 1-2 sentences and ask 1-2 short clarifying questions about it (constraints, edge cases, expected output). Do not ask the user anything about your own conversation state (e.g. whether this is their first question) — that is tracked for you separately. Do not answer, hint, or give code yet."
+	//
+	// "Both parts are required in the same reply, even if..." was added
+	// after a second, opposite real bug found live (via cmd/tutor-eval's
+	// runComprehensionCheckGroundingCheck, extended to actually cover
+	// this input shape — a real production session with a bare "hi" as
+	// the first message reproduced it 8/8 times): the model treated
+	// "respond naturally first (briefly, if it's just a greeting...)" as
+	// permission to stop after the greeting and skip the restate+ask
+	// half entirely — replying with only a generic "Hello! How can I
+	// assist you today?" and no mention of the actual problem. A
+	// substantive first message never triggered this (8/8 correct), so
+	// it's specific to the model reading a bare greeting as satisfying
+	// the whole instruction rather than just its first clause.
+	comprehensionCheckInstruction = "Respond to the user's next message naturally first (briefly, if it's just a greeting or small talk). Both parts are required in the same reply, even if their message is only a bare greeting with nothing else to respond to: after that brief natural response, you must ALSO, in the same reply, use the problem statement above to restate the problem in your own words in 1-2 sentences and ask 1-2 short clarifying questions about it (constraints, edge cases, expected output). Never end your reply after just the greeting. Do not ask the user anything about your own conversation state (e.g. whether this is their first question) — that is tracked for you separately. Do not answer, hint, or give code yet."
 )
 
 // systemPromptForMode returns the tutor's persona/rules for mode,

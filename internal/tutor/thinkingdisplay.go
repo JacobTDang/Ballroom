@@ -193,19 +193,39 @@ func (d *thinkingDisplay) tick() {
 
 // finish stops the animation — call via defer right after starting a
 // display for a turn, so the ticker goroutine never outlives that turn.
-// Leaves the last drawn frame and full call list in place as a static
-// recap of the turn rather than erasing the block; the reply prints
-// right below it. Also releases the renderer's own resources (for
-// Kitty: deletes its uploaded image data) — both happen once, together,
-// inside finishOnce so a second finish() call (tutor.go doesn't do
-// this, but the type stays correct on its own terms) is a safe no-op.
+// Erases the ball and tool-call list once the turn is done, so the
+// reply prints where they were instead of below a static recap left on
+// screen — an earlier version deliberately left the block in place, but
+// the user found that made a long practice session's tool-call block
+// pile up behind every single reply, which reads as clutter, not a
+// useful recap. Also releases the renderer's own resources (for Kitty:
+// deletes its uploaded image data) before erasing, so a Kitty placement
+// is torn down through its own protocol rather than just painted over.
+// Both happen once, together, inside finishOnce so a second finish()
+// call (tutor.go doesn't do this, but the type stays correct on its own
+// terms) is a safe no-op.
 func (d *thinkingDisplay) finish() {
 	d.finishOnce.Do(func() {
 		close(d.stop)
 		d.mu.Lock()
 		d.ball.close(d.w)
+		d.eraseLocked()
 		d.mu.Unlock()
 	})
+}
+
+// eraseLocked blanks every row redrawLocked last drew and leaves the
+// cursor back at the top of that now-empty space, ready for the turn's
+// reply to print there. Must be called with mu held.
+func (d *thinkingDisplay) eraseLocked() {
+	if d.drawn == 0 {
+		return
+	}
+	fmt.Fprintf(d.w, "\033[%dA", d.drawn)
+	for i := 0; i < d.drawn; i++ {
+		io.WriteString(d.w, "\033[2K\r\n")
+	}
+	fmt.Fprintf(d.w, "\033[%dA", d.drawn)
 }
 
 // redrawLocked repaints the whole block in place: one line per tool

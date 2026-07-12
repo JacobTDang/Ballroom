@@ -817,8 +817,38 @@ func main() {
 // Now the problem statement is injected directly, so this checks the
 // reply is actually grounded in it (not hallucinated) and free of
 // leaked tool-call narration.
-func runComprehensionCheckGroundingCheck(ctx context.Context) (pass, run int) {
-	const name = "comprehension check: grounded in the real problem, no narration leak"
+//
+// Runs the same check against two different first messages: a
+// substantive question, and a bare greeting. A real live bug (found
+// directly against a running practice container, not theorized) showed
+// these two behave very differently — a bare "hi" reliably got back
+// only a generic "Hello! How can I assist you today?" with no restate
+// or clarifying questions at all, 4/4 times, while a substantive first
+// message worked correctly. comprehensionCheckInstruction's "respond
+// naturally first (briefly, if it's just a greeting...)" clause was
+// apparently read by the model as permission to stop there instead of
+// still continuing with the rest of the instruction — this eval only
+// ever scripted a substantive first message, so it never covered the
+// one input shape (a bare greeting) that's realistically the most
+// common actual first message in a real session.
+func runComprehensionCheckGroundingCheck(ctx context.Context) (totalPass, totalRun int) {
+	cases := []struct {
+		label        string
+		firstMessage string
+	}{
+		{"substantive first message", "what problem am i working on?"},
+		{"bare greeting", "hi"},
+	}
+	for _, c := range cases {
+		pass, run := runComprehensionCheckGroundingCheckCase(ctx, c.label, c.firstMessage)
+		totalPass += pass
+		totalRun += run
+	}
+	return totalPass, totalRun
+}
+
+func runComprehensionCheckGroundingCheckCase(ctx context.Context, label, firstMessage string) (pass, run int) {
+	name := fmt.Sprintf("comprehension check: grounded in the real problem, no narration leak (%s)", label)
 
 	dir, err := os.MkdirTemp("", "ballroom-eval-work-")
 	if err != nil {
@@ -840,13 +870,13 @@ func runComprehensionCheckGroundingCheck(ctx context.Context) (pass, run int) {
 			WorkDir: dir, MaxContextBytes: 8000,
 		}
 		var stdout, stderr strings.Builder
-		if err := tutor.Run(ctx, cfg, strings.NewReader("what problem am i working on?\n"), &stdout, &stderr); err != nil {
+		if err := tutor.Run(ctx, cfg, strings.NewReader(firstMessage+"\n"), &stdout, &stderr); err != nil {
 			lastDetail = fmt.Sprintf("Run error: %v", err)
 			continue
 		}
 		out := stdout.String()
 		if !strings.Contains(strings.ToLower(out), "duplicate") {
-			lastDetail = "reply never mentioned the real problem ('duplicate') -- likely hallucinated: " + out
+			lastDetail = "reply never mentioned the real problem ('duplicate') -- likely hallucinated, or skipped restating it entirely: " + out
 			continue
 		}
 		if strings.Contains(out, `{"name"`) || strings.Contains(strings.ToLower(out), "i'll use the tool") || strings.Contains(strings.ToLower(out), "i will call") {

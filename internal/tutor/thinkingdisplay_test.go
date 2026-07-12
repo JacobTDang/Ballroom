@@ -240,13 +240,19 @@ func TestThinkingDisplay_ToolCallsPrintBeforeTheBall(t *testing.T) {
 	// ordering. What actually matters is the ordering *within* a single
 	// redraw pass that has both — isolate the last (most complete)
 	// redraw segment and check ordering only within that.
+	//
+	// Captured before finish(): finish() now erases the block (see its
+	// doc comment), which appends its own cursor-up sequence after the
+	// last real content redraw — this test is about redraw ordering,
+	// not erasing, so it looks at the buffer as it stood right after the
+	// last real draw.
 	t.Setenv("KITTY_WINDOW_ID", "")
 	var buf bytes.Buffer
 	d := newThinkingDisplay(&buf, false)
 	d.onStart(context.Background(), &callbacks.RunInfo{Name: "read_solution_file"}, &tool.CallbackInput{})
-	d.finish()
 
 	raw := buf.String()
+	d.finish()
 	ups := regexp.MustCompile(`\x1b\[\d+A`).FindAllStringIndex(raw, -1)
 	if len(ups) == 0 {
 		t.Fatal("expected at least one cursor-up redraw sequence")
@@ -263,6 +269,29 @@ func TestThinkingDisplay_ToolCallsPrintBeforeTheBall(t *testing.T) {
 	}
 	if ballIdx < nameIdx {
 		t.Error("expected the tool-call name to print before the ball (ball goes below the list), but the ball appeared first")
+	}
+}
+
+func TestThinkingDisplay_FinishErasesTheBallAndToolCallList(t *testing.T) {
+	t.Setenv("KITTY_WINDOW_ID", "")
+	var buf bytes.Buffer
+	d := newThinkingDisplay(&buf, false)
+	d.onStart(context.Background(), &callbacks.RunInfo{Name: "read_solution_file"}, &tool.CallbackInput{})
+
+	beforeFinish := buf.Len()
+	d.finish()
+	erase := buf.String()[beforeFinish:]
+
+	// One clear per drawn row (tool-call line + ball rows), all wrapped
+	// in a cursor-up-by-d.drawn before and after -- verifies finish()
+	// actually blanks the block rather than leaving it as a static
+	// recap.
+	wantUp := fmt.Sprintf("\033[%dA", d.drawn)
+	if strings.Count(erase, wantUp) != 2 {
+		t.Errorf("expected exactly 2 occurrences of %q (up before and after clearing) in finish()'s output, got %d in:\n%q", wantUp, strings.Count(erase, wantUp), erase)
+	}
+	if got := strings.Count(erase, "\033[2K"); got != d.drawn {
+		t.Errorf("expected %d row clears (\\033[2K) in finish()'s output, got %d in:\n%q", d.drawn, got, erase)
 	}
 }
 
