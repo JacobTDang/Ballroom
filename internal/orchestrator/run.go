@@ -120,6 +120,19 @@ func exerciseRunArgs(cfg config.Config, ex exercise.Exercise, controlDir, worksp
 		"-e", "PRACTICE_STARTED_AT=" + startedAt.Format(time.RFC3339),
 		"-e", "PRACTICE_DB_PATH=/data/tracker.db",
 		"-e", "TUTOR_MODEL=" + cfg.TutorModel,
+		// Bare "-e KEY" (no "=value") forwards the host shell's current
+		// value of KEY into the container — docker does not do this
+		// automatically for any env var. KITTY_WINDOW_ID identifies the
+		// *outer* terminal window, which only the host can know, so it
+		// has to be forwarded explicitly like this. TMUX does NOT need
+		// the same treatment — entrypoint.sh launches the tutor as a
+		// command inside one of the container's own tmux panes
+		// (`tmux send-keys ... "ballroom tutor"`), so it already
+		// inherits TMUX from that pane's shell naturally; forwarding the
+		// *host's* TMUX here would be wrong (it'd point at a host-side
+		// tmux socket that doesn't exist inside the container). See
+		// internal/tutor/kittyimage.go for how both are used.
+		"-e", "KITTY_WINDOW_ID",
 		cfg.DockerImage,
 	}
 }
@@ -132,6 +145,11 @@ func sandboxRunArgs(cfg config.Config) []string {
 		"run", "-it", "--rm",
 		"-v", sandboxVolume + ":/workspace",
 		"-e", "TUTOR_MODEL=" + cfg.TutorModel,
+		// See exerciseRunArgs's comment on this same flag — sandbox mode
+		// runs the identical entrypoint.sh/tmux layout, so the same
+		// reasoning applies (KITTY_WINDOW_ID needs host forwarding, TMUX
+		// doesn't).
+		"-e", "KITTY_WINDOW_ID",
 		cfg.DockerImage,
 	}
 }
