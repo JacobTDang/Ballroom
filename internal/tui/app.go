@@ -79,10 +79,13 @@ type toolCallingCheckMsg struct {
 
 // checkToolCallingCmd runs tutor.CheckToolCalling in the background —
 // a real LLM round-trip, so this must never block Update the way
-// checkModelFn's cheap /api/tags lookup can.
-func checkToolCallingCmd(model string) tea.Cmd {
+// checkModelFn's cheap /api/tags lookup can. ollamaHost is unused (but
+// still passed) when model is OpenRouterModelPrefix-prefixed — see
+// newChatModel's provider branch, which apiKey and ollamaHost are both
+// threaded through to.
+func checkToolCallingCmd(model, apiKey string) tea.Cmd {
 	return func() tea.Msg {
-		supported, err := checkToolCallingFn(ollamaHost, model)
+		supported, err := checkToolCallingFn(ollamaHost, model, apiKey)
 		return toolCallingCheckMsg{model: model, supported: supported, err: err}
 	}
 }
@@ -117,6 +120,11 @@ const (
 	stageLanguage
 	stageStats
 	stageModelPicker
+	// stageOpenRouterKeyEntry asks for an OpenRouter API key the first
+	// time an OpenRouterModelPrefix-prefixed model is picked with none
+	// available yet (settings.json nor OPENROUTER_API_KEY) — see
+	// handleModelEnter/selectModelOrPromptForKey.
+	stageOpenRouterKeyEntry
 )
 
 // appOutcome is what Run's caller should do once the program exits.
@@ -251,6 +259,10 @@ type appModel struct {
 	modelDownloadLineCh     <-chan string
 	modelDownloadErrCh      <-chan error
 
+	// stageOpenRouterKeyEntry
+	openRouterPendingModel string // the openrouter: tag waiting on a key before it can be selected
+	openRouterKeyInput     string
+
 	// outcome is read by Run() once the program exits.
 	outcome       appOutcome
 	exerciseToRun exercise.Exercise
@@ -355,6 +367,8 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateStats(msg)
 		case stageModelPicker:
 			return m.updateModelPicker(msg)
+		case stageOpenRouterKeyEntry:
+			return m.updateOpenRouterKeyEntry(msg)
 		}
 	}
 	return m, nil
@@ -732,9 +746,17 @@ func (m appModel) isLocalModel(name string) bool {
 // the typed filter matches nothing — treats the tag as a candidate:
 // checkModelTag checks it against Ollama and, if it isn't pulled, asks
 // whether to download it (see handleModelDownloadPrompt).
+//
+// An OpenRouterModelPrefix-prefixed tag is intercepted before either
+// path: there's no "pulled locally" concept for a hosted model, and
+// checkModelTag's checkModelFn call is an Ollama /api/tags lookup that
+// would just misreport it as not-pulled.
 func (m appModel) handleModelEnter() (tea.Model, tea.Cmd) {
 	if len(m.modelFiltered) > 0 {
 		sel := m.modelFiltered[m.modelCursor]
+		if strings.HasPrefix(sel, tutor.OpenRouterModelPrefix) {
+			return m.selectModelOrPromptForKey(sel)
+		}
 		if m.isLocalModel(sel) {
 			return m.selectModel(sel)
 		}
@@ -745,7 +767,27 @@ func (m appModel) handleModelEnter() (tea.Model, tea.Cmd) {
 	if tag == "" {
 		return m, nil
 	}
+	if strings.HasPrefix(tag, tutor.OpenRouterModelPrefix) {
+		return m.selectModelOrPromptForKey(tag)
+	}
 	return m.checkModelTag(tag)
+}
+
+// selectModelOrPromptForKey selects name immediately if an OpenRouter
+// API key is already available (settings.json or OPENROUTER_API_KEY,
+// resolved into cfg by config.Load), otherwise asks for one first via
+// stageOpenRouterKeyEntry — entering it there persists it to
+// settings.json (see updateOpenRouterKeyEntry), so this only ever asks
+// once across sessions, not once per pick.
+func (m appModel) selectModelOrPromptForKey(name string) (tea.Model, tea.Cmd) {
+	if m.cfg.OpenRouterAPIKey != "" {
+		return m.selectModel(name)
+	}
+	m.stage = stageOpenRouterKeyEntry
+	m.openRouterPendingModel = name
+	m.openRouterKeyInput = ""
+	m.modelWarning = ""
+	return m, nil
 }
 
 // checkModelTag checks tag against Ollama: if it's actually already
@@ -802,14 +844,52 @@ func (m appModel) handleModelDownloadPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 // so a slow/unreachable check can't stall the picker.
 func (m appModel) selectModel(name string) (tea.Model, tea.Cmd) {
 	m.cfg.TutorModel = name
-	if err := config.SaveSettings(m.cfg.SettingsPath(), config.Settings{TutorModel: name}); err != nil {
+	// OpenRouterAPIKey must round-trip here too, or picking any plain
+	// Ollama model after having set one via stageOpenRouterKeyEntry
+	// would silently wipe it from settings.json on the next save.
+	if err := config.SaveSettings(m.cfg.SettingsPath(), config.Settings{TutorModel: name, OpenRouterAPIKey: m.cfg.OpenRouterAPIKey}); err != nil {
 		m.err = err
 		return m, nil
 	}
 	m.err = nil
 	m.stage = stageMain
 	m.toolCallingWarning = ""
-	return m, checkToolCallingCmd(name)
+	return m, checkToolCallingCmd(name, m.cfg.OpenRouterAPIKey)
+}
+
+// --- stageOpenRouterKeyEntry ---
+
+// updateOpenRouterKeyEntry handles a single-line masked text input for
+// the OpenRouter API key — same rune/backspace shape as modelFilter's
+// handling in updateModelPicker, kept separate rather than shared since
+// this one never filters a list and needs its own Enter/Esc behavior.
+func (m appModel) updateOpenRouterKeyEntry(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.stage = stageModelPicker
+		m.openRouterPendingModel = ""
+		m.openRouterKeyInput = ""
+		return m, nil
+	case tea.KeyBackspace:
+		if len(m.openRouterKeyInput) > 0 {
+			m.openRouterKeyInput = m.openRouterKeyInput[:len(m.openRouterKeyInput)-1]
+		}
+		return m, nil
+	case tea.KeyEnter:
+		key := strings.TrimSpace(m.openRouterKeyInput)
+		if key == "" {
+			return m, nil
+		}
+		m.cfg.OpenRouterAPIKey = key
+		pending := m.openRouterPendingModel
+		m.openRouterPendingModel = ""
+		m.openRouterKeyInput = ""
+		return m.selectModel(pending)
+	case tea.KeyRunes:
+		m.openRouterKeyInput += string(msg.Runes)
+		return m, nil
+	}
+	return m, nil
 }
 
 // --- View ---
@@ -837,6 +917,8 @@ func (m appModel) renderRight() string {
 		return m.renderStats()
 	case stageModelPicker:
 		return m.renderModelPicker()
+	case stageOpenRouterKeyEntry:
+		return m.renderOpenRouterKeyEntry()
 	default:
 		return m.renderMain()
 	}
@@ -1089,5 +1171,24 @@ func (m appModel) renderModelPicker() string {
 
 	b.WriteString("\n")
 	b.WriteString(checkDimStyle.Render("↑/↓ move · enter select · esc back"))
+	return b.String()
+}
+
+// renderOpenRouterKeyEntry shows asterisks in place of the typed key —
+// this is a real secret on screen, unlike everything else the picker
+// handles, so it's masked even though this is a local, single-user TUI.
+func (m appModel) renderOpenRouterKeyEntry() string {
+	var b strings.Builder
+	b.WriteString(hintStyle.Render("OpenRouter API key"))
+	b.WriteString("\n")
+	b.WriteString(checkDimStyle.Render(fmt.Sprintf("needed once, to use %s", m.openRouterPendingModel)))
+	b.WriteString("\n\n")
+
+	b.WriteString(fmt.Sprintf("%s%s", checkDimStyle.Render("› "), strings.Repeat("*", len(m.openRouterKeyInput))))
+	b.WriteString("\n\n")
+
+	b.WriteString(checkDimStyle.Render("saved to settings.json — you won't be asked again"))
+	b.WriteString("\n\n")
+	b.WriteString(checkDimStyle.Render("enter confirm · esc cancel"))
 	return b.String()
 }

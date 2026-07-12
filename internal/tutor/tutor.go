@@ -26,14 +26,19 @@ import (
 // inside the practice container.
 type Config struct {
 	// OllamaHost is the base URL of the Ollama server (e.g.
-	// http://host.docker.internal:11434).
+	// http://host.docker.internal:11434). Unused when Model is
+	// OpenRouterModelPrefix-prefixed.
 	OllamaHost string
-	// Model is the Ollama model tag to use. Must support Ollama's
-	// structured tool_calls response field — confirmed via
-	// cmd/tutor-spike that qwen2.5-coder:7b does not (it emits
-	// tool-call-shaped JSON as plain text content instead), while
-	// llama3.1:8b does.
+	// Model is the Ollama model tag to use, or an
+	// OpenRouterModelPrefix-prefixed OpenRouter model slug (see
+	// agent.go's newChatModel). Must support the provider's structured
+	// tool_calls response field — confirmed via cmd/tutor-spike that
+	// qwen2.5-coder:7b does not (it emits tool-call-shaped JSON as plain
+	// text content instead), while llama3.1:8b does.
 	Model string
+	// APIKey authenticates OpenRouter requests when Model is
+	// OpenRouterModelPrefix-prefixed; unused otherwise.
+	APIKey string
 	// Mode is the tutor_mode (syntax-only / hints-first / full-assist)
 	// selecting the system prompt and whether the comprehension check
 	// runs.

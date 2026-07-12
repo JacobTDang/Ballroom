@@ -234,8 +234,14 @@ func tutorCmd() error {
 	}
 
 	cfg := tutor.Config{
-		OllamaHost:      ollamaHost,
-		Model:           model,
+		OllamaHost: ollamaHost,
+		Model:      model,
+		// APIKey is only meaningful when Model is
+		// tutor.OpenRouterModelPrefix-prefixed (see agent.go's
+		// newChatModel); harmless to always set from the env var
+		// regardless, same as OllamaHost being set but unused on that
+		// path.
+		APIKey:          os.Getenv("OPENROUTER_API_KEY"),
 		Mode:            mode,
 		WorkDir:         workDir,
 		NvimSocket:      os.Getenv("NVIM_SOCKET"),

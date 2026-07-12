@@ -153,6 +153,24 @@ func TestSaveSettings_ThenLoadRoundTrips(t *testing.T) {
 	}
 }
 
+func TestSaveSettings_ThenLoadRoundTripsOpenRouterAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	want := Settings{TutorModel: "openrouter:anthropic/claude-3.5-sonnet", OpenRouterAPIKey: "sk-abc123"}
+	if err := SaveSettings(path, want); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	got, err := LoadSettings(path)
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if got != want {
+		t.Errorf("LoadSettings = %+v, want %+v", got, want)
+	}
+}
+
 func TestSaveSettings_CreatesParentDirIfMissing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "data", "settings.json")
@@ -215,5 +233,87 @@ func TestLoad_ReadsPersistedTutorModel(t *testing.T) {
 	}
 	if cfg.TutorModel != "llama3:8b" {
 		t.Errorf("TutorModel = %q, want %q", cfg.TutorModel, "llama3:8b")
+	}
+}
+
+func TestLoad_ReadsPersistedOpenRouterAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	t.Setenv("PRACTICE_ROOT", resolved)
+	t.Setenv("OPENROUTER_API_KEY", "")
+
+	settingsPath := filepath.Join(resolved, "data", "settings.json")
+	if err := SaveSettings(settingsPath, Settings{TutorModel: "llama3:8b", OpenRouterAPIKey: "sk-from-settings"}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OpenRouterAPIKey != "sk-from-settings" {
+		t.Errorf("OpenRouterAPIKey = %q, want %q", cfg.OpenRouterAPIKey, "sk-from-settings")
+	}
+}
+
+func TestLoad_FallsBackToOpenRouterAPIKeyEnvVarWhenNotInSettings(t *testing.T) {
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	t.Setenv("PRACTICE_ROOT", resolved)
+	t.Setenv("OPENROUTER_API_KEY", "sk-from-env")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OpenRouterAPIKey != "sk-from-env" {
+		t.Errorf("OpenRouterAPIKey = %q, want %q", cfg.OpenRouterAPIKey, "sk-from-env")
+	}
+}
+
+func TestLoad_SettingsOpenRouterAPIKeyTakesPrecedenceOverEnvVar(t *testing.T) {
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	t.Setenv("PRACTICE_ROOT", resolved)
+	t.Setenv("OPENROUTER_API_KEY", "sk-from-env")
+
+	settingsPath := filepath.Join(resolved, "data", "settings.json")
+	if err := SaveSettings(settingsPath, Settings{TutorModel: "llama3:8b", OpenRouterAPIKey: "sk-from-settings"}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OpenRouterAPIKey != "sk-from-settings" {
+		t.Errorf("OpenRouterAPIKey = %q, want the settings.json value %q to win over the env var", cfg.OpenRouterAPIKey, "sk-from-settings")
+	}
+}
+
+func TestLoad_OpenRouterAPIKeyEmptyWhenNeitherSourceHasIt(t *testing.T) {
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	t.Setenv("PRACTICE_ROOT", resolved)
+	t.Setenv("OPENROUTER_API_KEY", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OpenRouterAPIKey != "" {
+		t.Errorf("OpenRouterAPIKey = %q, want empty", cfg.OpenRouterAPIKey)
 	}
 }

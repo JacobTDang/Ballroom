@@ -2,6 +2,7 @@ package tutor
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -90,6 +91,69 @@ func TestNewChatModel_TimesOutIfOllamaHangs(t *testing.T) {
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("agent.Generate took %v to return, want it to time out quickly (~%v)", elapsed, ollamaRequestTimeout)
+	}
+}
+
+// TestNewChatModel_RoutesOpenRouterPrefixedModelToOpenAICompatibleClient
+// proves newChatModel's branch: an OpenRouterModelPrefix-prefixed
+// Config.Model reaches a mock standing in for OpenRouter's OpenAI-
+// compatible /chat/completions endpoint (openRouterBaseURL is a var
+// specifically so this test can redirect it) rather than trying to
+// treat the prefix as a literal Ollama tag, and the prefix itself is
+// stripped before the model name reaches the request body — OpenRouter
+// wouldn't recognize "openrouter:anthropic/claude-3.5-sonnet" as a
+// model slug, only "anthropic/claude-3.5-sonnet".
+func TestNewChatModel_RoutesOpenRouterPrefixedModelToOpenAICompatibleClient(t *testing.T) {
+	var gotModel string
+	var gotAuth string
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		var req struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		gotModel = req.Model
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-test", "object": "chat.completion", "created": 1,
+			"model": req.Model,
+			"choices": []map[string]any{
+				{"index": 0, "message": map[string]string{"role": "assistant", "content": "hello from openrouter mock"}, "finish_reason": "stop"},
+			},
+		})
+	}))
+	t.Cleanup(mock.Close)
+
+	origBaseURL := openRouterBaseURL
+	openRouterBaseURL = mock.URL
+	t.Cleanup(func() { openRouterBaseURL = origBaseURL })
+
+	ctx := context.Background()
+	cfg := Config{Model: OpenRouterModelPrefix + "anthropic/claude-3.5-sonnet", APIKey: "sk-test-key"}
+	cm, err := newChatModel(ctx, cfg)
+	if err != nil {
+		t.Fatalf("newChatModel: %v", err)
+	}
+	agent, err := newAgent(ctx, cm, nil)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	reply, err := agent.Generate(ctx, []*schema.Message{schema.UserMessage("hi")})
+	if err != nil {
+		t.Fatalf("agent.Generate: %v", err)
+	}
+	if reply.Content != "hello from openrouter mock" {
+		t.Errorf("reply.Content = %q, want %q", reply.Content, "hello from openrouter mock")
+	}
+	if gotModel != "anthropic/claude-3.5-sonnet" {
+		t.Errorf("request model = %q, want the OpenRouterModelPrefix stripped: %q", gotModel, "anthropic/claude-3.5-sonnet")
+	}
+	if gotAuth != "Bearer sk-test-key" {
+		t.Errorf("Authorization header = %q, want %q", gotAuth, "Bearer sk-test-key")
 	}
 }
 

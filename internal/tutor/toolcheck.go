@@ -13,22 +13,25 @@ type pingArgs struct {
 	Reason string `json:"reason" jsonschema:"description=why you are pinging"`
 }
 
-// CheckToolCalling reports whether model actually supports Ollama's
-// structured tool_calls response field, by binding one trivial "ping"
-// tool and issuing a directive prompt only a real tool call can
-// satisfy. Some models (confirmed: qwen2.5-coder:7b — see
+// CheckToolCalling reports whether model actually supports the
+// provider's structured tool_calls response field, by binding one
+// trivial "ping" tool and issuing a directive prompt only a real tool
+// call can satisfy. Some models (confirmed: qwen2.5-coder:7b — see
 // config.DefaultTutorModel's doc comment) emit tool-call-shaped JSON as
 // plain text content instead of populating tool_calls; this call
 // distinguishes that failure mode directly rather than a caller
 // inferring it from unrelated symptoms during a real tutor session.
 //
+// ollamaHost and apiKey are only used for their respective providers
+// (see newChatModel) — pass "" for whichever doesn't apply to model.
+//
 // Ports the same wiring cmd/tutor-spike used to first confirm this
 // failure mode, as a small reusable check instead of a throwaway
 // binary.
-func CheckToolCalling(ollamaHost, model string) (bool, error) {
+func CheckToolCalling(ollamaHost, model, apiKey string) (bool, error) {
 	ctx := context.Background()
 
-	cm, err := newChatModel(ctx, Config{OllamaHost: ollamaHost, Model: model})
+	cm, err := newChatModel(ctx, Config{OllamaHost: ollamaHost, Model: model, APIKey: apiKey})
 	if err != nil {
 		return false, fmt.Errorf("tutor: check tool calling: %w", err)
 	}

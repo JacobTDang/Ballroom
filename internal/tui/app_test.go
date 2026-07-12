@@ -43,7 +43,7 @@ func fakeCheckModel(result preflight.Check) func() {
 // Returns a restore func to defer.
 func fakeCheckToolCalling(supported bool, err error) func() {
 	orig := checkToolCallingFn
-	checkToolCallingFn = func(string, string) (bool, error) { return supported, err }
+	checkToolCallingFn = func(string, string, string) (bool, error) { return supported, err }
 	return func() { checkToolCallingFn = orig }
 }
 
@@ -802,6 +802,161 @@ func TestAppModel_ModelPicker_SelectingLocalModelNeverCallsCheckModel(t *testing
 	}
 	if got.cfg.TutorModel != "qwen2.5-coder:7b" {
 		t.Errorf("cfg.TutorModel = %q, want %q", got.cfg.TutorModel, "qwen2.5-coder:7b")
+	}
+}
+
+// --- OpenRouter model selection (handleModelEnter routing + key entry) ---
+
+func TestAppModel_ModelPicker_TypingOpenRouterTagWithNoKeySetGoesToKeyEntry(t *testing.T) {
+	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b"})
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("openrouter:anthropic/claude-3.5-sonnet")})
+	m = newM.(appModel)
+
+	newM2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command — entering the key-entry stage is an internal stage change")
+	}
+	got := newM2.(appModel)
+	if got.stage != stageOpenRouterKeyEntry {
+		t.Errorf("stage = %v, want stageOpenRouterKeyEntry", got.stage)
+	}
+	if got.openRouterPendingModel != "openrouter:anthropic/claude-3.5-sonnet" {
+		t.Errorf("openRouterPendingModel = %q, want %q", got.openRouterPendingModel, "openrouter:anthropic/claude-3.5-sonnet")
+	}
+	// checkModelFn must never be reached for an openrouter: tag — it's
+	// meaningless against Ollama's /api/tags and would misreport it as
+	// "not pulled".
+}
+
+func TestAppModel_ModelPicker_TypingOpenRouterTagWithKeyAlreadySetSelectsImmediately(t *testing.T) {
+	defer fakeCheckToolCalling(true, nil)()
+
+	dir := t.TempDir()
+	m := appModel{cfg: config.Config{DataDir: dir, OpenRouterAPIKey: "sk-existing"}, stage: stageModelPicker, modelLoading: true}
+	newM, _ := m.Update(modelsLoadedMsg{models: []string{"qwen2.5-coder:7b"}})
+	m = newM.(appModel)
+	newM2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("openrouter:anthropic/claude-3.5-sonnet")})
+	m = newM2.(appModel)
+
+	newM3, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Error("expected a background command kicking off the tool-calling check")
+	}
+	got := newM3.(appModel)
+	if got.stage != stageMain {
+		t.Errorf("stage = %v, want stageMain (key already available, should select immediately)", got.stage)
+	}
+	if got.cfg.TutorModel != "openrouter:anthropic/claude-3.5-sonnet" {
+		t.Errorf("cfg.TutorModel = %q, want %q", got.cfg.TutorModel, "openrouter:anthropic/claude-3.5-sonnet")
+	}
+}
+
+func TestAppModel_OpenRouterKeyEntry_EnterSavesKeyAndSelectsPendingModel(t *testing.T) {
+	defer fakeCheckToolCalling(true, nil)()
+
+	dir := t.TempDir()
+	cfg := config.Config{DataDir: dir, TutorModel: "old-model"}
+	m := appModel{cfg: cfg, stage: stageOpenRouterKeyEntry, openRouterPendingModel: "openrouter:anthropic/claude-3.5-sonnet"}
+
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("sk-typed-key")})
+	m = newM.(appModel)
+
+	newM2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Error("expected a background command kicking off the tool-calling check")
+	}
+	got := newM2.(appModel)
+	if got.stage != stageMain {
+		t.Fatalf("stage = %v, want stageMain", got.stage)
+	}
+	if got.cfg.OpenRouterAPIKey != "sk-typed-key" {
+		t.Errorf("cfg.OpenRouterAPIKey = %q, want %q", got.cfg.OpenRouterAPIKey, "sk-typed-key")
+	}
+	if got.cfg.TutorModel != "openrouter:anthropic/claude-3.5-sonnet" {
+		t.Errorf("cfg.TutorModel = %q, want %q", got.cfg.TutorModel, "openrouter:anthropic/claude-3.5-sonnet")
+	}
+
+	saved, err := config.LoadSettings(cfg.SettingsPath())
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if saved.OpenRouterAPIKey != "sk-typed-key" {
+		t.Errorf("persisted OpenRouterAPIKey = %q, want %q", saved.OpenRouterAPIKey, "sk-typed-key")
+	}
+	if saved.TutorModel != "openrouter:anthropic/claude-3.5-sonnet" {
+		t.Errorf("persisted TutorModel = %q, want %q", saved.TutorModel, "openrouter:anthropic/claude-3.5-sonnet")
+	}
+}
+
+func TestAppModel_OpenRouterKeyEntry_EnterWithEmptyKeyDoesNothing(t *testing.T) {
+	m := appModel{cfg: config.Config{DataDir: t.TempDir()}, stage: stageOpenRouterKeyEntry, openRouterPendingModel: "openrouter:x/y"}
+
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no command when the key input is empty")
+	}
+	got := newM.(appModel)
+	if got.stage != stageOpenRouterKeyEntry {
+		t.Errorf("stage = %v, want to stay at stageOpenRouterKeyEntry with nothing typed", got.stage)
+	}
+}
+
+func TestAppModel_OpenRouterKeyEntry_EscCancelsBackToModelPickerWithoutSelecting(t *testing.T) {
+	m := appModel{cfg: config.Config{DataDir: t.TempDir(), TutorModel: "old-model"}, stage: stageOpenRouterKeyEntry, openRouterPendingModel: "openrouter:x/y", openRouterKeyInput: "sk-partial"}
+
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd != nil {
+		t.Error("expected no external command on cancel")
+	}
+	got := newM.(appModel)
+	if got.stage != stageModelPicker {
+		t.Errorf("stage = %v, want stageModelPicker", got.stage)
+	}
+	if got.cfg.TutorModel != "old-model" {
+		t.Errorf("cfg.TutorModel = %q, want unchanged %q", got.cfg.TutorModel, "old-model")
+	}
+	if got.cfg.OpenRouterAPIKey != "" {
+		t.Error("expected the partially-typed key to be discarded, not saved")
+	}
+}
+
+func TestAppModel_OpenRouterKeyEntry_BackspaceRemovesLastCharacter(t *testing.T) {
+	m := appModel{cfg: config.Config{DataDir: t.TempDir()}, stage: stageOpenRouterKeyEntry, openRouterKeyInput: "sk-abc"}
+
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	got := newM.(appModel)
+	if got.openRouterKeyInput != "sk-ab" {
+		t.Errorf("openRouterKeyInput = %q, want %q", got.openRouterKeyInput, "sk-ab")
+	}
+}
+
+func TestAppModel_SelectModel_PreservesOpenRouterAPIKeyAcrossAnOllamaPick(t *testing.T) {
+	defer fakeCheckToolCalling(true, nil)()
+
+	dir := t.TempDir()
+	cfg := config.Config{DataDir: dir, OpenRouterAPIKey: "sk-preserve-me"}
+	m := appModel{cfg: cfg}
+
+	newM, _ := m.selectModel("llama3:8b")
+	got := newM.(appModel)
+	if got.cfg.OpenRouterAPIKey != "sk-preserve-me" {
+		t.Errorf("cfg.OpenRouterAPIKey = %q, want it preserved across an unrelated Ollama pick", got.cfg.OpenRouterAPIKey)
+	}
+
+	saved, err := config.LoadSettings(cfg.SettingsPath())
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if saved.OpenRouterAPIKey != "sk-preserve-me" {
+		t.Errorf("persisted OpenRouterAPIKey = %q, want it preserved, not wiped by picking an unrelated Ollama model", saved.OpenRouterAPIKey)
+	}
+}
+
+func TestAppModel_RenderOpenRouterKeyEntry_MasksTypedKey(t *testing.T) {
+	m := appModel{cfg: config.Config{}, stage: stageOpenRouterKeyEntry, openRouterPendingModel: "openrouter:x/y", openRouterKeyInput: "sk-secret-value"}
+	view := stripAnsiTUI(m.View())
+	if strings.Contains(view, "sk-secret-value") {
+		t.Error("expected the typed API key to be masked, not shown in plain text")
 	}
 }
 
