@@ -131,9 +131,11 @@ func TestInputBox_ReturnToScrollPositionsAtScrollRegionBottom(t *testing.T) {
 	// regionBottom is an absolute jump, not something reached by a
 	// genuine scroll, so it carries no guarantee of being blank; a real
 	// live session found this the hard way (see returnToScroll's doc
-	// comment).
-	if got := buf.String(); got != "\033[21;1H\033[2K" {
-		t.Errorf("returnToScroll = %q, want \\033[21;1H\\033[2K", got)
+	// comment). Also clears the box's own content row (23 = regionBottom
+	// + 2) first, so a stale cooked-mode echo of the submitted line
+	// doesn't sit there looking like a duplicate until the next prompt.
+	if got := buf.String(); got != "\033[23;1H\033[2K\033[21;1H\033[2K" {
+		t.Errorf("returnToScroll = %q, want \\033[23;1H\\033[2K\\033[21;1H\\033[2K", got)
 	}
 }
 

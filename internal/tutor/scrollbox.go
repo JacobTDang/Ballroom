@@ -171,7 +171,17 @@ func (b *inputBox) showPrompt() {
 // several turns back and printing a shorter new line over it just
 // leaves the old tail dangling — the exact bug showPrompt already
 // avoided by clearing before it prints, which this now matches.
+//
+// Also clears the box's own content row (regionBottom+2). Nothing else
+// touches that row between a line being submitted and the next
+// showPrompt() call at the start of the following turn, so without
+// this it keeps showing cooked-mode's echo of the just-submitted line
+// — a stale copy sitting directly below the real echo this function's
+// caller is about to print into the scroll region. Found live: it
+// self-corrects on the next prompt, but in between it reads as a
+// duplicate, confusing enough to look like a bug.
 func (b *inputBox) returnToScroll() {
+	fmt.Fprintf(b.w, "\033[%d;1H\033[2K", b.regionBottom+2)
 	fmt.Fprintf(b.w, "\033[%d;1H\033[2K", b.regionBottom)
 }
 

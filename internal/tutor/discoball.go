@@ -27,14 +27,19 @@ var discoBallFS embed.FS
 // samples couldn't resolve the sprite's facet pattern at all. Packing
 // two samples per line recovers real detail (discoBallSampleRows/2
 // physical lines instead of discoBallSampleRows) without growing the
-// on-screen footprint. 6x6 (3 rendered lines) is a further shrink from
-// 10x10 (5 lines) — confirmed live still too big/prominent for a
-// "still thinking" indicator next to the tool-call list — a starting
-// point for further live tuning, not a measured-correct value.
+// on-screen footprint. Shrunk to 6x6 (3 rendered lines) at one point to
+// make the indicator less prominent, but that was tuned while Kitty
+// (a real image, crisp at any size) was still the renderer actually in
+// use live — once the box feature forced ANSI on unconditionally
+// (thinkingdisplay.go's boxInScrollRegion), 6x6 read as an
+// undifferentiated color blob in real live testing, not a ball. Back to
+// 10x10 (5 rendered lines), the last size confirmed live to still look
+// like a ball (that round's feedback was "too big/prominent", not
+// "unrecognizable") — prioritizing recognizable over compact.
 const (
 	discoBallFrameCount = 16
-	discoBallSampleRows = 6
-	discoBallSampleCols = 6
+	discoBallSampleRows = 10
+	discoBallSampleCols = 10
 
 	// discoBallAlphaThreshold: a downsampled cell averaging below this
 	// (out of the 65535-scale alpha image.Color.RGBA() returns) is
