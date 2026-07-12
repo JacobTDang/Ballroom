@@ -14,6 +14,7 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 	"github.com/JacobTDang/Ballroom/internal/preflight"
 	"github.com/JacobTDang/Ballroom/internal/tracker"
+	"github.com/JacobTDang/Ballroom/internal/tutor"
 )
 
 // listModelsFn and checkModelFn are vars (not direct calls) so tests can
@@ -21,6 +22,13 @@ import (
 // indirection pattern as buildImageFn in boot.go.
 var listModelsFn = preflight.ListModels
 var checkModelFn = preflight.CheckModel
+
+// checkToolCallingFn is checkModelFn's counterpart for the deeper
+// "does this model actually make real tool calls" question — a real
+// Ollama round-trip (see tutor.CheckToolCalling), so it always runs as
+// a background tea.Cmd (checkToolCallingCmd) after a pick completes
+// rather than blocking selection on it.
+var checkToolCallingFn = tutor.CheckToolCalling
 
 // suggestedModels are known-good tutor model tags surfaced in the picker
 // even before they're pulled locally, so they're discoverable without
@@ -55,6 +63,28 @@ func browsableModels(local []string) []string {
 type modelsLoadedMsg struct {
 	models []string
 	err    error
+}
+
+// toolCallingCheckMsg carries the result of a background
+// tutor.CheckToolCalling run kicked off by selectModel. model is the
+// tag it was checked against — the Update handler drops the result if
+// it no longer matches cfg.TutorModel, so a check for a pick the user
+// has since replaced with another one can't clobber the current
+// warning state.
+type toolCallingCheckMsg struct {
+	model     string
+	supported bool
+	err       error
+}
+
+// checkToolCallingCmd runs tutor.CheckToolCalling in the background —
+// a real LLM round-trip, so this must never block Update the way
+// checkModelFn's cheap /api/tags lookup can.
+func checkToolCallingCmd(model string) tea.Cmd {
+	return func() tea.Msg {
+		supported, err := checkToolCallingFn(ollamaHost, model)
+		return toolCallingCheckMsg{model: model, supported: supported, err: err}
+	}
 }
 
 // filterModels returns the models whose name contains filter
@@ -169,6 +199,11 @@ type appModel struct {
 
 	// stageMain
 	cursor int
+	// toolCallingWarning is set once a background tutor.CheckToolCalling
+	// (kicked off by selectModel) reports the currently selected model
+	// doesn't make real tool calls — shown on the main menu since the
+	// check resolves after the picker has already returned there.
+	toolCallingWarning string
 
 	// stageCategories / source data for stageProblems
 	problems       []catalog.ProblemStatus
@@ -277,6 +312,32 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.selectModel(m.modelDownloadTarget)
+
+	case toolCallingCheckMsg:
+		if msg.model != m.cfg.TutorModel {
+			// The user picked something else again before this
+			// resolved — stale, ignore rather than clobbering the
+			// warning state for whatever is actually selected now.
+			return m, nil
+		}
+		switch {
+		case msg.err != nil:
+			// A real bug found live: msg.err was captured on the struct
+			// but never actually looked at here, so a hard rejection
+			// (e.g. Ollama returning 400 "does not support tools" for a
+			// model picked without real tool-calling support) produced
+			// no warning at all — the picker went silent, and the
+			// problem only surfaced once inside a live tutor session as
+			// a confusing "could not reach" error that read like a
+			// network/Docker problem. An error here is at least as
+			// informative as the "ran cleanly but didn't call it" case
+			// below, often more so (a hard rejection is more certain
+			// than an inferred non-support), so it must warn too.
+			m.toolCallingWarning = fmt.Sprintf("checking whether %s supports real tool calling failed: %v — the tutor may not work correctly with this model. Pick a different model from the Model menu if this causes problems.", msg.model, msg.err)
+		case !msg.supported:
+			m.toolCallingWarning = fmt.Sprintf("%s may not support real tool calling — the tutor may not be able to read your code, problem, or tests reliably. Pick a different model from the Model menu if this causes problems.", msg.model)
+		}
+		return m, nil
 
 	case tea.KeyMsg:
 		switch m.stage {
@@ -734,7 +795,11 @@ func (m appModel) handleModelDownloadPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 // selectModel persists the pick immediately (same call the pre-merge
 // runModelPicker made in run.go) and updates cfg in place so any
 // exercise/sandbox launched later in this same process uses it right
-// away, without waiting for a fresh Config.Load.
+// away, without waiting for a fresh Config.Load. Selection itself is
+// never blocked on whether the model actually supports real tool
+// calling — checkToolCallingCmd runs that check in the background and
+// only surfaces a warning (toolCallingCheckMsg in Update) if it fails,
+// so a slow/unreachable check can't stall the picker.
 func (m appModel) selectModel(name string) (tea.Model, tea.Cmd) {
 	m.cfg.TutorModel = name
 	if err := config.SaveSettings(m.cfg.SettingsPath(), config.Settings{TutorModel: name}); err != nil {
@@ -743,7 +808,8 @@ func (m appModel) selectModel(name string) (tea.Model, tea.Cmd) {
 	}
 	m.err = nil
 	m.stage = stageMain
-	return m, nil
+	m.toolCallingWarning = ""
+	return m, checkToolCallingCmd(name)
 }
 
 // --- View ---
@@ -792,6 +858,11 @@ func (m appModel) renderMain() string {
 
 	if m.err != nil {
 		b.WriteString(failStyle.Render("  " + m.err.Error()))
+		b.WriteString("\n\n")
+	}
+
+	if m.toolCallingWarning != "" {
+		b.WriteString(hintStyle.Render("  " + m.toolCallingWarning))
 		b.WriteString("\n\n")
 	}
 

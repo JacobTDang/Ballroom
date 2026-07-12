@@ -38,6 +38,15 @@ func fakeCheckModel(result preflight.Check) func() {
 	return func() { checkModelFn = orig }
 }
 
+// fakeCheckToolCalling substitutes checkToolCallingFn in tests so
+// selectModel's background check never makes a real Ollama round-trip.
+// Returns a restore func to defer.
+func fakeCheckToolCalling(supported bool, err error) func() {
+	orig := checkToolCallingFn
+	checkToolCallingFn = func(string, string) (bool, error) { return supported, err }
+	return func() { checkToolCallingFn = orig }
+}
+
 // fakeCatalogList substitutes catalogListFn in tests so no real exercises
 // dir / sqlite db is touched — same indirection pattern as
 // listModelsFn/checkModelFn.
@@ -474,6 +483,8 @@ func TestAppModel_ModelPicker_QWithNoFilterGoesBackToMain(t *testing.T) {
 }
 
 func TestAppModel_ModelPicker_EnterOnLocalModelPersistsAndReturnsToMain(t *testing.T) {
+	defer fakeCheckToolCalling(true, nil)()
+
 	dir := t.TempDir()
 	cfg := config.Config{DataDir: dir, TutorModel: "old-model"}
 	m := appModel{cfg: cfg, stage: stageModelPicker, modelLoading: true}
@@ -484,8 +495,8 @@ func TestAppModel_ModelPicker_EnterOnLocalModelPersistsAndReturnsToMain(t *testi
 	m = newM2.(appModel)
 
 	newM3, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil {
-		t.Error("expected no external command — selecting a model doesn't leave the program")
+	if cmd == nil {
+		t.Error("expected a background command kicking off the tool-calling check")
 	}
 	got := newM3.(appModel)
 	if got.stage != stageMain {
@@ -608,6 +619,7 @@ func TestAppModel_ModelPicker_SelectingSuggestedNotPulledModelWarnsFirst(t *test
 
 func TestAppModel_ModelPicker_YOnDownloadPromptStartsLivePullAndSelectsOnSuccess(t *testing.T) {
 	defer fakeCheckModel(preflight.Check{OK: false, Detail: config.Qwen25Coder14BModel + " not pulled — ollama pull " + config.Qwen25Coder14BModel})()
+	defer fakeCheckToolCalling(true, nil)()
 
 	lineCh := make(chan string, 1)
 	errCh := make(chan error, 1)
@@ -647,8 +659,8 @@ func TestAppModel_ModelPicker_YOnDownloadPromptStartsLivePullAndSelectsOnSuccess
 	}
 
 	newM3, cmd3 := m.Update(pullDoneMsg{err: nil})
-	if cmd3 != nil {
-		t.Error("expected no external command once the pull succeeds — selecting a model is an internal stage change")
+	if cmd3 == nil {
+		t.Error("expected a background command kicking off the tool-calling check once the pull succeeds")
 	}
 	got := newM3.(appModel)
 	if got.stage != stageMain {
@@ -775,11 +787,14 @@ func TestAppModel_ModelPicker_SelectingLocalModelNeverCallsCheckModel(t *testing
 	// already-pulled local model called checkModelFn at all, this test
 	// would hit the real network-calling default and could hang/flake in
 	// CI. Selecting a genuinely local entry must short-circuit before
-	// ever reaching that call.
+	// ever reaching that call. checkToolCallingFn is faked separately —
+	// selecting a model always kicks that check off, local or not.
+	defer fakeCheckToolCalling(true, nil)()
+
 	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b", "llama3:8b"})
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil {
-		t.Error("expected enter to select immediately for an already-pulled local model, no external command")
+	if cmd == nil {
+		t.Error("expected a background command kicking off the tool-calling check")
 	}
 	got := newM.(appModel)
 	if got.stage != stageMain {
@@ -787,6 +802,96 @@ func TestAppModel_ModelPicker_SelectingLocalModelNeverCallsCheckModel(t *testing
 	}
 	if got.cfg.TutorModel != "qwen2.5-coder:7b" {
 		t.Errorf("cfg.TutorModel = %q, want %q", got.cfg.TutorModel, "qwen2.5-coder:7b")
+	}
+}
+
+// --- tool-calling validation (selectModel's checkToolCallingCmd) ---
+
+func TestAppModel_SelectModel_RunningItsCmdReportsUnsupportedToolCalling(t *testing.T) {
+	defer fakeCheckToolCalling(false, nil)()
+
+	m := appModel{cfg: config.Config{DataDir: t.TempDir()}}
+	newM, cmd := m.selectModel("qwen2.5-coder:7b")
+	if cmd == nil {
+		t.Fatal("expected selectModel to return the tool-calling check command")
+	}
+
+	msg := cmd()
+	checkMsg, ok := msg.(toolCallingCheckMsg)
+	if !ok {
+		t.Fatalf("cmd() returned %T, want toolCallingCheckMsg", msg)
+	}
+	if checkMsg.model != "qwen2.5-coder:7b" || checkMsg.supported {
+		t.Errorf("toolCallingCheckMsg = %+v, want model=qwen2.5-coder:7b supported=false", checkMsg)
+	}
+
+	got, _ := newM.Update(checkMsg)
+	final := got.(appModel)
+	if final.toolCallingWarning == "" {
+		t.Error("expected toolCallingWarning to be set for an unsupported model")
+	}
+	if !strings.Contains(final.toolCallingWarning, "qwen2.5-coder:7b") {
+		t.Errorf("toolCallingWarning = %q, want it to name the model", final.toolCallingWarning)
+	}
+}
+
+func TestAppModel_ToolCallingCheckMsg_SupportedLeavesNoWarning(t *testing.T) {
+	m := appModel{cfg: config.Config{TutorModel: "llama3.1:8b"}}
+	newM, cmd := m.Update(toolCallingCheckMsg{model: "llama3.1:8b", supported: true})
+	if cmd != nil {
+		t.Error("expected no further command once the check resolves")
+	}
+	got := newM.(appModel)
+	if got.toolCallingWarning != "" {
+		t.Errorf("toolCallingWarning = %q, want empty for a supported model", got.toolCallingWarning)
+	}
+}
+
+func TestAppModel_ToolCallingCheckMsg_ErrorSetsWarningWithRealDetail(t *testing.T) {
+	// A real bug found live: this used to leave toolCallingWarning empty
+	// on any error, on the reasoning that a network blip checking a
+	// perfectly fine model shouldn't scare the user into thinking that
+	// model is broken. In practice this swallowed a much more
+	// significant case: Ollama hard-rejecting a request with 400 "does
+	// not support tools" for a model picked without real tool-calling
+	// support IS an error here (CheckToolCalling returns it as such,
+	// not just supported=false) — so the picker went completely silent,
+	// and the problem only surfaced once inside a live tutor session as
+	// a confusing "could not reach" message. An error must still warn,
+	// just phrased as the check having failed rather than flatly
+	// blaming the model, since it could still be a transient issue.
+	m := appModel{cfg: config.Config{TutorModel: "llama3.1:8b"}}
+	newM, _ := m.Update(toolCallingCheckMsg{model: "llama3.1:8b", supported: false, err: errors.New("does not support tools")})
+	got := newM.(appModel)
+	if got.toolCallingWarning == "" {
+		t.Fatal("expected toolCallingWarning to be set when the check itself errored")
+	}
+	if !strings.Contains(got.toolCallingWarning, "llama3.1:8b") {
+		t.Errorf("toolCallingWarning = %q, want it to name the model", got.toolCallingWarning)
+	}
+	if !strings.Contains(got.toolCallingWarning, "does not support tools") {
+		t.Errorf("toolCallingWarning = %q, want the real underlying error detail included", got.toolCallingWarning)
+	}
+}
+
+func TestAppModel_ToolCallingCheckMsg_StaleResultForReplacedModelIgnored(t *testing.T) {
+	// The user picked "llama3.1:8b" again (or something else) before the
+	// check for the earlier "qwen2.5-coder:7b" pick resolved — that
+	// stale result must not set a warning about a model that isn't even
+	// selected anymore.
+	m := appModel{cfg: config.Config{TutorModel: "llama3.1:8b"}, toolCallingWarning: ""}
+	newM, _ := m.Update(toolCallingCheckMsg{model: "qwen2.5-coder:7b", supported: false})
+	got := newM.(appModel)
+	if got.toolCallingWarning != "" {
+		t.Errorf("toolCallingWarning = %q, want empty — result was for a model that is no longer selected", got.toolCallingWarning)
+	}
+}
+
+func TestAppModel_RenderMain_ShowsToolCallingWarning(t *testing.T) {
+	m := appModel{stage: stageMain, toolCallingWarning: "qwen2.5-coder:7b may not support real tool calling"}
+	view := stripAnsiTUI(m.View())
+	if !strings.Contains(view, "may not support real tool calling") {
+		t.Errorf("expected the tool-calling warning in the main menu view, got:\n%s", view)
 	}
 }
 
