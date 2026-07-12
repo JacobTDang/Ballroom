@@ -40,30 +40,26 @@ const DefaultTutorModel = "llama3.1:8b"
 // current agent until checked with cmd/tutor-eval.
 const DeepSeekCoderV2LiteModel = "deepseek-coder-v2:16b-lite-instruct-q4_K_M"
 
-// Qwen25Coder14BModel is a second tutor model confirmed to work end-to-end
-// (preflight check, TUTOR_MODEL wiring, and a real chat round-trip) —
-// qwen2.5-coder:14b-instruct, verified against the tag list at
-// ollama.com/library/qwen2.5-coder/tags (9.0GB, q4_K_M quantization,
-// 32K context). It is not the default. There's no fixed "supported
-// models" list in this codebase: the model picker
-// (internal/tui/modelpicker.go) already accepts any locally pulled or
-// freely typed Ollama tag, so selecting this one is just a matter of
-// typing it there or running `ollama pull qwen2.5-coder:14b-instruct`
-// first. This const exists purely so the verified tag is documented and
-// typo-proof (e.g. for scripting a pull, or referencing in tests) rather
-// than re-typed from memory.
-//
-// NOT re-verified against the tool-calling requirement above (see
-// DefaultTutorModel) — this was confirmed back when the tutor was a
-// single plain chat call with no tools, and qwen2.5-coder:7b (same
-// family) is confirmed NOT to do real tool calling. Treat it as
-// unverified for the current agent until checked with cmd/tutor-eval.
-//
-// Hardware note: this is a meaningfully larger model than
-// DefaultTutorModel (9.0GB on disk vs. ~4.7GB for the 7B default).
-// Budget roughly 12-16GB of free RAM/VRAM for comfortable inference at
-// this quantization (model weights plus KV cache headroom) — pulling or
-// selecting it on a machine with less will be slow or may fail to load.
+// Qwen25Coder14BModel is qwen2.5-coder:14b-instruct (9.0GB, q4_K_M
+// quantization, 32K context) — DO NOT use as the tutor model. Confirmed
+// via cmd/tutor-eval and a raw /api/chat repro (both live against a
+// real Ollama 0.31.1) that despite being a larger, "-instruct"-tuned
+// variant, it has the same real-tool-calling failure as qwen2.5-coder:7b
+// (see DefaultTutorModel): CheckToolCalling reports false, and the full
+// eval suite scored 0/8 on every real tool-calling scenario. Root cause
+// traced to the wire level, not theorized — Ollama's own chat template
+// for this model instructs it to wrap a tool call in
+// <tool_call>...</tool_call> tags, which Ollama's server-side parser
+// requires to populate the response's structured tool_calls field, but
+// raw /api/chat calls (4/4 in a row) show the model consistently
+// emitting a correctly-named, correctly-argued tool-call JSON body
+// *without* those wrapper tags — so Ollama never recognizes it as a
+// tool call at all, and it leaks through as plain message content
+// instead. This is a property of this model's current Ollama packaging/
+// template, not something fixable in this codebase's own prompts or
+// code. This const is kept only so the tag stays typo-proof for anyone
+// re-testing it after an Ollama/model update — re-run cmd/tutor-eval
+// before trusting it again, don't assume this comment is still current.
 const Qwen25Coder14BModel = "qwen2.5-coder:14b-instruct"
 
 // settingsFileName is the persisted user-settings file, stored under
