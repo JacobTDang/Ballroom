@@ -62,6 +62,20 @@ const DeepSeekCoderV2LiteModel = "deepseek-coder-v2:16b-lite-instruct-q4_K_M"
 // before trusting it again, don't assume this comment is still current.
 const Qwen25Coder14BModel = "qwen2.5-coder:14b-instruct"
 
+// Qwen2514BModel is qwen2.5:14b-instruct — the general-purpose sibling
+// of Qwen25Coder14BModel, NOT the coder-tuned variant. Confirmed via
+// CheckToolCalling and a full cmd/tutor-eval run (both live against a
+// real Ollama 0.31.1) to not share the coder variant's tool-calling
+// failure: 140/168 (83%) overall, including 7-8/8 on almost every real
+// tool-calling scenario. Real, currently-open weakness found by that
+// same run: hints-first mode leaks the forbidden technique name on the
+// first ask meaningfully more often than this project's history
+// documents for DefaultTutorModel (5/8, 1/8, 6/8 on the three
+// hints-first checks) — treat that specific mode as less reliable on
+// this model until prompts.go's hints-first instruction is
+// strengthened and re-verified for it specifically.
+const Qwen2514BModel = "qwen2.5:14b-instruct"
+
 // settingsFileName is the persisted user-settings file, stored under
 // Config.DataDir alongside tracker.db.
 const settingsFileName = "settings.json"
