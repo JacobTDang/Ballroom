@@ -16,8 +16,6 @@ import (
 	"os"
 	"regexp"
 
-	"github.com/cloudwego/eino/compose"
-	agentopt "github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 
@@ -165,9 +163,7 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 
 		helpRequestCount++
 		requestMessages := append(append([]*schema.Message{}, history...), turnMessages(cfg.Mode, helpRequestCount, line)...)
-		display := newThinkingDisplay(stdout)
-		reply, err := generateWithLeakRetry(ctx, agent, requestMessages, display)
-		display.finish()
+		reply, err := generateWithLeakRetry(ctx, agent, requestMessages)
 		if err != nil {
 			// The real err is included, not just cfg.OllamaHost -- a
 			// real bug found live: "could not reach" reads as a network
@@ -236,8 +232,8 @@ const leakedToolCallFallbackReply = "Sorry, I wasn't able to get a grounded answ
 // than ever showing the user raw tool-call JSON. The leaked reply is
 // never added to messages/history beyond this one retry attempt, so it
 // can't bias later turns toward repeating the same pattern.
-func generateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*schema.Message, display *thinkingDisplay) (*schema.Message, error) {
-	reply, err := agent.Generate(ctx, messages, agentopt.WithComposeOptions(compose.WithCallbacks(display.callbackHandler())))
+func generateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*schema.Message) (*schema.Message, error) {
+	reply, err := agent.Generate(ctx, messages)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +245,7 @@ func generateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*
 		schema.AssistantMessage(reply.Content, nil),
 		schema.SystemMessage(leakedToolCallRetryNote),
 	)
-	retryReply, err := agent.Generate(ctx, retryMessages, agentopt.WithComposeOptions(compose.WithCallbacks(display.callbackHandler())))
+	retryReply, err := agent.Generate(ctx, retryMessages)
 	if err == nil && !looksLikeLeakedToolCall(retryReply.Content) {
 		return retryReply, nil
 	}
@@ -265,14 +261,9 @@ func generateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*
 // of the time on a leaked fake tool-call JSON — a failure mode that
 // can't actually reach a real user, since Run() always retries and
 // falls back to an honest message instead, but the eval was reporting
-// it as a raw scenario failure anyway. w is where the (normally
-// discarded, since this is a headless CLI diagnostic) thinking-display
-// animation writes — pass io.Discard.
-func GenerateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*schema.Message, w io.Writer) (*schema.Message, error) {
-	display := newThinkingDisplay(w)
-	reply, err := generateWithLeakRetry(ctx, agent, messages, display)
-	display.finish()
-	return reply, err
+// it as a raw scenario failure anyway.
+func GenerateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*schema.Message) (*schema.Message, error) {
+	return generateWithLeakRetry(ctx, agent, messages)
 }
 
 // turnMessages returns the messages appended to history for one real
@@ -341,12 +332,10 @@ func TurnMessages(mode string, helpRequestCount int, line string) []*schema.Mess
 // same canned restate-and-ask-questions reply with no acknowledgment of
 // what the user actually said. comprehensionCheckInstruction (prompts.go)
 // now tells the model to respond to it. Routed through
-// generateWithLeakRetry and given a thinkingDisplay for the same reason
-// every other turn is: this call can leak fake tool-call JSON exactly
-// like any other (cmd/tutor-eval's grounding check already tested for
-// this here, but nothing actually protected it before), and on
-// llama3.1:8b a silent multi-second call with no display looks like a
-// hang.
+// generateWithLeakRetry for the same reason every other turn is: this
+// call can leak fake tool-call JSON exactly like any other
+// (cmd/tutor-eval's grounding check already tested for this here, but
+// nothing actually protected it before).
 //
 // On success, appends (userFirstMessage, reply) to *history and returns
 // true. Returns false if Ollama couldn't be reached, so the caller
@@ -359,9 +348,7 @@ func runComprehensionCheck(ctx context.Context, agent *react.Agent, ollamaHost, 
 	}
 	checkMessages = append(checkMessages, schema.SystemMessage(comprehensionCheckInstruction), schema.UserMessage(userFirstMessage))
 
-	display := newThinkingDisplay(stdout)
-	reply, err := generateWithLeakRetry(ctx, agent, checkMessages, display)
-	display.finish()
+	reply, err := generateWithLeakRetry(ctx, agent, checkMessages)
 	if err != nil {
 		// See Run's identical fix for why the real err is included, not
 		// just ollamaHost.

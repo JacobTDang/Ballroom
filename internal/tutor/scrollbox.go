@@ -103,9 +103,7 @@ func newInputBoxAt(w io.Writer, rows, cols int) (*inputBox, error) {
 // cmd/tutor-eval, or any environment stty size can't read), which
 // callers must treat as "fall back to the plain prompt," not fatal: a
 // tutor session needs to keep working exactly as it did before this
-// feature existed in that case, the same way kittyAvailable() silently
-// falls back to the ANSI ball rather than erroring when Kitty isn't
-// available.
+// feature existed in that case.
 func newInputBox(w io.Writer) (*inputBox, error) {
 	rows, cols, err := terminalSize()
 	if err != nil {
@@ -120,10 +118,9 @@ func newInputBox(w io.Writer) (*inputBox, error) {
 // startup banner, ScrollBoxLiveCheck's filler lines — lands there rather
 // than wherever drawBorders' own absolute positioning last left the
 // cursor (inside the box itself). Errors from these writes aren't
-// checked individually — consistent with this package's other
-// renderers (discoball.go, kittyimage.go), which treat "push bytes to
-// the terminal" as fire-and-forget rather than something a caller could
-// meaningfully recover from mid-render.
+// checked individually — "push bytes to the terminal" is treated as
+// fire-and-forget rather than something a caller could meaningfully
+// recover from mid-render.
 //
 // The initial \033[2J (clear entire screen) is load-bearing, found via
 // a real tmux repro after this broke live: a pane always has *something*

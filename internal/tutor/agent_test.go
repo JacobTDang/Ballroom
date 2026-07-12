@@ -2,7 +2,6 @@ package tutor
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -116,7 +115,7 @@ func TestGenerateWithLeakRetry_ExportedWrapperProtectsAgainstLeaks(t *testing.T)
 		t.Fatalf("newAgent: %v", err)
 	}
 
-	reply, err := GenerateWithLeakRetry(ctx, agent, []*schema.Message{schema.UserMessage("hi")}, io.Discard)
+	reply, err := GenerateWithLeakRetry(ctx, agent, []*schema.Message{schema.UserMessage("hi")})
 	if err != nil {
 		t.Fatalf("GenerateWithLeakRetry: %v", err)
 	}

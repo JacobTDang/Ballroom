@@ -68,33 +68,3 @@ func TestSandboxRunArgs_IncludesTutorModelEnvFromConfig(t *testing.T) {
 		t.Errorf("expected the docker image to still be the final arg, got %v", args)
 	}
 }
-
-// TestExerciseRunArgs_ForwardsKittyWindowID and its sandbox counterpart
-// below check for the bare "-e KEY" form (no "=value") — per `docker
-// run --help`, that forwards the *host* shell's current value of KEY
-// into the container, which is how the tutor process can tell whether
-// the outer terminal is Kitty. TMUX deliberately does NOT get the same
-// treatment — see run.go's comment on why forwarding the host's TMUX
-// would actually be wrong here (the tutor already inherits the
-// container's own TMUX naturally, from running inside one of its tmux
-// panes).
-func TestExerciseRunArgs_ForwardsKittyWindowID(t *testing.T) {
-	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
-	ex := exercise.Exercise{ID: "two-pointers-01-go", Category: "pattern", Language: "go", TutorMode: "hint", TestCommand: "go test ./..."}
-
-	args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now())
-
-	if !containsFlag(args, "KITTY_WINDOW_ID") {
-		t.Errorf("expected a bare -e KITTY_WINDOW_ID flag to forward the host's value, got %v", args)
-	}
-}
-
-func TestSandboxRunArgs_ForwardsKittyWindowID(t *testing.T) {
-	cfg := config.Config{DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
-
-	args := sandboxRunArgs(cfg)
-
-	if !containsFlag(args, "KITTY_WINDOW_ID") {
-		t.Errorf("expected a bare -e KITTY_WINDOW_ID flag to forward the host's value, got %v", args)
-	}
-}

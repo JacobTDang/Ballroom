@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -691,7 +690,7 @@ func runScenario(ctx context.Context, sc scenario, nvimSocket string) (bool, str
 		// real user (tutor.go's Run always retries/falls back to an
 		// honest message) but was muddying this eval's signal by
 		// reporting it as a raw scenario failure anyway.
-		reply, err := tutor.GenerateWithLeakRetry(ctx, agent, requestMessages, io.Discard)
+		reply, err := tutor.GenerateWithLeakRetry(ctx, agent, requestMessages)
 		if err != nil {
 			return false, "", fmt.Errorf("agent.Generate: %w", err)
 		}

@@ -116,11 +116,11 @@ func TestRun_PrintsAssistantReply(t *testing.T) {
 	}
 }
 
-func TestRun_ShowsToolCallIndicatorBeforeTheFinalReply(t *testing.T) {
+func TestRun_CompletesATurnThatMakesARealToolCall(t *testing.T) {
 	// newToolCallOllama (toolcheck_test.go) simulates a real tool_calls
 	// response for its first request, then a plain-text reply for its
 	// second — driving Run() through an actual read_solution_file call
-	// via the agent, not a synthetic call into toolCallDisplay directly.
+	// via the agent, not a synthetic call.
 	mock := newToolCallOllama(t, "read_solution_file")
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly // skip the comprehension check for a single-turn test
@@ -132,16 +132,8 @@ func TestRun_ShowsToolCallIndicatorBeforeTheFinalReply(t *testing.T) {
 	}
 
 	got := stripAnsi(stdout.String())
-	toolIdx := strings.Index(got, "read_solution_file")
-	replyIdx := strings.Index(got, "pong received")
-	if toolIdx == -1 {
-		t.Fatalf("expected a read_solution_file indicator in stdout, got:\n%s", got)
-	}
-	if replyIdx == -1 {
+	if !strings.Contains(got, "pong received") {
 		t.Fatalf("expected the final reply in stdout, got:\n%s", got)
-	}
-	if toolIdx > replyIdx {
-		t.Errorf("expected the tool-call indicator before the final reply, got:\n%s", got)
 	}
 }
 
@@ -413,21 +405,6 @@ func TestRun_ComprehensionCheckRetriesWhenReplyLeaksFakeToolCallJSON(t *testing.
 	}
 	if n := len(mock.allRequests()); n != 2 {
 		t.Errorf("requests = %d, want exactly 2 (original comprehension check + one retry)", n)
-	}
-}
-
-func TestRun_ComprehensionCheckShowsThinkingDisplay(t *testing.T) {
-	mock := newSequencedOllama(t, "restated problem + questions")
-	cfg := testConfig(mock.URL)
-	cfg.Mode = exercise.TutorModeFullAssist
-
-	var stdout, stderr strings.Builder
-	if err := Run(context.Background(), cfg, strings.NewReader("hi\n"), &stdout, &stderr); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if !strings.Contains(stdout.String(), "\033[2K") {
-		t.Errorf("stdout has no thinkingDisplay redraw output, want a display shown during the comprehension check")
 	}
 }
 
