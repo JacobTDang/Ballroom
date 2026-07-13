@@ -299,6 +299,8 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 			// session chasing a nonexistent Docker-networking problem
 			// instead of straight to the actual cause.
 			fmt.Fprintf(stderr, "tutor: could not reach %s: %v\n", turnEndpoint, err)
+			drainResize()
+			fmt.Fprintln(stdout, turnFailedFallbackReply)
 			continue
 		}
 
@@ -348,6 +350,16 @@ const leakedToolCallRetryNote = "Your last reply described calling a tool by wri
 // raw tool-call JSON, so this is an honest admission instead of a
 // second garbled attempt.
 const leakedToolCallFallbackReply = "Sorry, I wasn't able to get a grounded answer for that just now — could you try asking again?"
+
+// turnFailedFallbackReply is shown in the chat (not just logged to
+// stderr, which the user may never see once the anchored box has taken
+// over the terminal) when a turn's Generate call fails outright — a bad
+// host, a rejected request, an upstream rate limit, anything. A real bug
+// found live: without this, a failed turn printed nothing to stdout at
+// all and just silently moved on to the next prompt, so any transient
+// failure looked exactly like the tutor being completely unresponsive
+// rather than a one-off hiccup worth retrying.
+const turnFailedFallbackReply = "Sorry, I couldn't reach the model just now — please try asking again."
 
 // generateWithLeakRetry wraps agent.Generate with one retry: if the
 // model leaks a fake tool-call JSON blob into its reply instead of

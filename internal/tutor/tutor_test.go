@@ -271,6 +271,28 @@ func TestRun_RetainsConversationHistory(t *testing.T) {
 	}
 }
 
+// TestRun_TurnFailureShowsUserFacingMessageNotJustStderr is a regression
+// test for a real bug found live: when a turn's Generate call fails (a
+// bad host, a rejected request, an upstream rate limit, anything), the
+// old code only logged to stderr and silently continued the loop --
+// nothing was ever printed to stdout, so the user's chat pane showed no
+// acknowledgment at all that their message was received or that
+// anything went wrong. A transient failure looked identical to "the
+// tutor is completely unresponsive". Every turn must show the user
+// something, even on failure.
+func TestRun_TurnFailureShowsUserFacingMessageNotJustStderr(t *testing.T) {
+	cfg := testConfig("http://127.0.0.1:1") // port 1 is reserved/unlisted, refuses immediately
+	cfg.Mode = exercise.TutorModeSyntaxOnly // skip the comprehension check for a single-turn test
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("hello\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run should exit cleanly even when Ollama is unreachable, got error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), turnFailedFallbackReply) {
+		t.Errorf("stdout = %q, want it to include a user-facing message on failure, not just a stderr log", stdout.String())
+	}
+}
+
 func TestRun_HandlesUnreachableHostGracefully(t *testing.T) {
 	cfg := testConfig("http://127.0.0.1:1") // port 1 is reserved/unlisted, refuses immediately
 	cfg.Mode = exercise.TutorModeSyntaxOnly
