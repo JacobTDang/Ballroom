@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestActivityFeed_StartedAddsARunningLine(t *testing.T) {
@@ -120,6 +121,44 @@ func TestActivityFeed_CurrentCallsMatchesStartedOrder(t *testing.T) {
 	}
 }
 
+// --- activityCall.completedAt -- drives the settle fade (see
+// activitySettledDotColor): the dot fades from its glow color down to
+// the resting base color over activitySettleFadeDuration once a call
+// settles, instead of snapping to base instantly, per an explicit
+// request for smoother transitions ("after tool calling there is a
+// slight fade").
+
+func TestActivityFeed_StartedLeavesCompletedAtZero(t *testing.T) {
+	f := &activityFeed{}
+	f.started("call-1", "read_solution_file", "")
+	calls := f.currentCalls()
+	if !calls[0].completedAt.IsZero() {
+		t.Errorf("completedAt = %v, want zero -- a just-started call hasn't settled yet", calls[0].completedAt)
+	}
+}
+
+func TestActivityFeed_FinishedSetsCompletedAt(t *testing.T) {
+	f := &activityFeed{}
+	f.started("call-1", "read_solution_file", "")
+	before := time.Now()
+	f.finished("call-1", "312 bytes")
+	after := time.Now()
+
+	calls := f.currentCalls()
+	if calls[0].completedAt.Before(before) || calls[0].completedAt.After(after) {
+		t.Errorf("completedAt = %v, want it set to roughly now (between %v and %v)", calls[0].completedAt, before, after)
+	}
+}
+
+func TestActivityFeed_FailedSetsCompletedAt(t *testing.T) {
+	f := &activityFeed{}
+	f.started("call-1", "read_test_output", "")
+	f.failed("call-1", "no test run yet")
+	if f.currentCalls()[0].completedAt.IsZero() {
+		t.Error("completedAt is zero, want it set once a call fails too, not just when it succeeds")
+	}
+}
+
 func TestFormatActivityLine_IsADotFollowedByActivityLineBody(t *testing.T) {
 	cases := []activityCall{
 		{name: "read_solution_file", status: "running"},
@@ -187,6 +226,58 @@ func TestActivityDotColor_DoneAndFailedAreStaticRegardlessOfPhase(t *testing.T) 
 				t.Errorf("activityDotColor(%s, %d) = (%d,%d,%d), want the static base color, unaffected by phase", status, phase, r, g, b)
 			}
 		}
+	}
+}
+
+// --- activitySettledDotColor -- the settle fade shown by pulsedCallLines
+// once a call is done/failed (activityDotColor above, used directly by
+// pulsedStatusLine, deliberately stays a pure phase->color function with
+// no notion of "just settled"; this is a separate function specifically
+// for that transition instead of reshaping activityDotColor's signature
+// for every caller). Takes elapsed directly rather than a completedAt
+// timestamp so it's a pure, deterministic function of its input -- no
+// real-clock dependency to fake out in tests.
+
+func TestActivitySettledDotColor_AtZeroElapsedIsTheGlowColor(t *testing.T) {
+	r, g, b := activitySettledDotColor(0)
+	if r != activityPulseGlowR || g != activityPulseGlowG || b != activityPulseGlowB {
+		t.Errorf("activitySettledDotColor(0) = (%d,%d,%d), want exactly the glow color (%d,%d,%d) -- the fade starts here", r, g, b, activityPulseGlowR, activityPulseGlowG, activityPulseGlowB)
+	}
+}
+
+func TestActivitySettledDotColor_AtFadeDurationIsExactlyBase(t *testing.T) {
+	r, g, b := activitySettledDotColor(activitySettleFadeDuration)
+	if r != activityPulseBaseR || g != activityPulseBaseG || b != activityPulseBaseB {
+		t.Errorf("activitySettledDotColor(fadeDuration) = (%d,%d,%d), want exactly the resting base color (%d,%d,%d)", r, g, b, activityPulseBaseR, activityPulseBaseG, activityPulseBaseB)
+	}
+}
+
+func TestActivitySettledDotColor_PastFadeDurationStaysAtBase(t *testing.T) {
+	r, g, b := activitySettledDotColor(activitySettleFadeDuration * 10)
+	if r != activityPulseBaseR || g != activityPulseBaseG || b != activityPulseBaseB {
+		t.Errorf("activitySettledDotColor(10x fadeDuration) = (%d,%d,%d), want the resting base color, not clamped/wrapped weirdly", r, g, b)
+	}
+}
+
+func TestActivitySettledDotColor_MidwayIsBetweenGlowAndBase(t *testing.T) {
+	r, g, b := activitySettledDotColor(activitySettleFadeDuration / 2)
+	if r <= activityPulseBaseR || r >= activityPulseGlowR {
+		t.Errorf("activitySettledDotColor(fadeDuration/2) red = %d, want strictly between the base (%d) and glow (%d)", r, activityPulseBaseR, activityPulseGlowR)
+	}
+	if g <= activityPulseBaseG || g >= activityPulseGlowG {
+		t.Errorf("activitySettledDotColor(fadeDuration/2) green = %d, want strictly between the base (%d) and glow (%d)", g, activityPulseBaseG, activityPulseGlowG)
+	}
+	if b <= activityPulseBaseB || b >= activityPulseGlowB {
+		t.Errorf("activitySettledDotColor(fadeDuration/2) blue = %d, want strictly between the base (%d) and glow (%d)", b, activityPulseBaseB, activityPulseGlowB)
+	}
+}
+
+func TestActivitySettledDotColor_NegativeElapsedClampsToGlow(t *testing.T) {
+	// Defensive: elapsed should never actually be negative in practice,
+	// but this must not produce a nonsensical color if it somehow is.
+	r, g, b := activitySettledDotColor(-1)
+	if r != activityPulseGlowR || g != activityPulseGlowG || b != activityPulseGlowB {
+		t.Errorf("activitySettledDotColor(-1) = (%d,%d,%d), want clamped to the glow color", r, g, b)
 	}
 }
 
@@ -366,6 +457,31 @@ func TestPulsedCallLines_DoneCallHasHeaderThenIndentedOutput(t *testing.T) {
 	}
 	if !strings.HasPrefix(got[1], activityIndent) || !strings.Contains(got[1], "312 bytes") {
 		t.Errorf("pulsedCallLines(done)[1] = %q, want the indented result", got[1])
+	}
+}
+
+// TestPulsedCallLines_JustSettledCallGlowsNotBase confirms pulsedCallLines
+// actually wires activitySettledDotColor in: a call that completedAt
+// just now should render with the glow color, not the base color a
+// naive "done -> always base" implementation would produce.
+func TestPulsedCallLines_JustSettledCallGlowsNotBase(t *testing.T) {
+	c := activityCall{name: "read_solution_file", status: "done", detail: "312 bytes", completedAt: time.Now()}
+	got := pulsedCallLines(c, 0, 80)
+	glow := fmt.Sprintf("\033[38;2;%d;%d;%dm", activityPulseGlowR, activityPulseGlowG, activityPulseGlowB)
+	if !strings.Contains(got[0], glow) {
+		t.Errorf("pulsedCallLines(...)[0] = %q, want the just-settled header to start the fade at the glow color", got[0])
+	}
+}
+
+// TestPulsedCallLines_LongSettledCallIsBase confirms a call that settled
+// well outside the fade window renders with the plain resting base
+// color, same as before this feature existed.
+func TestPulsedCallLines_LongSettledCallIsBase(t *testing.T) {
+	c := activityCall{name: "read_solution_file", status: "done", detail: "312 bytes", completedAt: time.Now().Add(-10 * activitySettleFadeDuration)}
+	got := pulsedCallLines(c, 0, 80)
+	base := fmt.Sprintf("\033[38;2;%d;%d;%dm", activityPulseBaseR, activityPulseBaseG, activityPulseBaseB)
+	if !strings.Contains(got[0], base) {
+		t.Errorf("pulsedCallLines(...)[0] = %q, want the long-settled header at the resting base color", got[0])
 	}
 }
 

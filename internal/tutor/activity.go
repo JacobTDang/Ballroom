@@ -34,8 +34,14 @@ const activityArgsPreviewMax = 40
 const activityResultPreviewMax = 240
 
 // activityCall is one tool invocation's current display state.
+// completedAt is the wall-clock time updateLocked set status to
+// "done"/"failed" -- zero while still "running". Used by
+// activitySettledDotColor to fade the dot from its glow color down to
+// the resting base color over activitySettleFadeDuration instead of
+// snapping to base the instant a call settles.
 type activityCall struct {
 	callID, name, status, detail string // status: "running" | "done" | "failed"
+	completedAt                  time.Time
 }
 
 // activityFeed tracks the tool calls happening during one Generate call
@@ -87,6 +93,7 @@ func (f *activityFeed) updateLocked(callID, status, detail string) {
 		if f.calls[i].callID == callID {
 			f.calls[i].status = status
 			f.calls[i].detail = detail
+			f.calls[i].completedAt = time.Now()
 			return
 		}
 	}
@@ -217,6 +224,41 @@ func activityDotColor(status string, phase int) (r, g, b int) {
 	t := float64(phase%activityPulsePeriodTicks) / float64(activityPulsePeriodTicks)
 	glow := (1 + math.Cos(2*math.Pi*t)) / 2 // 1 at phase 0 (peak glow), 0 at half period (resting base)
 	blended := activityPulseBaseColor.BlendLuv(activityPulseGlowColor, glow)
+	r8, g8, b8 := blended.RGB255()
+	return int(r8), int(g8), int(b8)
+}
+
+// activitySettleFadeDuration is how long a call's dot takes to fade
+// from the glow color down to the resting base color once it settles
+// (done/failed), instead of snapping to base instantly — per an
+// explicit request for smoother transitions ("after tool calling there
+// is a slight fade").
+const activitySettleFadeDuration = 250 * time.Millisecond
+
+// activitySettledDotColor returns a settled call's dot color for one
+// redraw, elapsed time after it completed: the glow color at elapsed=0,
+// fading (in Luv, same perceptually-uniform blend activityDotColor
+// itself uses) down to the resting base color by
+// activitySettleFadeDuration, and exactly the base color from then on.
+// A separate function from activityDotColor (rather than folding this
+// into it) deliberately: activityDotColor is also called directly by
+// pulsedStatusLine, which has no specific call/completion time to fade
+// from at all, so giving it a "just settled" mode would mean every
+// caller has to reason about a state that doesn't apply to it.
+//
+// Takes elapsed directly rather than a completedAt timestamp so this
+// stays a pure, deterministic function of its input, with no real-clock
+// dependency to fake out in tests — pulsedCallLines is the one place
+// that actually computes time.Since(c.completedAt) and calls this.
+func activitySettledDotColor(elapsed time.Duration) (r, g, b int) {
+	if elapsed <= 0 {
+		return activityPulseGlowR, activityPulseGlowG, activityPulseGlowB
+	}
+	if elapsed >= activitySettleFadeDuration {
+		return activityPulseBaseR, activityPulseBaseG, activityPulseBaseB
+	}
+	fade := elapsed.Seconds() / activitySettleFadeDuration.Seconds()
+	blended := activityPulseGlowColor.BlendLuv(activityPulseBaseColor, fade)
 	r8, g8, b8 := blended.RGB255()
 	return int(r8), int(g8), int(b8)
 }
@@ -379,8 +421,25 @@ func activityOutputLines(c activityCall, cols int) []string {
 // color-wrapped header line (dot + activityCallHeader) followed by the
 // call's indented output preview, once it has one (activityOutputLines
 // — nil for a still-running call, so it's just the header line).
+//
+// A settled (done/failed) call's dot uses activitySettledDotColor
+// instead of activityDotColor's own static base-color branch, so it
+// fades from the glow color down to base over activitySettleFadeDuration
+// right after it completes, instead of snapping to base instantly. An
+// unset (zero-value) completedAt -- every test in this file that builds
+// an activityCall{status: "done", ...} literal directly, never having
+// gone through activityFeed's real updateLocked -- safely resolves to
+// the plain base color anyway: time.Since of the zero time overflows
+// Duration's own range, and time.Time.Sub's documented behavior is to
+// clamp to the maximum representable Duration rather than wrap, which
+// is still comfortably past activitySettleFadeDuration.
 func pulsedCallLines(c activityCall, phase, cols int) []string {
-	r, g, b := activityDotColor(c.status, phase)
+	var r, g, b int
+	if c.status == "running" {
+		r, g, b = activityDotColor(c.status, phase)
+	} else {
+		r, g, b = activitySettledDotColor(time.Since(c.completedAt))
+	}
 	header := coloredDot(r, g, b) + " " + truncateLine(activityCallHeader(c), max(cols-2, 0))
 	return append([]string{header}, activityOutputLines(c, cols)...)
 }
@@ -390,21 +449,31 @@ func pulsedCallLines(c activityCall, phase, cols int) []string {
 // pulsedCallLines exactly as the live activity region does (phase is
 // irrelevant here: activityDotColor only varies by phase for a
 // "running" call, and every settled call is "done"/"failed" by the time
-// this renders, so it always gets the same static color regardless of
-// what phase is passed). Unlike the live activity region (which
-// disappears entirely once the turn ends, see tutorModel.activityView),
-// this gets appended to displayLines so the conversation history keeps
-// showing what the model actually did and what it got back, not just
-// its final reply — a real feature request from live use ("leave behind
-// the toolname it used" / "the tool output should be indented"). Empty
-// for a turn that made no tool calls at all, so a normal reasoning-only
-// turn doesn't get a spurious blank entry.
+// this renders). Unlike the live activity region (which disappears
+// entirely once the turn ends, see tutorModel.activityView), this gets
+// appended to displayLines so the conversation history keeps showing
+// what the model actually did and what it got back, not just its final
+// reply — a real feature request from live use ("leave behind the
+// toolname it used" / "the tool output should be indented"). Empty for
+// a turn that made no tool calls at all, so a normal reasoning-only turn
+// doesn't get a spurious blank entry.
+//
+// Backdates each call's completedAt before rendering, deliberately:
+// unlike the live activity region (re-rendered fresh every pulse tick,
+// so the settle fade genuinely animates as you watch it), this gets
+// rendered exactly once and baked into a plain string forever. Calling
+// pulsedCallLines with the real completedAt (set only moments earlier,
+// in the same Update() call) would freeze every entry at whatever point
+// of the fade it happened to catch -- almost always still glowing,
+// never the calm resting color a permanent record should show.
 func toolUsageSummary(calls []activityCall, cols int) string {
 	if len(calls) == 0 {
 		return ""
 	}
+	longAgo := time.Now().Add(-2 * activitySettleFadeDuration)
 	var lines []string
 	for _, c := range calls {
+		c.completedAt = longAgo
 		lines = append(lines, pulsedCallLines(c, 0, cols)...)
 	}
 	return strings.Join(lines, "\n")
