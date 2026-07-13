@@ -297,7 +297,9 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 
 		helpRequestCount++
 		requestMessages := append(append([]*schema.Message{}, history...), turnMessages(cfg.Mode, helpRequestCount, line)...)
-		reply, err := generateWithLeakRetry(ctx, turnAgent, requestMessages, newActivityOption(box))
+		activityOpt, stopActivity := startActivitySession(box)
+		reply, err := generateWithLeakRetry(ctx, turnAgent, requestMessages, activityOpt)
+		stopActivity()
 		if box != nil {
 			box.clearActivity()
 		}
@@ -384,7 +386,7 @@ const turnFailedFallbackReply = "Sorry, I couldn't reach the model just now — 
 // can't bias later turns toward repeating the same pattern.
 //
 // opts is threaded into both Generate calls unchanged — in practice
-// this is newActivityOption's callback wiring (see Run/runComprehensionCheck),
+// this is startActivitySession's callback wiring (see Run/runComprehensionCheck),
 // so a retry's own tool calls stay visible in the same activity feed as
 // the original attempt's, not a separate one. Variadic and additive: the
 // only direct external caller (cmd/tutor-eval, via GenerateWithLeakRetry)
@@ -507,9 +509,9 @@ func TurnMessages(mode string, helpRequestCount int, line string) []*schema.Mess
 // resize their terminal while waiting.
 //
 // box drives the same live tool-call activity display Run's own per-turn
-// call uses (see newActivityOption) — nil when there's no real terminal
-// (e.g. cmd/tutor-eval), in which case this is a no-op exactly as it was
-// before the activity display existed.
+// call uses (see startActivitySession) — nil when there's no real
+// terminal (e.g. cmd/tutor-eval), in which case this is a no-op exactly
+// as it was before the activity display existed.
 func runComprehensionCheck(ctx context.Context, agent *react.Agent, endpoint, workDir, userFirstMessage string, history *[]*schema.Message, stdout, stderr io.Writer, drainResize func(), box *inputBox) bool {
 	checkMessages := append([]*schema.Message{}, (*history)...)
 	if problem := readProblemStatement(workDir); problem != "" {
@@ -517,7 +519,9 @@ func runComprehensionCheck(ctx context.Context, agent *react.Agent, endpoint, wo
 	}
 	checkMessages = append(checkMessages, schema.SystemMessage(comprehensionCheckInstruction), schema.UserMessage(userFirstMessage))
 
-	reply, err := generateWithLeakRetry(ctx, agent, checkMessages, newActivityOption(box))
+	activityOpt, stopActivity := startActivitySession(box)
+	reply, err := generateWithLeakRetry(ctx, agent, checkMessages, activityOpt)
+	stopActivity()
 	if box != nil {
 		box.clearActivity()
 	}

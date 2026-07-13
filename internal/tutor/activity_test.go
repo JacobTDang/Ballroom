@@ -2,9 +2,21 @@ package tutor
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
+
+// fakeActivityPulseInterval substitutes activityPulseInterval so pulse
+// tests run in milliseconds instead of waiting on the real ~120ms
+// production cadence — same var-swap-and-restore pattern this package
+// already uses for ollamaRequestTimeout. Returns a restore func to defer.
+func fakeActivityPulseInterval(d time.Duration) func() {
+	orig := activityPulseInterval
+	activityPulseInterval = d
+	return func() { activityPulseInterval = orig }
+}
 
 func TestActivityFeed_StartedAddsARunningLine(t *testing.T) {
 	f := &activityFeed{}
@@ -96,6 +108,109 @@ func TestActivityFeed_CapsAtFourDroppingTheOldest(t *testing.T) {
 	}
 }
 
+func TestActivityFeed_CurrentCallsReturnsACopyNotTheLiveSlice(t *testing.T) {
+	f := &activityFeed{}
+	f.started("call-1", "read_solution_file", "")
+
+	calls := f.currentCalls()
+	calls[0].name = "mutated"
+
+	if f.currentCalls()[0].name != "read_solution_file" {
+		t.Error("mutating the returned slice affected the feed's internal state -- currentCalls must return a copy")
+	}
+}
+
+func TestActivityFeed_CurrentCallsMatchesStartedOrder(t *testing.T) {
+	f := &activityFeed{}
+	f.started("call-1", "read_solution_file", "")
+	f.started("call-2", "read_problem_statement", "")
+
+	calls := f.currentCalls()
+	if len(calls) != 2 || calls[0].name != "read_solution_file" || calls[1].name != "read_problem_statement" {
+		t.Errorf("currentCalls() = %+v, want both calls in start order", calls)
+	}
+}
+
+func TestFormatActivityLine_IsADotFollowedByActivityLineBody(t *testing.T) {
+	cases := []activityCall{
+		{name: "read_solution_file", status: "running"},
+		{name: "highlight_lines", status: "running", detail: `{"start_line":1}`},
+		{name: "read_solution_file", status: "done", detail: "312 bytes"},
+		{name: "read_test_output", status: "failed", detail: "no test run yet"},
+	}
+	for _, c := range cases {
+		want := "● " + activityLineBody(c)
+		if got := formatActivityLine(c); got != want {
+			t.Errorf("formatActivityLine(%+v) = %q, want %q", c, got, want)
+		}
+	}
+}
+
+func TestActivityDotColor_RunningAtPhaseZeroIsFullBrightness(t *testing.T) {
+	r, g, b := activityDotColor("running", 0)
+	if r != activityPulseBaseR || g != activityPulseBaseG || b != activityPulseBaseB {
+		t.Errorf("activityDotColor(running, 0) = (%d,%d,%d), want the full base color (%d,%d,%d)", r, g, b, activityPulseBaseR, activityPulseBaseG, activityPulseBaseB)
+	}
+}
+
+func TestActivityDotColor_RunningAtHalfPeriodIsDimmerThanBase(t *testing.T) {
+	r, _, _ := activityDotColor("running", activityPulsePeriodTicks/2)
+	if r >= activityPulseBaseR {
+		t.Errorf("activityDotColor(running, period/2) red = %d, want dimmer than the base %d", r, activityPulseBaseR)
+	}
+	if r <= 0 {
+		t.Errorf("activityDotColor(running, period/2) red = %d, want never fully dark (min brightness floor)", r)
+	}
+}
+
+func TestActivityDotColor_RunningIsPeriodic(t *testing.T) {
+	a := [3]int{}
+	b := [3]int{}
+	a[0], a[1], a[2] = activityDotColor("running", 3)
+	b[0], b[1], b[2] = activityDotColor("running", 3+activityPulsePeriodTicks)
+	if a != b {
+		t.Errorf("activityDotColor(running, 3) = %v, activityDotColor(running, 3+period) = %v, want equal (periodic)", a, b)
+	}
+}
+
+func TestActivityDotColor_DoneAndFailedAreStaticRegardlessOfPhase(t *testing.T) {
+	for _, status := range []string{"done", "failed"} {
+		for _, phase := range []int{0, 1, activityPulsePeriodTicks / 2, 100} {
+			r, g, b := activityDotColor(status, phase)
+			if r != activityPulseBaseR || g != activityPulseBaseG || b != activityPulseBaseB {
+				t.Errorf("activityDotColor(%s, %d) = (%d,%d,%d), want the static base color, unaffected by phase", status, phase, r, g, b)
+			}
+		}
+	}
+}
+
+func TestPulsedStatusLine_ContainsThePlainStatusText(t *testing.T) {
+	got := pulsedStatusLine(0, 80)
+	if !strings.Contains(got, "Thinking...") {
+		t.Errorf("pulsedStatusLine(0, 80) = %q, want it to contain the plain status text", got)
+	}
+	if !strings.Contains(got, "\033[38;2;") {
+		t.Errorf("pulsedStatusLine(0, 80) = %q, want a truecolor escape for the dot", got)
+	}
+}
+
+func TestPulsedCallLine_ContainsTheLineBodyUntruncatedEscapes(t *testing.T) {
+	c := activityCall{name: "read_solution_file", status: "done", detail: "312 bytes"}
+	got := pulsedCallLine(c, 0, 80)
+	if !strings.Contains(got, "read_solution_file  312 bytes") {
+		t.Errorf("pulsedCallLine(...) = %q, want it to contain the formatted body", got)
+	}
+}
+
+func TestPulsedCallLine_TruncatesBodyNotTheEscapeSequence(t *testing.T) {
+	c := activityCall{name: "read_solution_file", status: "done", detail: strings.Repeat("x", 200)}
+	got := pulsedCallLine(c, 0, 20) // narrow width
+	// The color escape itself must survive intact (never sliced mid-sequence).
+	if !strings.Contains(got, "\033[38;2;") || !strings.Contains(got, "m●\033[0m") {
+		t.Errorf("pulsedCallLine(...) = %q, want the truecolor escape sequence intact", got)
+	}
+}
+
 func TestActivityFeed_ConcurrentStartedFinishedDoNotRace(t *testing.T) {
 	f := &activityFeed{}
 	var wg sync.WaitGroup
@@ -110,4 +225,60 @@ func TestActivityFeed_ConcurrentStartedFinishedDoNotRace(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+// --- activityPulse ---
+
+func TestActivityPulse_TicksAndRedraws(t *testing.T) {
+	defer fakeActivityPulseInterval(2 * time.Millisecond)()
+
+	var buf countingWriter
+	box, err := newInputBoxAt(&buf, 24, 80)
+	if err != nil {
+		t.Fatalf("newInputBoxAt: %v", err)
+	}
+	buf.writes = 0
+	feed := &activityFeed{}
+	feed.started("call-1", "read_solution_file", "")
+
+	pulse := startActivityPulse(box, feed)
+	time.Sleep(20 * time.Millisecond) // several ticks at 2ms each
+	pulse.close()
+
+	if buf.writes == 0 {
+		t.Error("expected the pulse ticker to have redrawn the activity region at least once")
+	}
+}
+
+func TestActivityPulse_CloseStopsFurtherWrites(t *testing.T) {
+	defer fakeActivityPulseInterval(2 * time.Millisecond)()
+
+	var buf countingWriter
+	box, err := newInputBoxAt(&buf, 24, 80)
+	if err != nil {
+		t.Fatalf("newInputBoxAt: %v", err)
+	}
+	feed := &activityFeed{}
+
+	pulse := startActivityPulse(box, feed)
+	time.Sleep(10 * time.Millisecond)
+	pulse.close()
+
+	afterClose := buf.writes
+	time.Sleep(20 * time.Millisecond) // long enough for several more ticks, if the goroutine were still running
+
+	if buf.writes != afterClose {
+		t.Errorf("writes continued after close() returned (%d -> %d) -- the ticker goroutine did not actually stop", afterClose, buf.writes)
+	}
+}
+
+func TestStartActivitySession_NilBoxIsSafeAndReturnsAUsableStopFunc(t *testing.T) {
+	// A nil box means no real terminal (e.g. cmd/tutor-eval) -- there's
+	// no reserved region to draw into, matching how every other
+	// box-dependent feature in this package already degrades. The
+	// AgentOption's internals aren't inspectable from this package, so
+	// this only asserts the call is safe end to end: it doesn't panic,
+	// and the returned stop func is callable.
+	_, stop := startActivitySession(nil)
+	stop()
 }

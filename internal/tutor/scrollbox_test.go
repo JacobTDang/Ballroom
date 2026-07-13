@@ -468,6 +468,62 @@ func TestInputBox_ShowActivity_ConcurrentCallsDoNotRace(t *testing.T) {
 	}
 }
 
+func TestInputBox_ShowActivityPulse_WritesColoredDotsAtReservedRows(t *testing.T) {
+	var buf bytes.Buffer
+	box, err := newInputBoxAt(&buf, 24, 80)
+	if err != nil {
+		t.Fatalf("newInputBoxAt: %v", err)
+	}
+	buf.Reset()
+
+	box.showActivityPulse([]activityCall{{name: "read_solution_file", status: "running"}}, 0)
+
+	out := buf.String()
+	if !strings.Contains(out, "\033[17;1H\033[2K") {
+		t.Errorf("output %q missing the positioned/cleared status row", out)
+	}
+	if !strings.Contains(out, "\033[38;2;") {
+		t.Errorf("output %q missing a truecolor escape for the status dot", out)
+	}
+	if !strings.Contains(out, "read_solution_file") {
+		t.Errorf("output %q missing the tool call's name", out)
+	}
+}
+
+func TestInputBox_ShowActivityPulse_SingleBufferedWrite(t *testing.T) {
+	var buf countingWriter
+	box, err := newInputBoxAt(&buf, 24, 80)
+	if err != nil {
+		t.Fatalf("newInputBoxAt: %v", err)
+	}
+	buf.writes = 0
+
+	box.showActivityPulse([]activityCall{{name: "read_solution_file", status: "running"}}, 0)
+
+	if buf.writes != 1 {
+		t.Errorf("showActivityPulse made %d Write calls, want exactly 1", buf.writes)
+	}
+}
+
+func TestInputBox_ShowActivityPulse_ConcurrentCallsDoNotRace(t *testing.T) {
+	var buf bytes.Buffer
+	box, err := newInputBoxAt(&buf, 24, 80)
+	if err != nil {
+		t.Fatalf("newInputBoxAt: %v", err)
+	}
+
+	done := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		go func(n int) {
+			box.showActivityPulse([]activityCall{{name: "tool", status: "running"}}, n)
+			done <- struct{}{}
+		}(i)
+	}
+	for i := 0; i < 8; i++ {
+		<-done
+	}
+}
+
 // countingWriter counts how many times Write is called, without caring
 // about the bytes themselves -- used to assert a caller batches into one
 // Write rather than many small ones.

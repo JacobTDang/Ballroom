@@ -238,30 +238,62 @@ func truncateLine(s string, max int) string {
 	return string(runes[:max-len(truncateLineEllipsis)]) + truncateLineEllipsis
 }
 
-// showActivity redraws the whole activity region in one buffered write:
-// row regionBottom+1 gets status, the activityToolLines rows below it
-// get toolLines (padded with cleared-but-empty rows for any index beyond
-// len(toolLines), so a feed that's shrunk — or an idle clearActivity call
-// — never leaves a longer previous frame's lines dangling). Every line is
-// truncated to the box's current width first. A single Write for the
-// whole frame, not one per row, avoids the partial-frame
-// flicker/interleaving risk of many small writes — more important here
-// than for drawBorders (called once per setup/resize) since this can run
-// once per tool-call event, potentially from concurrent goroutines (see
-// mu's doc comment on inputBox).
-func (b *inputBox) showActivity(status string, toolLines []string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+// buildActivityFrame positions and clears every activity row (status
+// row + activityToolLines tool rows) and writes statusLine/toolLines
+// into them, returning the whole frame as one string ready for a single
+// buffered Write. Shared by showActivity (plain, event-driven) and
+// showActivityPulse (colored dot, ticker-driven) so both stay in exact
+// row-position agreement — callers are responsible for having already
+// truncated/formatted each line; this only positions them. toolLines
+// shorter than activityToolLines get cleared-but-empty rows for the
+// remainder, so a feed that's shrunk — or an idle clearActivity call —
+// never leaves a longer previous frame's lines dangling.
+func (b *inputBox) buildActivityFrame(statusLine string, toolLines []string) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "\033[%d;1H\033[2K%s", b.regionBottom+1, truncateLine(status, b.cols))
+	fmt.Fprintf(&sb, "\033[%d;1H\033[2K%s", b.regionBottom+1, statusLine)
 	for i := 0; i < activityToolLines; i++ {
 		var line string
 		if i < len(toolLines) {
-			line = truncateLine(toolLines[i], b.cols)
+			line = toolLines[i]
 		}
 		fmt.Fprintf(&sb, "\033[%d;1H\033[2K%s", b.regionBottom+2+i, line)
 	}
-	io.WriteString(b.w, sb.String())
+	return sb.String()
+}
+
+// showActivity redraws the whole activity region in one buffered write,
+// truncating every line to the box's current width first. Used for the
+// immediate, event-driven redraw right when a tool call starts/finishes
+// (see activity.go's OnStart/OnEnd) — more important here than for
+// drawBorders (called once per setup/resize) to batch into one write,
+// since this can run once per tool-call event, potentially from
+// concurrent goroutines (see mu's doc comment on inputBox).
+func (b *inputBox) showActivity(status string, toolLines []string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	truncated := make([]string, len(toolLines))
+	for i, line := range toolLines {
+		truncated[i] = truncateLine(line, b.cols)
+	}
+	io.WriteString(b.w, b.buildActivityFrame(truncateLine(status, b.cols), truncated))
+}
+
+// showActivityPulse redraws the activity region with each line's leading
+// dot colored via activityDotColor (pulsing while a call is running,
+// static once it's settled) — driven by activityPulse's ticker on a
+// fixed cadence, not by tool-call events (see showActivity for that
+// path). calls is a snapshot (activityFeed.currentCalls) formatted by
+// activity.go's pulsedStatusLine/pulsedCallLine, which truncate each
+// line's plain text *before* wrapping it in a color escape, so a
+// truecolor sequence is never sliced mid-escape by width truncation.
+func (b *inputBox) showActivityPulse(calls []activityCall, phase int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	toolLines := make([]string, len(calls))
+	for i, c := range calls {
+		toolLines[i] = pulsedCallLine(c, phase, b.cols)
+	}
+	io.WriteString(b.w, b.buildActivityFrame(pulsedStatusLine(phase, b.cols), toolLines))
 }
 
 // clearActivity blanks the whole activity region — called once a turn
