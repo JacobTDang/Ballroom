@@ -214,6 +214,84 @@ func TestApplyHighlight_InjectionPayloadDoesNotExecute(t *testing.T) {
 	}
 }
 
+// noteCountExpr calls ballroom_highlight's own note_count() rather than
+// inspecting extmarks/namespaces directly from the test -- same reason
+// add_highlight/toggle/clear_all are all reached via v:lua.require(...)
+// instead of poking nvim's buffer state by hand: it exercises the
+// module's real public surface, not a reimplementation of it.
+const noteCountExpr = `v:lua.require('ballroom_highlight').note_count()`
+
+func TestApplyHighlight_DoesNotPaintBackgroundHighlightBlock(t *testing.T) {
+	socket := startTestNvim(t)
+	ctx := context.Background()
+
+	expr := highlightExpr("test.txt", 1, 1, "a note")
+	if _, err := remoteExpr(ctx, socket, expr); err != nil {
+		t.Fatalf("remoteExpr: %v", err)
+	}
+
+	extmarkCountExpr := `len(nvim_buf_get_extmarks(bufnr('%'), nvim_create_namespace('ballroom_tutor'), 0, -1, {}))`
+	out, err := remoteExpr(ctx, socket, extmarkCountExpr)
+	if err != nil {
+		t.Fatalf("remoteExpr: %v", err)
+	}
+	if out != "1" {
+		t.Errorf("extmark count = %s, want 1 (just the note's virtual text, no background highlight block)", out)
+	}
+}
+
+func TestFocusGained_ClearsNotesLeftWhileAway(t *testing.T) {
+	socket := startTestNvim(t)
+	ctx := context.Background()
+
+	expr := highlightExpr("test.txt", 1, 1, "a note")
+	if _, err := remoteExpr(ctx, socket, expr); err != nil {
+		t.Fatalf("remoteExpr: %v", err)
+	}
+
+	before, err := remoteExpr(ctx, socket, noteCountExpr)
+	if err != nil {
+		t.Fatalf("remoteExpr: %v", err)
+	}
+	if before != "1" {
+		t.Fatalf("note_count() = %s before FocusGained, want 1", before)
+	}
+
+	if _, err := remoteExpr(ctx, socket, `execute('doautocmd FocusGained')`); err != nil {
+		t.Fatalf("remoteExpr: %v", err)
+	}
+
+	after, err := remoteExpr(ctx, socket, noteCountExpr)
+	if err != nil {
+		t.Fatalf("remoteExpr: %v", err)
+	}
+	if after != "0" {
+		t.Errorf("note_count() = %s after FocusGained, want 0 -- notes should disappear once the user is back", after)
+	}
+}
+
+func TestFocusLost_LeavesNotesInPlace(t *testing.T) {
+	socket := startTestNvim(t)
+	ctx := context.Background()
+
+	expr := highlightExpr("test.txt", 1, 1, "a note")
+	if _, err := remoteExpr(ctx, socket, expr); err != nil {
+		t.Fatalf("remoteExpr: %v", err)
+	}
+
+	if _, err := remoteExpr(ctx, socket, `execute('doautocmd FocusLost')`); err != nil {
+		t.Fatalf("remoteExpr: %v", err)
+	}
+
+	out, err := remoteExpr(ctx, socket, noteCountExpr)
+	if err != nil {
+		t.Fatalf("remoteExpr: %v", err)
+	}
+	if out != "1" {
+		t.Errorf("note_count() = %s after FocusLost, want 1 -- a note left while away must survive until the user actually returns", out)
+	}
+}
+
 func TestReadCursorPosition_ReturnsPosition(t *testing.T) {
 	socket := startTestNvim(t)
 	ctx := context.Background()
