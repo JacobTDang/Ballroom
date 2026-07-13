@@ -42,7 +42,8 @@ var suggestedModels = []string{
 
 // suggestedOpenRouterModels are free-tier OpenRouter model slugs (no
 // OpenRouterModelPrefix — stageAPIModelEntry adds it on select) verified
-// live, on 2026-07-12, via tutor.CheckToolCalling to actually make real
+// live, on 2026-07-12 (poolside/laguna-xs-2.1:free added and verified
+// 2026-07-13), via tutor.CheckToolCalling to actually make real
 // tool calls, not just declared "tools"-capable in OpenRouter's
 // /models metadata (that distinction mattered in this codebase before —
 // see config.Qwen25Coder14BModel's doc comment for a model that claims
@@ -57,6 +58,7 @@ var suggestedOpenRouterModels = []string{
 	"nvidia/nemotron-3-super-120b-a12b:free",
 	"nvidia/nemotron-3-nano-30b-a3b:free",
 	"nvidia/nemotron-nano-9b-v2:free",
+	"poolside/laguna-xs-2.1:free",
 }
 
 // browsableModels merges local (locally pulled) with suggestedModels,
