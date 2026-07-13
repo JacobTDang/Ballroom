@@ -3,7 +3,6 @@ package tutor
 import (
 	"context"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -81,12 +80,6 @@ type tutorModel struct {
 	ctx context.Context
 	cfg Config
 
-	// stderr is the same real process stream Run's caller passed in --
-	// routing-decision-failed logging (see startTurnCmd) still goes here
-	// directly, on the turn's own goroutine, entirely independent of
-	// bubbletea's own stdout-only rendering.
-	stderr io.Writer
-
 	workerAgent          *react.Agent
 	orchestratorAgent    *react.Agent
 	orchestratorCM       model.ToolCallingChatModel
@@ -140,11 +133,10 @@ func newTutorLayoutOnly() tutorModel {
 // deciding whether the first message wants a comprehension check. Same
 // construction logic as before, just returned as a Model instead of
 // consumed inline by a for-loop.
-func newTutorModel(ctx context.Context, cfg Config, stderr io.Writer) (tutorModel, error) {
+func newTutorModel(ctx context.Context, cfg Config) (tutorModel, error) {
 	m := newTutorLayoutOnly()
 	m.ctx = ctx
 	m.cfg = cfg
-	m.stderr = stderr
 
 	tools, err := buildTools(cfg)
 	if err != nil {
@@ -202,8 +194,8 @@ func newTutorModel(ctx context.Context, cfg Config, stderr io.Writer) (tutorMode
 // tea.Cmd chain synchronously (same pattern as this package's own
 // submitAndRun test helper) sidesteps that race entirely: there is no
 // second input source that can outrun the turn.
-func RunOneTurn(ctx context.Context, cfg Config, message string, stderr io.Writer) (reply string, err error) {
-	m, err := newTutorModel(ctx, cfg, stderr)
+func RunOneTurn(ctx context.Context, cfg Config, message string) (reply string, err error) {
+	m, err := newTutorModel(ctx, cfg)
 	if err != nil {
 		return "", err
 	}
@@ -319,9 +311,21 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if summary := toolUsageSummary(calls, m.activityContentWidth()); summary != "" {
 			m.displayLines = append(m.displayLines, summary)
 		}
+		// routingWarning and a turn failure's real error detail both used
+		// to go to a raw fmt.Fprintf(m.stderr, ...) call -- a real bug
+		// found live: a real interactive session has stderr and stdout on
+		// the very same tty, so that write bypassed bubbletea's renderer
+		// entirely and visibly corrupted the alt-screen frame (stray text,
+		// e.g. an eino error's own "node path: [chat]" detail, landing
+		// wherever the cursor happened to be, never cleared by the next
+		// redraw). Rendered into displayLines instead, both now go through
+		// the same safe pipeline as everything else on screen.
+		if msg.routingWarning != "" {
+			m.displayLines = append(m.displayLines, activityErrorNote(msg.routingWarning))
+		}
 		if msg.err != nil {
-			fmt.Fprintf(m.stderr, "tutor: could not reach %s: %v\n", msg.endpoint, msg.err)
 			m.displayLines = append(m.displayLines, turnFailedFallbackReply)
+			m.displayLines = append(m.displayLines, activityErrorNote(fmt.Sprintf("could not reach %s: %v", msg.endpoint, msg.err)))
 			m.refreshViewport()
 			return m, nil
 		}
@@ -492,12 +496,17 @@ func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 // adopt regardless of outcome -- unchanged from the pre-turn snapshot
 // for a successful comprehension check, incremented for any real
 // (non-check) turn attempt, success or failure (see startTurn).
+// routingWarning is non-empty only when routing was enabled and the
+// handoff decision itself failed (defaulting to the specialist, per
+// decideHandoff) -- the turn still completes normally either way, this
+// is just visibility into why the decision defaulted.
 type turnCompleteMsg struct {
 	reply            *schema.Message
 	err              error
 	endpoint         string
 	userMessage      string
 	helpRequestCount int
+	routingWarning   string
 }
 
 // activityEventMsg carries one live snapshot of the turn's tool calls so
@@ -573,14 +582,17 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 		}
 
 		turnAgent, turnEndpoint := m.workerAgent, m.workerEndpoint
+		routingWarning := ""
 		if m.routingEnabled {
 			handoff, err := decideHandoff(m.ctx, m.orchestratorCM, line)
 			if err != nil {
 				// Doesn't abort the turn -- decideHandoff already
 				// defaulted to handoff (true) on this same error, so the
 				// turn still gets answered by the specialist; this is
-				// just visibility into why.
-				fmt.Fprintf(m.stderr, "tutor: routing decision failed, defaulting to handoff: %v\n", err)
+				// just visibility into why (rendered by Update, not
+				// written directly here -- see turnCompleteMsg.routingWarning's
+				// doc comment for why a direct write is unsafe).
+				routingWarning = fmt.Sprintf("routing decision failed, defaulting to handoff: %v", err)
 			}
 			if !handoff {
 				turnAgent, turnEndpoint = m.orchestratorAgent, m.orchestratorEndpoint
@@ -595,10 +607,10 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 		requestMessages := append(append([]*schema.Message{}, m.history...), turnMessages(m.cfg.Mode, newHelpRequestCount, line)...)
 		reply, err := generateWithLeakRetry(m.ctx, turnAgent, requestMessages, activityOpt)
 		if err != nil {
-			doneCh <- turnCompleteMsg{err: err, endpoint: turnEndpoint, userMessage: line, helpRequestCount: newHelpRequestCount}
+			doneCh <- turnCompleteMsg{err: err, endpoint: turnEndpoint, userMessage: line, helpRequestCount: newHelpRequestCount, routingWarning: routingWarning}
 			return
 		}
-		doneCh <- turnCompleteMsg{reply: reply, userMessage: line, helpRequestCount: newHelpRequestCount}
+		doneCh <- turnCompleteMsg{reply: reply, userMessage: line, helpRequestCount: newHelpRequestCount, routingWarning: routingWarning}
 	}()
 
 	return activityCh, doneCh

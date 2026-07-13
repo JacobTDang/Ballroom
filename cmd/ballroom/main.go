@@ -264,7 +264,7 @@ func tutorCmd() error {
 		NvimSocket:      os.Getenv("NVIM_SOCKET"),
 		MaxContextBytes: maxContextBytes,
 	}
-	return tutor.Run(context.Background(), cfg, os.Stdin, os.Stdout, os.Stderr)
+	return tutor.Run(context.Background(), cfg, os.Stdin, os.Stdout)
 }
 
 // checkToolCallingFn is a var (not a direct call) so tests can

@@ -2,8 +2,8 @@ package tutor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -159,7 +159,7 @@ func TestTutorModel_EnterOnNonEmptyTextareaResetsItAndEchoesIntoViewport(t *test
 	mock := newSequencedOllama(t, "reply")
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestTutorModel_LongReplyWrapsInsteadOfBeingCutOff(t *testing.T) {
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestNewTutorModel_NoRoutingBannerAndHistorySeededWithSystemPrompt(t *testin
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestNewTutorModel_RoutingEnabledBannerNamesBothModels(t *testing.T) {
 	cfg.Model = "worker-model"
 	cfg.OrchestratorModel = "orchestrator-model"
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestNewTutorModel_ComprehensionCheckPendingMatchesMode(t *testing.T) {
 
 	syntaxCfg := testConfig(mock.URL)
 	syntaxCfg.Mode = exercise.TutorModeSyntaxOnly
-	m, err := newTutorModel(context.Background(), syntaxCfg, io.Discard)
+	m, err := newTutorModel(context.Background(), syntaxCfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -439,7 +439,7 @@ func TestNewTutorModel_ComprehensionCheckPendingMatchesMode(t *testing.T) {
 
 	fullCfg := testConfig(mock.URL)
 	fullCfg.Mode = exercise.TutorModeFullAssist
-	m, err = newTutorModel(context.Background(), fullCfg, io.Discard)
+	m, err = newTutorModel(context.Background(), fullCfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestTutorModel_SubmitAppendsUserMessageImmediatelyAndReplyAfterCompletion(t
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestTutorModel_TurnFailureShowsFallbackAndDoesNotPersistToHistory(t *testin
 	cfg := testConfig("http://127.0.0.1:1") // refuses immediately
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -499,7 +499,7 @@ func TestTutorModel_NoRoutingWhenOrchestratorModelEmpty(t *testing.T) {
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -524,7 +524,7 @@ func TestTutorModel_RoutesToOrchestratorWhenDecisionIsNo(t *testing.T) {
 	cfg.OrchestratorModel = "orchestrator-model"
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -554,7 +554,7 @@ func TestTutorModel_RoutesToWorkerWhenDecisionIsYes(t *testing.T) {
 	cfg.OrchestratorModel = "orchestrator-model"
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -572,6 +572,60 @@ func TestTutorModel_RoutesToWorkerWhenDecisionIsYes(t *testing.T) {
 	}
 }
 
+// TestTutorModel_RoutingDecisionFailureShowsWarningButTurnStillSucceeds
+// is a regression test for a real bug found live: this warning used to
+// go to a raw fmt.Fprintf(m.stderr, ...) call, which corrupted the
+// real terminal (see activityErrorNote's doc comment in activity.go).
+// It's rendered into the viewport instead now. decideHandoff already
+// defaults to handoff (true) on its own request failure, so the turn
+// still completes normally via the worker -- this only checks that the
+// warning explaining *why* it defaulted is now visible in the chat.
+func TestTutorModel_RoutingDecisionFailureShowsWarningButTurnStillSucceeds(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req tutorChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Model == "orchestrator-model" {
+			// The routing decision itself always goes to the
+			// orchestrator (see decideHandoff) -- fail only that
+			// request, so the worker's own answer still succeeds.
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"orchestrator unreachable"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"message": map[string]string{"role": "assistant", "content": "worker answered"},
+			"done":    true,
+		})
+	}))
+	defer mock.Close()
+
+	cfg := testConfig(mock.URL)
+	cfg.Model = "worker-model"
+	cfg.OrchestratorModel = "orchestrator-model"
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "hi")
+
+	view := got.viewport.View()
+	if !strings.Contains(view, "routing decision failed") {
+		t.Errorf("viewport view %q, want the routing-failure warning visible", view)
+	}
+	if !strings.Contains(view, "worker answered") {
+		t.Errorf("viewport view %q, want the turn to still succeed via the defaulted handoff", view)
+	}
+}
+
 func TestTutorModel_ComprehensionCheckAlwaysUsesOrchestratorWhenRoutingEnabled(t *testing.T) {
 	mock := newSequencedOllama(t, "restated problem + questions")
 	cfg := testConfig(mock.URL)
@@ -579,7 +633,7 @@ func TestTutorModel_ComprehensionCheckAlwaysUsesOrchestratorWhenRoutingEnabled(t
 	cfg.OrchestratorModel = "orchestrator-model"
 	cfg.Mode = exercise.TutorModeFullAssist
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -602,7 +656,7 @@ func TestTutorModel_ComprehensionCheckClearsPendingRegardlessOfOutcome(t *testin
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeFullAssist
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -629,7 +683,7 @@ func TestTutorModel_RetriesWhenReplyLeaksFakeToolCallJSON(t *testing.T) {
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -734,7 +788,7 @@ func TestTutorModel_SubmitShowsLiveToolCallActivity(t *testing.T) {
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 	cfg.WorkDir = t.TempDir()
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -795,7 +849,7 @@ func TestTutorModel_ToolNameLeftBehindInHistoryAfterTurnCompletes(t *testing.T) 
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 	cfg.WorkDir = t.TempDir()
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -817,7 +871,7 @@ func TestTutorModel_ToolNameLeftBehindInHistoryAfterTurnCompletes(t *testing.T) 
 	mock2 := newSequencedOllama(t, "a plain reply")
 	cfg2 := testConfig(mock2.URL)
 	cfg2.Mode = exercise.TutorModeSyntaxOnly
-	m2, err := newTutorModel(context.Background(), cfg2, io.Discard)
+	m2, err := newTutorModel(context.Background(), cfg2)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -858,22 +912,27 @@ func TestTutorModel_ErrorMessageIncludesRealUnderlyingDetail(t *testing.T) {
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	var stderr strings.Builder
-	m, err := newTutorModel(context.Background(), cfg, &stderr)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = newM.(tutorModel)
 
-	submitAndRun(t, m, "hello")
+	// Not stderr -- a real bug found live: writing this detail directly
+	// to a raw stderr stream corrupted the terminal, since a real
+	// interactive session has stderr and stdout on the very same tty
+	// (see activityErrorNote's doc comment in activity.go). It's
+	// rendered into the viewport instead now, same safe pipeline as
+	// everything else on screen.
+	got := submitAndRun(t, m, "hello")
 
-	got := stderr.String()
-	if !strings.Contains(got, "could not reach") {
-		t.Errorf("stderr = %q, want the generic message preserved", got)
+	view := got.viewport.View()
+	if !strings.Contains(view, "could not reach") {
+		t.Errorf("viewport view %q, want the generic message preserved", view)
 	}
-	if !strings.Contains(got, "does not support tools") {
-		t.Errorf("stderr = %q, want the real underlying error detail included, not just the generic host message", got)
+	if !strings.Contains(view, "does not support tools") {
+		t.Errorf("viewport view %q, want the real underlying error detail included, not just the generic host message", view)
 	}
 }
 
@@ -887,19 +946,18 @@ func TestTutorModel_ComprehensionCheckErrorMessageIncludesRealUnderlyingDetail(t
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeFullAssist // wants the comprehension check
 
-	var stderr strings.Builder
-	m, err := newTutorModel(context.Background(), cfg, &stderr)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = newM.(tutorModel)
 
-	submitAndRun(t, m, "hi")
+	got := submitAndRun(t, m, "hi")
 
-	got := stderr.String()
-	if !strings.Contains(got, "could not reach") || !strings.Contains(got, "does not support tools") {
-		t.Errorf("stderr = %q, want the real underlying error detail included", got)
+	view := got.viewport.View()
+	if !strings.Contains(view, "could not reach") || !strings.Contains(view, "does not support tools") {
+		t.Errorf("viewport view %q, want the real underlying error detail included", view)
 	}
 }
 
@@ -923,8 +981,7 @@ func TestTutorModel_OpenRouterModelShowsOpenRouterInBannerAndErrors(t *testing.T
 	cfg.Model = OpenRouterModelPrefix + "some/model"
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	var stderr strings.Builder
-	m, err := newTutorModel(context.Background(), cfg, &stderr)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -934,14 +991,14 @@ func TestTutorModel_OpenRouterModelShowsOpenRouterInBannerAndErrors(t *testing.T
 
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = newM.(tutorModel)
-	submitAndRun(t, m, "hello")
+	got := submitAndRun(t, m, "hello")
 
-	errOut := stderr.String()
-	if !strings.Contains(errOut, "could not reach OpenRouter:") {
-		t.Errorf("stderr = %q, want \"could not reach OpenRouter:\", not the empty/meaningless OllamaHost", errOut)
+	view := got.viewport.View()
+	if !strings.Contains(view, "could not reach OpenRouter:") {
+		t.Errorf("viewport view %q, want \"could not reach OpenRouter:\", not the empty/meaningless OllamaHost", view)
 	}
-	if !strings.Contains(errOut, "rate limited") {
-		t.Errorf("stderr = %q, want the real underlying error detail included too", errOut)
+	if !strings.Contains(view, "rate limited") {
+		t.Errorf("viewport view %q, want the real underlying error detail included too", view)
 	}
 }
 
@@ -955,7 +1012,7 @@ func TestTutorModel_ComprehensionCheckIncludesUsersRealFirstMessage(t *testing.T
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeFullAssist
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -988,7 +1045,7 @@ func TestTutorModel_ComprehensionCheckRetriesWhenReplyLeaksFakeToolCallJSON(t *t
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeFullAssist
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -1020,7 +1077,7 @@ func TestTutorModel_ComprehensionCheckInjectsProblemStatementDirectly(t *testing
 		t.Fatalf("write problem.md: %v", err)
 	}
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -1049,7 +1106,7 @@ func TestTutorModel_ComprehensionCheckHistoryPersistsBothTurns(t *testing.T) {
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeHintsFirst
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -1094,7 +1151,7 @@ func TestTutorModel_FallsBackToHonestMessageWhenRetryAlsoLeaks(t *testing.T) {
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -1121,7 +1178,7 @@ func TestTutorModel_DoesNotRetryWhenReplyIsClean(t *testing.T) {
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -1140,7 +1197,7 @@ func TestTutorModel_LeakedReplyNeverPersistedToHistory(t *testing.T) {
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
@@ -1169,7 +1226,7 @@ func TestTutorModel_RetainsConversationHistoryAcrossTurns(t *testing.T) {
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	m, err := newTutorModel(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}

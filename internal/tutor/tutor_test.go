@@ -121,8 +121,8 @@ func TestRun_ExitsCleanlyOnCtrlDWithNoInput(t *testing.T) {
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
-	var stdout, stderr strings.Builder
-	if err := Run(context.Background(), cfg, strings.NewReader("\x04"), &stdout, &stderr); err != nil {
+	var stdout strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("\x04"), &stdout); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := stripAnsi(stdout.String()); !strings.Contains(got, "Ask a question") {
