@@ -309,6 +309,24 @@ func TestActivityOutputLines_ContentIsColoredGray(t *testing.T) {
 	}
 }
 
+func TestActivityErrorNote_ContainsTheErrorColorAndTheText(t *testing.T) {
+	got := activityErrorNote("could not reach http://localhost:11434: connection refused")
+	color := fmt.Sprintf("\033[38;2;%d;%d;%dm", activityErrorNoteR, activityErrorNoteG, activityErrorNoteB)
+	if !strings.Contains(got, color) {
+		t.Errorf("activityErrorNote(...) = %q, want the error-red color escape", got)
+	}
+	if !strings.Contains(got, "could not reach http://localhost:11434: connection refused") {
+		t.Errorf("activityErrorNote(...) = %q, want the original text preserved", got)
+	}
+}
+
+func TestActivityErrorNote_StartsWithADefensiveReset(t *testing.T) {
+	got := activityErrorNote("some error")
+	if !strings.HasPrefix(got, "\033[0m\033[38;2;") {
+		t.Errorf("activityErrorNote(...) = %q, want it prefixed with an explicit reset before its own color, same defensive pattern as coloredDot/activityOutputHighlight", got)
+	}
+}
+
 func TestActivityOutputLines_ColorEscapeStartsWithADefensiveReset(t *testing.T) {
 	// Guards the fix for a real bug found live: a later, supposedly
 	// uncolored line was seen visibly inheriting an earlier line's

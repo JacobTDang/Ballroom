@@ -313,6 +313,33 @@ func activityOutputHighlight(s string) string {
 	return fmt.Sprintf("\033[0m\033[38;2;%d;%d;%dm%s\033[0m", activityOutputHighlightR, activityOutputHighlightG, activityOutputHighlightB, s)
 }
 
+// activityErrorNoteR/G/B is used for a turn or routing-decision
+// failure's real underlying error detail, shown directly in the chat --
+// the same red already used for a failed check elsewhere in this
+// project (internal/tui/boot.go's checkFailStyle: #F03C3C), so a
+// failure reads consistently as a failure across the whole app.
+const (
+	activityErrorNoteR = 0xF0
+	activityErrorNoteG = 0x3C
+	activityErrorNoteB = 0x3C
+)
+
+// activityErrorNote wraps s in the error-red foreground escape, same
+// truecolor mechanism (and defensive leading reset) as coloredDot and
+// activityOutputHighlight. This is what a turn/routing failure's real
+// error detail is rendered with in tutorModel.Update — a real bug found
+// live: that detail used to go to a raw fmt.Fprintf(m.stderr, ...) call
+// instead, and since a real interactive session has stderr and stdout
+// on the very same tty, that write bypassed bubbletea's renderer
+// entirely and visibly corrupted the alt-screen frame (stray text
+// landing wherever the cursor happened to be, never cleared by the next
+// redraw). Routing it through displayLines instead means it goes
+// through the same safe, diffed rendering pipeline as everything else
+// on screen.
+func activityErrorNote(s string) string {
+	return fmt.Sprintf("\033[0m\033[38;2;%d;%d;%dm%s\033[0m", activityErrorNoteR, activityErrorNoteG, activityErrorNoteB, s)
+}
+
 // activityOutputLines returns c's result (done) or error (failed)
 // detail, word-wrapped to fit within cols, highlighted in yellow, and
 // indented, capped at activityOutputPreviewLines lines — nil for a
