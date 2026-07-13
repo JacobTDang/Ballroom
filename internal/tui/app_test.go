@@ -304,6 +304,12 @@ func TestAppModel_ProviderChoice_SelectingAPIGoesToAPIModelEntry(t *testing.T) {
 	if got.stage != stageAPIModelEntry {
 		t.Fatalf("stage = %v, want stageAPIModelEntry", got.stage)
 	}
+	if len(got.apiModelFiltered) == 0 {
+		t.Error("expected apiModelFiltered to be seeded with suggestedOpenRouterModels, got none")
+	}
+	if got.apiModelCursor != 0 {
+		t.Errorf("apiModelCursor = %d, want 0", got.apiModelCursor)
+	}
 }
 
 func TestAppModel_ProviderChoice_OrchestratorGetsAThirdNoneOption(t *testing.T) {
@@ -434,6 +440,76 @@ func TestAppModel_APIModelEntry_BackspaceRemovesLastCharacter(t *testing.T) {
 	got := newM.(appModel)
 	if got.apiModelInput != "anthropic/" {
 		t.Errorf("apiModelInput = %q, want %q", got.apiModelInput, "anthropic/")
+	}
+}
+
+// apiModelEntryFixture enters stageAPIModelEntry the real way (via
+// stageProviderChoice), so apiModelFiltered starts seeded with
+// suggestedOpenRouterModels exactly like a real session.
+func apiModelEntryFixture(t *testing.T) appModel {
+	t.Helper()
+	m := appModel{stage: stageProviderChoice, settingsCursor: 1, settingsEditing: settingsTargetWorker}
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	return newM.(appModel)
+}
+
+func TestAppModel_APIModelEntry_TypingFiltersSuggestedModels(t *testing.T) {
+	m := apiModelEntryFixture(t)
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("gpt-oss-20b")})
+	got := newM.(appModel)
+	if len(got.apiModelFiltered) != 1 || got.apiModelFiltered[0] != "openai/gpt-oss-20b:free" {
+		t.Errorf("apiModelFiltered = %v, want [openai/gpt-oss-20b:free]", got.apiModelFiltered)
+	}
+}
+
+func TestAppModel_APIModelEntry_DownMovesCursorWithinFilteredList(t *testing.T) {
+	m := apiModelEntryFixture(t)
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := newM.(appModel)
+	if got.apiModelCursor != 1 {
+		t.Errorf("apiModelCursor = %d, want 1", got.apiModelCursor)
+	}
+}
+
+func TestAppModel_APIModelEntry_DownStopsAtLastFilteredEntry(t *testing.T) {
+	m := apiModelEntryFixture(t)
+	for i := 0; i < len(m.apiModelFiltered)+5; i++ {
+		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = newM.(appModel)
+	}
+	if m.apiModelCursor != len(m.apiModelFiltered)-1 {
+		t.Errorf("apiModelCursor = %d, want %d (last entry)", m.apiModelCursor, len(m.apiModelFiltered)-1)
+	}
+}
+
+func TestAppModel_APIModelEntry_EnterOnHighlightedSuggestionSelectsItWithOpenRouterPrefix(t *testing.T) {
+	defer fakeCheckToolCalling(true, nil)()
+	dir := t.TempDir()
+
+	m := apiModelEntryFixture(t)
+	m.cfg = config.Config{DataDir: dir, OpenRouterAPIKey: "sk-existing"}
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = newM.(appModel)
+	want := "openrouter:" + m.apiModelFiltered[m.apiModelCursor]
+
+	newM2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Error("expected a background command kicking off the tool-calling check")
+	}
+	got := newM2.(appModel)
+	if got.cfg.TutorModel != want {
+		t.Errorf("cfg.TutorModel = %q, want %q", got.cfg.TutorModel, want)
+	}
+}
+
+func TestAppModel_APIModelEntry_QWithNoFilterGoesBackToProviderChoice(t *testing.T) {
+	m := apiModelEntryFixture(t)
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd != nil {
+		t.Error("expected no external command — back to the provider choice is an internal stage change")
+	}
+	if newM.(appModel).stage != stageProviderChoice {
+		t.Error("expected q with no filter to return to stageProviderChoice")
 	}
 }
 

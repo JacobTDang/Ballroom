@@ -40,6 +40,25 @@ var suggestedModels = []string{
 	config.Qwen25Coder14BModel,
 }
 
+// suggestedOpenRouterModels are free-tier OpenRouter model slugs (no
+// OpenRouterModelPrefix — stageAPIModelEntry adds it on select) verified
+// live, on 2026-07-12, via tutor.CheckToolCalling to actually make real
+// tool calls, not just declared "tools"-capable in OpenRouter's
+// /models metadata (that distinction mattered in this codebase before —
+// see config.Qwen25Coder14BModel's doc comment for a model that claims
+// tool support but doesn't deliver it end-to-end). Kept short and
+// re-verified rather than exhaustive: OpenRouter's free-tier catalog
+// changes over time, and an unverified entry here would be actively
+// misleading in a list whose whole point is "known to work".
+var suggestedOpenRouterModels = []string{
+	"openai/gpt-oss-120b:free",
+	"openai/gpt-oss-20b:free",
+	"nvidia/nemotron-3-ultra-550b-a55b:free",
+	"nvidia/nemotron-3-super-120b-a12b:free",
+	"nvidia/nemotron-3-nano-30b-a3b:free",
+	"nvidia/nemotron-nano-9b-v2:free",
+}
+
 // browsableModels merges local (locally pulled) with suggestedModels,
 // deduplicated — a suggested tag already pulled just appears once, as a
 // normal local entry.
@@ -277,8 +296,13 @@ type appModel struct {
 	settingsCursor  int
 	settingsEditing settingsTarget // which Config field stageProviderChoice onward writes to (see selectModel)
 
-	// stageAPIModelEntry
-	apiModelInput string
+	// stageAPIModelEntry: apiModelInput both filters apiModelFiltered
+	// (derived from suggestedOpenRouterModels, same shape as
+	// modelFilter/modelFiltered below) and, when nothing matches, is the
+	// custom slug typed directly.
+	apiModelInput    string
+	apiModelFiltered []string
+	apiModelCursor   int
 
 	// stageModelPicker
 	modelLoading  bool
@@ -523,6 +547,18 @@ func (m appModel) loadModelPicker() (tea.Model, tea.Cmd) {
 		models, err := listModelsFn(ollamaHost)
 		return modelsLoadedMsg{models: models, err: err}
 	}
+}
+
+// loadAPIModelEntry enters stageAPIModelEntry seeded with
+// suggestedOpenRouterModels — unlike loadModelPicker's Ollama tags,
+// this list is static, so no async fetch (and no loading state) is
+// needed.
+func (m appModel) loadAPIModelEntry() appModel {
+	m.stage = stageAPIModelEntry
+	m.apiModelInput = ""
+	m.apiModelFiltered = suggestedOpenRouterModels
+	m.apiModelCursor = 0
+	return m
 }
 
 // distinctCategories collects the top-level practice-picker entries —
@@ -800,9 +836,7 @@ func (m appModel) updateProviderChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 0:
 			return m.loadModelPicker()
 		case 1:
-			m.stage = stageAPIModelEntry
-			m.apiModelInput = ""
-			return m, nil
+			return m.loadAPIModelEntry(), nil
 		case 2:
 			return m.clearOrchestratorModel()
 		}
@@ -839,16 +873,35 @@ func (m appModel) clearOrchestratorModel() (tea.Model, tea.Cmd) {
 // without any new logic needed here.
 func (m appModel) updateAPIModelEntry(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
+	case tea.KeyUp:
+		if m.apiModelCursor > 0 {
+			m.apiModelCursor--
+		}
+		return m, nil
+	case tea.KeyDown:
+		if m.apiModelCursor < len(m.apiModelFiltered)-1 {
+			m.apiModelCursor++
+		}
+		return m, nil
 	case tea.KeyEsc, tea.KeyCtrlC:
 		m.stage = stageProviderChoice
 		m.apiModelInput = ""
+		m.apiModelFiltered = nil
 		return m, nil
 	case tea.KeyBackspace:
 		if len(m.apiModelInput) > 0 {
 			m.apiModelInput = m.apiModelInput[:len(m.apiModelInput)-1]
+			m.apiModelFiltered = filterModels(suggestedOpenRouterModels, m.apiModelInput)
+			m.apiModelCursor = 0
 		}
 		return m, nil
 	case tea.KeyEnter:
+		if len(m.apiModelFiltered) > 0 {
+			sel := m.apiModelFiltered[m.apiModelCursor]
+			m.apiModelInput = ""
+			m.apiModelFiltered = nil
+			return m.selectModelOrPromptForKey(tutor.OpenRouterModelPrefix + sel)
+		}
 		slug := strings.TrimSpace(m.apiModelInput)
 		if slug == "" {
 			return m, nil
@@ -856,7 +909,17 @@ func (m appModel) updateAPIModelEntry(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.apiModelInput = ""
 		return m.selectModelOrPromptForKey(tutor.OpenRouterModelPrefix + slug)
 	case tea.KeyRunes:
+		// "q" with nothing typed yet backs out, matching stageModelPicker's
+		// identical convention (see handleModelEnter's own comment on the
+		// same trade-off for tags that start with "q").
+		if m.apiModelInput == "" && string(msg.Runes) == "q" {
+			m.stage = stageProviderChoice
+			m.apiModelFiltered = nil
+			return m, nil
+		}
 		m.apiModelInput += string(msg.Runes)
+		m.apiModelFiltered = filterModels(suggestedOpenRouterModels, m.apiModelInput)
+		m.apiModelCursor = 0
 		return m, nil
 	}
 	return m, nil
@@ -1409,16 +1472,40 @@ func (m appModel) renderProviderChoice() string {
 // renderAPIModelEntry's input is unmasked (unlike
 // renderOpenRouterKeyEntry's) — a model slug isn't a secret.
 func (m appModel) renderAPIModelEntry() string {
+	currentModel := m.cfg.TutorModel
+	if m.settingsEditing == settingsTargetOrchestrator {
+		currentModel = m.cfg.OrchestratorModel
+	}
+
 	var b strings.Builder
 	b.WriteString(hintStyle.Render("OpenRouter model"))
 	b.WriteString("\n")
-	b.WriteString(checkDimStyle.Render("enter a model slug, e.g. anthropic/claude-3.5-sonnet"))
+	b.WriteString(checkDimStyle.Render("pick a suggestion, or type any model slug, e.g. anthropic/claude-3.5-sonnet"))
 	b.WriteString("\n\n")
 
 	b.WriteString(fmt.Sprintf("%s%s", checkDimStyle.Render("› "), m.apiModelInput))
 	b.WriteString("\n\n")
 
-	b.WriteString(checkDimStyle.Render("enter confirm · esc cancel"))
+	if len(m.apiModelFiltered) == 0 {
+		b.WriteString(checkDimStyle.Render("no suggested matches -- enter confirms the typed slug above"))
+		b.WriteString("\n")
+	} else {
+		for i, slug := range m.apiModelFiltered {
+			label := slug
+			if tutor.OpenRouterModelPrefix+slug == currentModel {
+				label += "  " + hintStyle.Render("(current)")
+			}
+			if i == m.apiModelCursor {
+				b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s", label)))
+			} else {
+				b.WriteString(fmt.Sprintf("  %s", label))
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	b.WriteString("\n")
+	b.WriteString(checkDimStyle.Render("↑/↓ move · enter select · esc back"))
 	return b.String()
 }
 
