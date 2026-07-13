@@ -17,8 +17,11 @@ import (
 // turn is in flight. Phase 1: static text. A later pass replaces this
 // with a moving gradient-shimmer redraw (see the plan for this feature)
 // — nothing else about the activity region changes for that, since the
-// status line is just one more argument to showActivity.
-const activityThinkingStatus = "⟳ Thinking…"
+// status line is just one more argument to showActivity. Uses only ●
+// (a single dot, matching Claude Code's own tool-call indicator) and
+// plain ASCII — see formatActivityLine's doc comment for why every other
+// symbol this package originally used got removed.
+const activityThinkingStatus = "● Thinking..."
 
 // activityArgsPreviewMax/activityResultPreviewMax cap how much of a raw
 // tool-call argument/result string appears on one activity line — both
@@ -97,24 +100,38 @@ func (f *activityFeed) linesLocked() []string {
 	return lines
 }
 
-// formatActivityLine renders one call's current state. "{}" (an empty
-// JSON object -- what eino sends for a no-argument tool) is treated the
-// same as no args at all, since showing "({})" on every no-arg tool call
-// (most of this package's tools) would be noise, not information.
+// formatActivityLine renders one call's current state. Every line leads
+// with a single ● — a real bug found live: the previous version used a
+// different glyph per state (⟳ → ✓ ✗) plus a Unicode ellipsis (…), and
+// in a real user's terminal font every one of those rendered as an
+// unrecognizable fallback glyph (tofu, reading like stray underscores).
+// ● alone is confirmed to render correctly everywhere it's been tested
+// (it's an extremely old, near-universally-supported code point), so
+// state is now distinguished by the trailing text instead of the
+// leading glyph — running has no suffix, done gets the result appended,
+// failed gets an explicit "- failed:" tag. Color (a later pass — see the
+// plan for this feature) is what's meant to carry the state distinction
+// visually going forward, the same way Claude Code's own tool-call dot
+// does; this is the plain-text-only baseline that works before that.
+//
+// "{}" (an empty JSON object -- what eino sends for a no-argument tool)
+// is treated the same as no args at all, since showing "({})" on every
+// no-arg tool call (most of this package's tools) would be noise, not
+// information.
 func formatActivityLine(c activityCall) string {
 	switch c.status {
 	case "done":
 		if c.detail == "" {
-			return fmt.Sprintf("✓ %s", c.name)
+			return fmt.Sprintf("● %s", c.name)
 		}
-		return fmt.Sprintf("✓ %s  %s", c.name, c.detail)
+		return fmt.Sprintf("● %s  %s", c.name, c.detail)
 	case "failed":
-		return fmt.Sprintf("✗ %s: %s", c.name, c.detail)
+		return fmt.Sprintf("● %s - failed: %s", c.name, c.detail)
 	default: // "running"
 		if c.detail == "" || c.detail == "{}" {
-			return fmt.Sprintf("→ %s", c.name)
+			return fmt.Sprintf("● %s", c.name)
 		}
-		return fmt.Sprintf("→ %s(%s)", c.name, c.detail)
+		return fmt.Sprintf("● %s(%s)", c.name, c.detail)
 	}
 }
 

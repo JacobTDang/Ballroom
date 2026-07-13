@@ -170,7 +170,7 @@ func TestRun_ShowsLiveToolCallActivityAndClearsItBeforeThePrints(t *testing.T) {
 	}
 
 	out := stdout.String()
-	toolLineIdx := strings.Index(out, "→ read_solution_file")
+	toolLineIdx := strings.Index(out, "● read_solution_file")
 	if toolLineIdx == -1 {
 		t.Fatalf("expected the live activity display to show the real tool being called, got:\n%s", out)
 	}

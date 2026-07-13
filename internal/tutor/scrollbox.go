@@ -207,12 +207,23 @@ func (b *inputBox) returnToScroll() {
 	fmt.Fprintf(b.w, "\033[%d;1H\033[2K", b.regionBottom)
 }
 
-// truncateLine caps s at max runes, replacing the last rune with an
-// ellipsis when it's cut — used both as a hard rendering safety net
-// (showActivity: a line must never exceed the box's width, or it wraps
-// onto and corrupts the row below it) and for shortening tool-call
-// argument/result previews to something readable at a glance (activity.go).
-// max <= 0 returns empty rather than panicking on the slice below.
+// truncateLineEllipsis is deliberately plain ASCII, not the Unicode
+// ellipsis (…) — a real bug found live: that character (and every other
+// symbol this package originally used: ⟳ → ✓ ✗) rendered as an
+// unrecognizable fallback glyph (tofu, reading like a stray underscore)
+// in a real user's terminal font. Everything this package writes is now
+// plain ASCII plus the one glyph confirmed to render everywhere: ● (see
+// activityThinkingStatus/formatActivityLine in activity.go).
+const truncateLineEllipsis = "..."
+
+// truncateLine caps s at max runes, replacing the tail with
+// truncateLineEllipsis when it's cut — used both as a hard rendering
+// safety net (showActivity: a line must never exceed the box's width, or
+// it wraps onto and corrupts the row below it) and for shortening
+// tool-call argument/result previews to something readable at a glance
+// (activity.go). max <= 0 returns empty rather than panicking on the
+// slice below; max too small to fit the ellipsis itself just returns as
+// much of the ellipsis as fits.
 func truncateLine(s string, max int) string {
 	if max <= 0 {
 		return ""
@@ -221,10 +232,10 @@ func truncateLine(s string, max int) string {
 	if len(runes) <= max {
 		return s
 	}
-	if max == 1 {
-		return "…"
+	if max <= len(truncateLineEllipsis) {
+		return truncateLineEllipsis[:max]
 	}
-	return string(runes[:max-1]) + "…"
+	return string(runes[:max-len(truncateLineEllipsis)]) + truncateLineEllipsis
 }
 
 // showActivity redraws the whole activity region in one buffered write:

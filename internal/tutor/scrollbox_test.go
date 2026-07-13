@@ -316,18 +316,30 @@ func TestTruncateLine_ShortStringUnchanged(t *testing.T) {
 }
 
 func TestTruncateLine_LongStringTruncatedWithEllipsis(t *testing.T) {
+	// ASCII "..." only -- a real bug found live: the Unicode ellipsis
+	// (…) and every other symbol this package originally used (⟳ → ✓ ✗)
+	// rendered as unrecognizable fallback glyphs (tofu, looking like
+	// stray underscores) in a real user's terminal font. Everything this
+	// package writes must be plain ASCII plus the one glyph confirmed to
+	// render everywhere: ● (see activityThinkingStatus/formatActivityLine).
 	got := truncateLine("this is a much longer string than the limit allows", 10)
 	if runes := []rune(got); len(runes) != 10 {
 		t.Errorf("truncateLine(...) = %q (len %d), want exactly 10 runes", got, len(runes))
 	}
-	if !strings.HasSuffix(got, "…") {
-		t.Errorf("truncateLine(...) = %q, want it to end with an ellipsis", got)
+	if !strings.HasSuffix(got, "...") {
+		t.Errorf("truncateLine(...) = %q, want it to end with \"...\"", got)
 	}
 }
 
 func TestTruncateLine_MaxOfZeroOrLessReturnsEmpty(t *testing.T) {
 	if got := truncateLine("anything", 0); got != "" {
 		t.Errorf("truncateLine(_, 0) = %q, want empty", got)
+	}
+}
+
+func TestTruncateLine_MaxSmallerThanEllipsisTruncatesTheEllipsisItself(t *testing.T) {
+	if got := truncateLine("anything long enough to truncate", 2); got != ".." {
+		t.Errorf("truncateLine(_, 2) = %q, want \"..\"", got)
 	}
 }
 
