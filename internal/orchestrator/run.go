@@ -120,6 +120,16 @@ func exerciseRunArgs(cfg config.Config, ex exercise.Exercise, controlDir, worksp
 		"-e", "PRACTICE_STARTED_AT=" + startedAt.Format(time.RFC3339),
 		"-e", "PRACTICE_DB_PATH=/data/tracker.db",
 		"-e", "TUTOR_MODEL=" + cfg.TutorModel,
+		// Always forwarded, empty or not -- the tutor process only reads
+		// it when TutorModel is tutor.OpenRouterModelPrefix-prefixed
+		// (see cmd/ballroom/main.go's tutorCmd), same as TUTOR_MODEL
+		// being forwarded even when it's just the default.
+		"-e", "OPENROUTER_API_KEY=" + cfg.OpenRouterAPIKey,
+		// Always forwarded, empty or not -- an empty value means routing
+		// is off (see cmd/ballroom/main.go's tutorCmd and
+		// internal/tutor.Config.OrchestratorModel), same rationale as
+		// OPENROUTER_API_KEY above.
+		"-e", "TUTOR_ORCHESTRATOR_MODEL=" + cfg.OrchestratorModel,
 		cfg.DockerImage,
 	}
 }
@@ -132,6 +142,8 @@ func sandboxRunArgs(cfg config.Config) []string {
 		"run", "-it", "--rm",
 		"-v", sandboxVolume + ":/workspace",
 		"-e", "TUTOR_MODEL=" + cfg.TutorModel,
+		"-e", "OPENROUTER_API_KEY=" + cfg.OpenRouterAPIKey,
+		"-e", "TUTOR_ORCHESTRATOR_MODEL=" + cfg.OrchestratorModel,
 		cfg.DockerImage,
 	}
 }

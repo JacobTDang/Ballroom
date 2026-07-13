@@ -7,7 +7,22 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// nvimCommand is the nvim binary remoteExpr invokes — a package var
+// (not a literal in the exec.CommandContext call) so tests can point it
+// at a stand-in script to exercise remoteExprTimeout without needing a
+// real nvim instance that can be made to hang on demand.
+var nvimCommand = "nvim"
+
+// remoteExprTimeout bounds each nvim --remote-expr call. Without this,
+// a blocking prompt in the editor (e.g. a swap-file recovery dialog)
+// would hang this call — and by extension the whole synchronous tutor
+// turn loop — indefinitely, with no way to recover short of killing the
+// process. A var, not a const, so tests can shrink it rather than
+// waiting out the real duration.
+var remoteExprTimeout = 10 * time.Second
 
 // escapeVimSingleQuoted doubles every embedded single quote so s is safe
 // to interpolate into a VimL single-quoted string literal — the only
@@ -55,7 +70,10 @@ func remoteExpr(ctx context.Context, socket, expr string) (string, error) {
 		return "", nil
 	}
 
-	cmd := exec.CommandContext(ctx, "nvim", "--server", socket, "--remote-expr", expr)
+	ctx, cancel := context.WithTimeout(ctx, remoteExprTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, nvimCommand, "--server", socket, "--remote-expr", expr)
 	var out, errOut bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errOut

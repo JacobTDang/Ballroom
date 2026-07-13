@@ -13,6 +13,7 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/config"
 	"github.com/JacobTDang/Ballroom/internal/orchestrator"
 	"github.com/JacobTDang/Ballroom/internal/preflight"
+	"github.com/JacobTDang/Ballroom/internal/tutor"
 )
 
 const ollamaHost = "http://localhost:11434"
@@ -176,6 +177,23 @@ type bootModel struct {
 }
 
 func newBootModel(cfg config.Config) bootModel {
+	// modelCheck defaults to the real local-Ollama lookup, but an
+	// OpenRouter-prefixed model was never a candidate for that at all —
+	// preflight.CheckModel only ever queries Ollama's own /api/tags, so
+	// it always reported an OpenRouter model as "not pulled". That
+	// always tripped checkDoneMsg's pull-fallback path (Ollama itself
+	// being reachable was the only other condition), which pulled
+	// config.DefaultTutorModel and silently overwrote cfg.TutorModel for
+	// the session — a real bug found live: the worker model kept
+	// reverting to llama on every restart, and the corrupted value then
+	// got persisted to settings.json the next time any setting was
+	// saved. Trivially OK here instead of ever making that call.
+	modelCheck := func() preflight.Check { return preflight.CheckModel(ollamaHost, cfg.TutorModel) }
+	if strings.HasPrefix(cfg.TutorModel, tutor.OpenRouterModelPrefix) {
+		modelCheck = func() preflight.Check {
+			return preflight.Check{Name: preflight.CheckNameModel, OK: true, Detail: cfg.TutorModel + " (OpenRouter, not a local Ollama model)"}
+		}
+	}
 	return bootModel{
 		cfg: cfg,
 		pending: []func() preflight.Check{
@@ -186,7 +204,7 @@ func newBootModel(cfg config.Config) bootModel {
 			// `docker image inspect` call first just to discard it.
 			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameImage} },
 			func() preflight.Check { return preflight.CheckOllama(ollamaHost) },
-			func() preflight.Check { return preflight.CheckModel(ollamaHost, cfg.TutorModel) },
+			modelCheck,
 		},
 		checkNames: []string{
 			preflight.CheckNameDocker,

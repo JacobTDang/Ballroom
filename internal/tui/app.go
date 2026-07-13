@@ -14,6 +14,7 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 	"github.com/JacobTDang/Ballroom/internal/preflight"
 	"github.com/JacobTDang/Ballroom/internal/tracker"
+	"github.com/JacobTDang/Ballroom/internal/tutor"
 )
 
 // listModelsFn and checkModelFn are vars (not direct calls) so tests can
@@ -21,6 +22,13 @@ import (
 // indirection pattern as buildImageFn in boot.go.
 var listModelsFn = preflight.ListModels
 var checkModelFn = preflight.CheckModel
+
+// checkToolCallingFn is checkModelFn's counterpart for the deeper
+// "does this model actually make real tool calls" question — a real
+// Ollama round-trip (see tutor.CheckToolCalling), so it always runs as
+// a background tea.Cmd (checkToolCallingCmd) after a pick completes
+// rather than blocking selection on it.
+var checkToolCallingFn = tutor.CheckToolCalling
 
 // suggestedModels are known-good tutor model tags surfaced in the picker
 // even before they're pulled locally, so they're discoverable without
@@ -30,6 +38,25 @@ var checkModelFn = preflight.CheckModel
 var suggestedModels = []string{
 	config.DeepSeekCoderV2LiteModel,
 	config.Qwen25Coder14BModel,
+}
+
+// suggestedOpenRouterModels are free-tier OpenRouter model slugs (no
+// OpenRouterModelPrefix — stageAPIModelEntry adds it on select) verified
+// live, on 2026-07-12, via tutor.CheckToolCalling to actually make real
+// tool calls, not just declared "tools"-capable in OpenRouter's
+// /models metadata (that distinction mattered in this codebase before —
+// see config.Qwen25Coder14BModel's doc comment for a model that claims
+// tool support but doesn't deliver it end-to-end). Kept short and
+// re-verified rather than exhaustive: OpenRouter's free-tier catalog
+// changes over time, and an unverified entry here would be actively
+// misleading in a list whose whole point is "known to work".
+var suggestedOpenRouterModels = []string{
+	"openai/gpt-oss-120b:free",
+	"openai/gpt-oss-20b:free",
+	"nvidia/nemotron-3-ultra-550b-a55b:free",
+	"nvidia/nemotron-3-super-120b-a12b:free",
+	"nvidia/nemotron-3-nano-30b-a3b:free",
+	"nvidia/nemotron-nano-9b-v2:free",
 }
 
 // browsableModels merges local (locally pulled) with suggestedModels,
@@ -55,6 +82,31 @@ func browsableModels(local []string) []string {
 type modelsLoadedMsg struct {
 	models []string
 	err    error
+}
+
+// toolCallingCheckMsg carries the result of a background
+// tutor.CheckToolCalling run kicked off by selectModel. model is the
+// tag it was checked against — the Update handler drops the result if
+// it no longer matches cfg.TutorModel, so a check for a pick the user
+// has since replaced with another one can't clobber the current
+// warning state.
+type toolCallingCheckMsg struct {
+	model     string
+	supported bool
+	err       error
+}
+
+// checkToolCallingCmd runs tutor.CheckToolCalling in the background —
+// a real LLM round-trip, so this must never block Update the way
+// checkModelFn's cheap /api/tags lookup can. ollamaHost is unused (but
+// still passed) when model is OpenRouterModelPrefix-prefixed — see
+// newChatModel's provider branch, which apiKey and ollamaHost are both
+// threaded through to.
+func checkToolCallingCmd(model, apiKey string) tea.Cmd {
+	return func() tea.Msg {
+		supported, err := checkToolCallingFn(ollamaHost, model, apiKey)
+		return toolCallingCheckMsg{model: model, supported: supported, err: err}
+	}
 }
 
 // filterModels returns the models whose name contains filter
@@ -86,7 +138,44 @@ const (
 	stageProblems
 	stageLanguage
 	stageStats
+	// stageSettings is the Settings menu entry's landing screen: a
+	// Worker model / Orchestrator model role choice (see settingsTarget)
+	// — which one is being edited then decides where stageProviderChoice
+	// and everything past it write their result (selectModel).
+	stageSettings
+	// stageProviderChoice is the Local (Ollama) / API (OpenRouter)
+	// choice for whichever role stageSettings just picked. Routes to
+	// stageModelPicker (Local) or stageAPIModelEntry (API) -- plus a
+	// third "None (disable routing)" option, only when the role being
+	// edited is the orchestrator (there must always be a worker model,
+	// so that option never appears for it).
+	stageProviderChoice
 	stageModelPicker
+	// stageAPIModelEntry asks for a bare OpenRouter model slug (no
+	// OpenRouterModelPrefix needed — provider is already established by
+	// the point this shows) when stageProviderChoice -> API is chosen.
+	// Enter delegates to the same selectModelOrPromptForKey
+	// handleModelEnter already uses for a directly-typed openrouter: tag
+	// in the local picker.
+	stageAPIModelEntry
+	// stageOpenRouterKeyEntry asks for an OpenRouter API key the first
+	// time an OpenRouterModelPrefix-prefixed model is picked with none
+	// available yet (settings.json nor OPENROUTER_API_KEY) — see
+	// handleModelEnter/selectModelOrPromptForKey.
+	stageOpenRouterKeyEntry
+)
+
+// settingsTarget tracks which Config field stageProviderChoice and
+// everything past it (stageModelPicker, stageAPIModelEntry,
+// stageOpenRouterKeyEntry) are editing — set by updateSettings when the
+// user picks Worker or Orchestrator from stageSettings' top-level list,
+// read by selectModel to decide whether to write cfg.TutorModel or
+// cfg.OrchestratorModel.
+type settingsTarget int
+
+const (
+	settingsTargetWorker settingsTarget = iota
+	settingsTargetOrchestrator
 )
 
 // appOutcome is what Run's caller should do once the program exits.
@@ -118,16 +207,16 @@ const (
 	menuPractice menuChoice = iota
 	menuSandbox
 	menuStats
-	menuModelPicker
+	menuSettings
 )
 
-var menuLabels = []string{"Practice", "Sandbox", "Stats", "Model"}
+var menuLabels = []string{"Practice", "Sandbox", "Stats", "Settings"}
 
 var menuDescriptions = []string{
 	"Pick a category and work through exercises",
 	"Free practice, no grading, persists across sessions",
 	"See your progress across categories",
-	"Choose which Ollama model tutors your sessions",
+	"Choose your worker and orchestrator models — local (Ollama) or API (OpenRouter)",
 }
 
 // menuRightColWidth is the fixed content width of the right column —
@@ -169,6 +258,11 @@ type appModel struct {
 
 	// stageMain
 	cursor int
+	// toolCallingWarning is set once a background tutor.CheckToolCalling
+	// (kicked off by selectModel) reports the currently selected model
+	// doesn't make real tool calls — shown on the main menu since the
+	// check resolves after the picker has already returned there.
+	toolCallingWarning string
 
 	// stageCategories / source data for stageProblems
 	problems       []catalog.ProblemStatus
@@ -194,6 +288,22 @@ type appModel struct {
 	statsStatuses []catalog.ExerciseStatus
 	statsRecent   []tracker.Attempt
 
+	// stageSettings: settingsCursor is 0 = Worker model, 1 = Orchestrator
+	// model there; reused by stageProviderChoice as 0 = Local (Ollama),
+	// 1 = API (OpenRouter), 2 = None (disable routing, orchestrator only)
+	// — the two stages are never on screen at once, so one cursor field
+	// covers both without ambiguity.
+	settingsCursor  int
+	settingsEditing settingsTarget // which Config field stageProviderChoice onward writes to (see selectModel)
+
+	// stageAPIModelEntry: apiModelInput both filters apiModelFiltered
+	// (derived from suggestedOpenRouterModels, same shape as
+	// modelFilter/modelFiltered below) and, when nothing matches, is the
+	// custom slug typed directly.
+	apiModelInput    string
+	apiModelFiltered []string
+	apiModelCursor   int
+
 	// stageModelPicker
 	modelLoading  bool
 	modelLoadErr  error
@@ -215,6 +325,10 @@ type appModel struct {
 	modelDownloadLines      []string
 	modelDownloadLineCh     <-chan string
 	modelDownloadErrCh      <-chan error
+
+	// stageOpenRouterKeyEntry
+	openRouterPendingModel string // the openrouter: tag waiting on a key before it can be selected
+	openRouterKeyInput     string
 
 	// outcome is read by Run() once the program exits.
 	outcome       appOutcome
@@ -278,6 +392,32 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.selectModel(m.modelDownloadTarget)
 
+	case toolCallingCheckMsg:
+		if msg.model != m.cfg.TutorModel {
+			// The user picked something else again before this
+			// resolved — stale, ignore rather than clobbering the
+			// warning state for whatever is actually selected now.
+			return m, nil
+		}
+		switch {
+		case msg.err != nil:
+			// A real bug found live: msg.err was captured on the struct
+			// but never actually looked at here, so a hard rejection
+			// (e.g. Ollama returning 400 "does not support tools" for a
+			// model picked without real tool-calling support) produced
+			// no warning at all — the picker went silent, and the
+			// problem only surfaced once inside a live tutor session as
+			// a confusing "could not reach" error that read like a
+			// network/Docker problem. An error here is at least as
+			// informative as the "ran cleanly but didn't call it" case
+			// below, often more so (a hard rejection is more certain
+			// than an inferred non-support), so it must warn too.
+			m.toolCallingWarning = fmt.Sprintf("checking whether %s supports real tool calling failed: %v — the tutor may not work correctly with this model. Pick a different model from the Model menu if this causes problems.", msg.model, msg.err)
+		case !msg.supported:
+			m.toolCallingWarning = fmt.Sprintf("%s may not support real tool calling — the tutor may not be able to read your code, problem, or tests reliably. Pick a different model from the Model menu if this causes problems.", msg.model)
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		switch m.stage {
 		case stageMain:
@@ -292,8 +432,16 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateLanguage(msg)
 		case stageStats:
 			return m.updateStats(msg)
+		case stageSettings:
+			return m.updateSettings(msg)
+		case stageProviderChoice:
+			return m.updateProviderChoice(msg)
 		case stageModelPicker:
 			return m.updateModelPicker(msg)
+		case stageAPIModelEntry:
+			return m.updateAPIModelEntry(msg)
+		case stageOpenRouterKeyEntry:
+			return m.updateOpenRouterKeyEntry(msg)
 		}
 	}
 	return m, nil
@@ -332,8 +480,8 @@ func (m appModel) chooseMain() (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case menuStats:
 		return m.loadStats(), nil
-	case menuModelPicker:
-		return m.loadModelPicker()
+	case menuSettings:
+		return m.loadSettings()
 	}
 	return m, nil
 }
@@ -375,6 +523,15 @@ func (m appModel) loadStats() appModel {
 	return m
 }
 
+// loadSettings enters stageSettings, the Worker/Orchestrator role
+// choice — unlike loadModelPicker/loadStats, this needs no data fetch,
+// so it's synchronous (no tea.Cmd).
+func (m appModel) loadSettings() (tea.Model, tea.Cmd) {
+	m.stage = stageSettings
+	m.settingsCursor = 0
+	return m, nil
+}
+
 func (m appModel) loadModelPicker() (tea.Model, tea.Cmd) {
 	m.stage = stageModelPicker
 	m.modelLoading = true
@@ -390,6 +547,18 @@ func (m appModel) loadModelPicker() (tea.Model, tea.Cmd) {
 		models, err := listModelsFn(ollamaHost)
 		return modelsLoadedMsg{models: models, err: err}
 	}
+}
+
+// loadAPIModelEntry enters stageAPIModelEntry seeded with
+// suggestedOpenRouterModels — unlike loadModelPicker's Ollama tags,
+// this list is static, so no async fetch (and no loading state) is
+// needed.
+func (m appModel) loadAPIModelEntry() appModel {
+	m.stage = stageAPIModelEntry
+	m.apiModelInput = ""
+	m.apiModelFiltered = suggestedOpenRouterModels
+	m.apiModelCursor = 0
+	return m
 }
 
 // distinctCategories collects the top-level practice-picker entries —
@@ -601,6 +770,161 @@ func (m appModel) updateStats(tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// --- stageSettings ---
+
+// updateSettings handles the top-level Worker model / Orchestrator model
+// role choice — a plain 2-item list, same up/down/enter shape as every
+// other short list in this program. Enter records which Config field is
+// being edited (settingsEditing) and moves to stageProviderChoice, which
+// asks Local vs API for that role.
+func (m appModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.settingsCursor > 0 {
+			m.settingsCursor--
+		}
+		return m, nil
+	case tea.KeyDown:
+		if m.settingsCursor < 1 {
+			m.settingsCursor++
+		}
+		return m, nil
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.stage = stageMain
+		return m, nil
+	case tea.KeyEnter:
+		if m.settingsCursor == 0 {
+			m.settingsEditing = settingsTargetWorker
+		} else {
+			m.settingsEditing = settingsTargetOrchestrator
+		}
+		m.stage = stageProviderChoice
+		m.settingsCursor = 0
+		return m, nil
+	}
+	return m, nil
+}
+
+// --- stageProviderChoice ---
+
+// updateProviderChoice handles the Local (Ollama) / API (OpenRouter)
+// provider choice for whichever role updateSettings just picked
+// (m.settingsEditing) — a plain list, 2 items normally, or 3 when editing
+// the orchestrator (a trailing "None (disable routing)" entry, since the
+// worker model can never be unset).
+func (m appModel) updateProviderChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	maxCursor := 1
+	if m.settingsEditing == settingsTargetOrchestrator {
+		maxCursor = 2
+	}
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.settingsCursor > 0 {
+			m.settingsCursor--
+		}
+		return m, nil
+	case tea.KeyDown:
+		if m.settingsCursor < maxCursor {
+			m.settingsCursor++
+		}
+		return m, nil
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.stage = stageSettings
+		return m, nil
+	case tea.KeyEnter:
+		switch m.settingsCursor {
+		case 0:
+			return m.loadModelPicker()
+		case 1:
+			return m.loadAPIModelEntry(), nil
+		case 2:
+			return m.clearOrchestratorModel()
+		}
+	}
+	return m, nil
+}
+
+// clearOrchestratorModel disables routing by clearing cfg.OrchestratorModel
+// — the "None (disable routing)" entry in stageProviderChoice, only
+// reachable when editing the orchestrator role.
+func (m appModel) clearOrchestratorModel() (tea.Model, tea.Cmd) {
+	m.cfg.OrchestratorModel = ""
+	if err := config.SaveSettings(m.cfg.SettingsPath(), config.Settings{
+		TutorModel:        m.cfg.TutorModel,
+		OpenRouterAPIKey:  m.cfg.OpenRouterAPIKey,
+		OrchestratorModel: "",
+	}); err != nil {
+		m.err = err
+		return m, nil
+	}
+	m.err = nil
+	m.stage = stageSettings
+	return m, nil
+}
+
+// --- stageAPIModelEntry ---
+
+// updateAPIModelEntry handles a single-line unmasked text input for a
+// bare OpenRouter model slug — same rune/backspace shape as
+// updateOpenRouterKeyEntry's key input, unmasked since a model slug
+// isn't a secret. Enter delegates to selectModelOrPromptForKey (already
+// built for handleModelEnter's directly-typed openrouter: path), which
+// handles both "key already available" and "no key yet" correctly
+// without any new logic needed here.
+func (m appModel) updateAPIModelEntry(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.apiModelCursor > 0 {
+			m.apiModelCursor--
+		}
+		return m, nil
+	case tea.KeyDown:
+		if m.apiModelCursor < len(m.apiModelFiltered)-1 {
+			m.apiModelCursor++
+		}
+		return m, nil
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.stage = stageProviderChoice
+		m.apiModelInput = ""
+		m.apiModelFiltered = nil
+		return m, nil
+	case tea.KeyBackspace:
+		if len(m.apiModelInput) > 0 {
+			m.apiModelInput = m.apiModelInput[:len(m.apiModelInput)-1]
+			m.apiModelFiltered = filterModels(suggestedOpenRouterModels, m.apiModelInput)
+			m.apiModelCursor = 0
+		}
+		return m, nil
+	case tea.KeyEnter:
+		if len(m.apiModelFiltered) > 0 {
+			sel := m.apiModelFiltered[m.apiModelCursor]
+			m.apiModelInput = ""
+			m.apiModelFiltered = nil
+			return m.selectModelOrPromptForKey(tutor.OpenRouterModelPrefix + sel)
+		}
+		slug := strings.TrimSpace(m.apiModelInput)
+		if slug == "" {
+			return m, nil
+		}
+		m.apiModelInput = ""
+		return m.selectModelOrPromptForKey(tutor.OpenRouterModelPrefix + slug)
+	case tea.KeyRunes:
+		// "q" with nothing typed yet backs out, matching stageModelPicker's
+		// identical convention (see handleModelEnter's own comment on the
+		// same trade-off for tags that start with "q").
+		if m.apiModelInput == "" && string(msg.Runes) == "q" {
+			m.stage = stageProviderChoice
+			m.apiModelFiltered = nil
+			return m, nil
+		}
+		m.apiModelInput += string(msg.Runes)
+		m.apiModelFiltered = filterModels(suggestedOpenRouterModels, m.apiModelInput)
+		m.apiModelCursor = 0
+		return m, nil
+	}
+	return m, nil
+}
+
 // --- stageModelPicker ---
 
 func (m appModel) updateModelPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -632,7 +956,9 @@ func (m appModel) updateModelPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyEsc, tea.KeyCtrlC:
-		m.stage = stageMain
+		// Back to the provider choice, not stageMain — stageModelPicker
+		// is only reachable via stageProviderChoice -> Local now.
+		m.stage = stageProviderChoice
 		return m, nil
 	case tea.KeyEnter:
 		return m.handleModelEnter()
@@ -642,7 +968,7 @@ func (m appModel) updateModelPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// every rune (including "q") feeds the filter/custom tag
 		// instead, since it might be part of a real model name.
 		if m.modelFilter == "" && string(msg.Runes) == "q" {
-			m.stage = stageMain
+			m.stage = stageProviderChoice
 			return m, nil
 		}
 		m.modelFilter += string(msg.Runes)
@@ -671,9 +997,17 @@ func (m appModel) isLocalModel(name string) bool {
 // the typed filter matches nothing — treats the tag as a candidate:
 // checkModelTag checks it against Ollama and, if it isn't pulled, asks
 // whether to download it (see handleModelDownloadPrompt).
+//
+// An OpenRouterModelPrefix-prefixed tag is intercepted before either
+// path: there's no "pulled locally" concept for a hosted model, and
+// checkModelTag's checkModelFn call is an Ollama /api/tags lookup that
+// would just misreport it as not-pulled.
 func (m appModel) handleModelEnter() (tea.Model, tea.Cmd) {
 	if len(m.modelFiltered) > 0 {
 		sel := m.modelFiltered[m.modelCursor]
+		if strings.HasPrefix(sel, tutor.OpenRouterModelPrefix) {
+			return m.selectModelOrPromptForKey(sel)
+		}
 		if m.isLocalModel(sel) {
 			return m.selectModel(sel)
 		}
@@ -684,7 +1018,27 @@ func (m appModel) handleModelEnter() (tea.Model, tea.Cmd) {
 	if tag == "" {
 		return m, nil
 	}
+	if strings.HasPrefix(tag, tutor.OpenRouterModelPrefix) {
+		return m.selectModelOrPromptForKey(tag)
+	}
 	return m.checkModelTag(tag)
+}
+
+// selectModelOrPromptForKey selects name immediately if an OpenRouter
+// API key is already available (settings.json or OPENROUTER_API_KEY,
+// resolved into cfg by config.Load), otherwise asks for one first via
+// stageOpenRouterKeyEntry — entering it there persists it to
+// settings.json (see updateOpenRouterKeyEntry), so this only ever asks
+// once across sessions, not once per pick.
+func (m appModel) selectModelOrPromptForKey(name string) (tea.Model, tea.Cmd) {
+	if m.cfg.OpenRouterAPIKey != "" {
+		return m.selectModel(name)
+	}
+	m.stage = stageOpenRouterKeyEntry
+	m.openRouterPendingModel = name
+	m.openRouterKeyInput = ""
+	m.modelWarning = ""
+	return m, nil
 }
 
 // checkModelTag checks tag against Ollama: if it's actually already
@@ -734,15 +1088,76 @@ func (m appModel) handleModelDownloadPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 // selectModel persists the pick immediately (same call the pre-merge
 // runModelPicker made in run.go) and updates cfg in place so any
 // exercise/sandbox launched later in this same process uses it right
-// away, without waiting for a fresh Config.Load.
+// away, without waiting for a fresh Config.Load. Selection itself is
+// never blocked on whether the model actually supports real tool
+// calling — checkToolCallingCmd runs that check in the background and
+// only surfaces a warning (toolCallingCheckMsg in Update) if it fails,
+// so a slow/unreachable check can't stall the picker.
+//
+// Which Config field gets written depends on m.settingsEditing (set by
+// updateSettings when the role choice was made) — either branch must
+// carry forward every other field, or the one this call isn't touching
+// would silently get wiped from settings.json on save.
 func (m appModel) selectModel(name string) (tea.Model, tea.Cmd) {
-	m.cfg.TutorModel = name
-	if err := config.SaveSettings(m.cfg.SettingsPath(), config.Settings{TutorModel: name}); err != nil {
+	settings := config.Settings{
+		TutorModel:        m.cfg.TutorModel,
+		OpenRouterAPIKey:  m.cfg.OpenRouterAPIKey,
+		OrchestratorModel: m.cfg.OrchestratorModel,
+	}
+	if m.settingsEditing == settingsTargetOrchestrator {
+		m.cfg.OrchestratorModel = name
+		settings.OrchestratorModel = name
+	} else {
+		m.cfg.TutorModel = name
+		settings.TutorModel = name
+	}
+	if err := config.SaveSettings(m.cfg.SettingsPath(), settings); err != nil {
 		m.err = err
 		return m, nil
 	}
 	m.err = nil
 	m.stage = stageMain
+	m.toolCallingWarning = ""
+	return m, checkToolCallingCmd(name, m.cfg.OpenRouterAPIKey)
+}
+
+// --- stageOpenRouterKeyEntry ---
+
+// updateOpenRouterKeyEntry handles a single-line masked text input for
+// the OpenRouter API key — same rune/backspace shape as modelFilter's
+// handling in updateModelPicker, kept separate rather than shared since
+// this one never filters a list and needs its own Enter/Esc behavior.
+func (m appModel) updateOpenRouterKeyEntry(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyCtrlC:
+		// Back to the provider choice, not stageModelPicker — a single
+		// consistent "cancel returns to the provider choice" behavior
+		// regardless of whether this stage was reached via typing
+		// openrouter: directly in the local picker or via the Settings ->
+		// API path.
+		m.stage = stageProviderChoice
+		m.openRouterPendingModel = ""
+		m.openRouterKeyInput = ""
+		return m, nil
+	case tea.KeyBackspace:
+		if len(m.openRouterKeyInput) > 0 {
+			m.openRouterKeyInput = m.openRouterKeyInput[:len(m.openRouterKeyInput)-1]
+		}
+		return m, nil
+	case tea.KeyEnter:
+		key := strings.TrimSpace(m.openRouterKeyInput)
+		if key == "" {
+			return m, nil
+		}
+		m.cfg.OpenRouterAPIKey = key
+		pending := m.openRouterPendingModel
+		m.openRouterPendingModel = ""
+		m.openRouterKeyInput = ""
+		return m.selectModel(pending)
+	case tea.KeyRunes:
+		m.openRouterKeyInput += string(msg.Runes)
+		return m, nil
+	}
 	return m, nil
 }
 
@@ -769,8 +1184,16 @@ func (m appModel) renderRight() string {
 		return m.renderLanguage()
 	case stageStats:
 		return m.renderStats()
+	case stageSettings:
+		return m.renderSettings()
+	case stageProviderChoice:
+		return m.renderProviderChoice()
 	case stageModelPicker:
 		return m.renderModelPicker()
+	case stageAPIModelEntry:
+		return m.renderAPIModelEntry()
+	case stageOpenRouterKeyEntry:
+		return m.renderOpenRouterKeyEntry()
 	default:
 		return m.renderMain()
 	}
@@ -792,6 +1215,11 @@ func (m appModel) renderMain() string {
 
 	if m.err != nil {
 		b.WriteString(failStyle.Render("  " + m.err.Error()))
+		b.WriteString("\n\n")
+	}
+
+	if m.toolCallingWarning != "" {
+		b.WriteString(hintStyle.Render("  " + m.toolCallingWarning))
 		b.WriteString("\n\n")
 	}
 
@@ -957,6 +1385,130 @@ func (m appModel) renderStats() string {
 	return b.String()
 }
 
+// settingsOptionLabels/settingsOptionDescriptions back updateProviderChoice's
+// base 2-item list and renderProviderChoice's rendering of it (a 3rd,
+// orchestrator-only "None" entry is appended there, not here) — kept
+// together so the list and its descriptions can't drift out of sync.
+var (
+	settingsOptionLabels = []string{"Local (Ollama)", "API (OpenRouter)"}
+	settingsOptionDescs  = []string{
+		"Pick from models pulled on this machine",
+		"Use a hosted model via an OpenRouter API key",
+	}
+)
+
+// settingsRoleLabels/settingsRoleDescs back updateSettings' top-level
+// Worker/Orchestrator role list and renderSettings' rendering of it.
+var (
+	settingsRoleLabels = []string{"Worker model", "Orchestrator model"}
+	settingsRoleDescs  = []string{
+		"Answers coding questions — always required",
+		"Routes turns to the worker, or answers directly — optional",
+	}
+)
+
+func (m appModel) renderSettings() string {
+	var b strings.Builder
+	b.WriteString(hintStyle.Render("Settings"))
+	b.WriteString("\n")
+	b.WriteString(checkDimStyle.Render(fmt.Sprintf("Worker model: %s", m.cfg.TutorModel)))
+	b.WriteString("\n")
+	orchestratorStatus := m.cfg.OrchestratorModel
+	if orchestratorStatus == "" {
+		orchestratorStatus = "none (routing off)"
+	}
+	b.WriteString(checkDimStyle.Render(fmt.Sprintf("Orchestrator model: %s", orchestratorStatus)))
+	b.WriteString("\n\n")
+
+	for i, label := range settingsRoleLabels {
+		if i == m.settingsCursor {
+			b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s", label)))
+			b.WriteString("\n  " + menuSubtitleStyle.Render(settingsRoleDescs[i]))
+		} else {
+			b.WriteString(fmt.Sprintf("  %s", label))
+		}
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString(checkDimStyle.Render("↑/↓ move · enter select · esc back"))
+	return b.String()
+}
+
+// renderProviderChoice renders the Local (Ollama) / API (OpenRouter)
+// choice for whichever role updateSettings picked (m.settingsEditing) —
+// a 3rd "None (disable routing)" entry is appended only when editing the
+// orchestrator. Copies the shared label/desc slices before appending so
+// the orchestrator-only 3rd item never leaks into the worker's list.
+func (m appModel) renderProviderChoice() string {
+	labels := append([]string{}, settingsOptionLabels...)
+	descs := append([]string{}, settingsOptionDescs...)
+	if m.settingsEditing == settingsTargetOrchestrator {
+		labels = append(labels, "None (disable routing)")
+		descs = append(descs, "Answer every turn with the worker model only")
+	}
+
+	var b strings.Builder
+	title := "Worker model"
+	if m.settingsEditing == settingsTargetOrchestrator {
+		title = "Orchestrator model"
+	}
+	b.WriteString(hintStyle.Render(title))
+	b.WriteString("\n\n")
+
+	for i, label := range labels {
+		if i == m.settingsCursor {
+			b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s", label)))
+			b.WriteString("\n  " + menuSubtitleStyle.Render(descs[i]))
+		} else {
+			b.WriteString(fmt.Sprintf("  %s", label))
+		}
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString(checkDimStyle.Render("↑/↓ move · enter select · esc back"))
+	return b.String()
+}
+
+// renderAPIModelEntry's input is unmasked (unlike
+// renderOpenRouterKeyEntry's) — a model slug isn't a secret.
+func (m appModel) renderAPIModelEntry() string {
+	currentModel := m.cfg.TutorModel
+	if m.settingsEditing == settingsTargetOrchestrator {
+		currentModel = m.cfg.OrchestratorModel
+	}
+
+	var b strings.Builder
+	b.WriteString(hintStyle.Render("OpenRouter model"))
+	b.WriteString("\n")
+	b.WriteString(checkDimStyle.Render("pick a suggestion, or type any model slug, e.g. anthropic/claude-3.5-sonnet"))
+	b.WriteString("\n\n")
+
+	b.WriteString(fmt.Sprintf("%s%s", checkDimStyle.Render("› "), m.apiModelInput))
+	b.WriteString("\n\n")
+
+	if len(m.apiModelFiltered) == 0 {
+		b.WriteString(checkDimStyle.Render("no suggested matches -- enter confirms the typed slug above"))
+		b.WriteString("\n")
+	} else {
+		for i, slug := range m.apiModelFiltered {
+			label := slug
+			if tutor.OpenRouterModelPrefix+slug == currentModel {
+				label += "  " + hintStyle.Render("(current)")
+			}
+			if i == m.apiModelCursor {
+				b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s", label)))
+			} else {
+				b.WriteString(fmt.Sprintf("  %s", label))
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	b.WriteString("\n")
+	b.WriteString(checkDimStyle.Render("↑/↓ move · enter select · esc back"))
+	return b.String()
+}
+
 func (m appModel) renderModelPicker() string {
 	var b strings.Builder
 	b.WriteString(hintStyle.Render("Tutor model"))
@@ -1018,5 +1570,24 @@ func (m appModel) renderModelPicker() string {
 
 	b.WriteString("\n")
 	b.WriteString(checkDimStyle.Render("↑/↓ move · enter select · esc back"))
+	return b.String()
+}
+
+// renderOpenRouterKeyEntry shows asterisks in place of the typed key —
+// this is a real secret on screen, unlike everything else the picker
+// handles, so it's masked even though this is a local, single-user TUI.
+func (m appModel) renderOpenRouterKeyEntry() string {
+	var b strings.Builder
+	b.WriteString(hintStyle.Render("OpenRouter API key"))
+	b.WriteString("\n")
+	b.WriteString(checkDimStyle.Render(fmt.Sprintf("needed once, to use %s", m.openRouterPendingModel)))
+	b.WriteString("\n\n")
+
+	b.WriteString(fmt.Sprintf("%s%s", checkDimStyle.Render("› "), strings.Repeat("*", len(m.openRouterKeyInput))))
+	b.WriteString("\n\n")
+
+	b.WriteString(checkDimStyle.Render("saved to settings.json — you won't be asked again"))
+	b.WriteString("\n\n")
+	b.WriteString(checkDimStyle.Render("enter confirm · esc cancel"))
 	return b.String()
 }

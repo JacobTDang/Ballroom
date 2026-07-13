@@ -9,11 +9,15 @@
 package tutor
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
+	"regexp"
+	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/cloudwego/eino/components/model"
+	agentopt "github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 
@@ -24,14 +28,28 @@ import (
 // inside the practice container.
 type Config struct {
 	// OllamaHost is the base URL of the Ollama server (e.g.
-	// http://host.docker.internal:11434).
+	// http://host.docker.internal:11434). Unused when Model is
+	// OpenRouterModelPrefix-prefixed.
 	OllamaHost string
-	// Model is the Ollama model tag to use. Must support Ollama's
-	// structured tool_calls response field — confirmed via
-	// cmd/tutor-spike that qwen2.5-coder:7b does not (it emits
-	// tool-call-shaped JSON as plain text content instead), while
-	// llama3.1:8b does.
+	// Model is the Ollama model tag to use, or an
+	// OpenRouterModelPrefix-prefixed OpenRouter model slug (see
+	// agent.go's newChatModel). Must support the provider's structured
+	// tool_calls response field — confirmed via cmd/tutor-spike that
+	// qwen2.5-coder:7b does not (it emits tool-call-shaped JSON as plain
+	// text content instead), while llama3.1:8b does.
 	Model string
+	// OrchestratorModel, when non-empty, enables per-turn routing: this
+	// model decides (see decideHandoff) whether a turn needs Model's
+	// coding-specialist attention or can be answered directly, and
+	// always handles the comprehension check. Empty (the default) means
+	// no routing at all — Model handles every turn by itself, identical
+	// to this project's behavior before routing existed.
+	OrchestratorModel string
+	// APIKey authenticates OpenRouter requests when Model or
+	// OrchestratorModel is OpenRouterModelPrefix-prefixed; unused
+	// otherwise. One key authenticates every model on an OpenRouter
+	// account, so this stays a single shared field even with two roles.
+	APIKey string
 	// Mode is the tutor_mode (syntax-only / hints-first / full-assist)
 	// selecting the system prompt and whether the comprehension check
 	// runs.
@@ -49,72 +67,174 @@ type Config struct {
 	MaxContextBytes int
 }
 
-// Run drives one tutor session: read a line from stdin, get the agent's
-// reply, print it, repeat until stdin closes. Port of tutor/chat.sh's
-// main() loop — but unlike that version, this never stuffs the solution
-// file into every request; the model calls read_solution_file (and the
-// other 4 tools) itself when it decides it needs to, which is the whole
-// point of this rewrite over the old regex-directive approach.
+// providerEndpoint returns a human-readable description of where a
+// request for model actually goes, for display in the startup banner
+// and "could not reach" error messages — ollamaHost (cfg.OllamaHost) is
+// meaningless (empty, in practice) once model is
+// OpenRouterModelPrefix-prefixed, since that path never touches it (see
+// newChatModel, agent.go). A real bug found live: an OpenRouter session
+// showed "connected to ." and "could not reach :" verbatim before this
+// existed.
+func providerEndpoint(model, ollamaHost string) string {
+	if strings.HasPrefix(model, OpenRouterModelPrefix) {
+		return "OpenRouter"
+	}
+	return ollamaHost
+}
+
+// decideHandoff asks orchestratorCM (a raw chat model, not a
+// react.Agent — no tools needed for a classification call, and
+// avoiding the agent graph means this can't hit the MaxStep issue
+// react.Agent turns can) whether userMessage needs Model's coding-
+// specialist attention. See prompts.go's routingInstruction for the
+// exact instruction and the reasoning behind biasing toward handoff on
+// anything unclear.
+//
+// Defaults to (true, err) on a request failure — same asymmetric-cost
+// reasoning as an ambiguous reply: silently leaving a real code
+// question with the orchestrator on a routing bug is a much worse
+// failure than one unnecessary specialist call.
+func decideHandoff(ctx context.Context, orchestratorCM model.ToolCallingChatModel, userMessage string) (bool, error) {
+	reply, err := orchestratorCM.Generate(ctx, []*schema.Message{
+		schema.SystemMessage(routingInstruction),
+		schema.UserMessage(userMessage),
+	})
+	if err != nil {
+		return true, err
+	}
+	return !strings.HasPrefix(strings.ToUpper(strings.TrimSpace(reply.Content)), "NO"), nil
+}
+
+// Run drives one tutor session as a bubbletea program (model.go's
+// tutorModel) — a scrolling conversation viewport above a
+// dynamically-growing multi-line input box, replacing an earlier
+// hand-rolled raw-ANSI anchored-box implementation
+// (internal/tutor/scrollbox.go, deleted) after it repeatedly broke live:
+// a typed message that wrapped past the box's single reserved content
+// row landed on the terminal's actual last row, triggering the outer
+// terminal's own native scroll — something a manually DECSTBM-confined
+// region has no way to detect or recover from. bubbletea's renderer
+// (already proven bug-free in this codebase's other TUI, internal/tui)
+// owns all cursor positioning instead, so this class of bug can't
+// recur — bubbles/textarea's real per-keystroke height recompute is
+// what makes the input box's growth genuinely dynamic (see model.go's
+// recomputeLayout/estimatedTextareaRows), not a fixed row count.
+//
+// tea.WithInput/tea.WithOutput let this run against any io.Reader/
+// io.Writer, not just a real terminal — cmd/tutor-eval's grounding
+// check and this package's own tests rely on that to drive a real
+// session against a fake stdin.
+//
+// tea.WithMouseCellMotion() claims mouse input for the program — a real
+// bug found live: without it, a mouse wheel scroll over the pane wasn't
+// reported to bubbletea at all, so (when running inside tmux, as this
+// always does in a real practice session) tmux fell back to its own
+// native copy-mode scrollback for the pane instead. That's a dead end
+// for an alt-screen program like this one, which doesn't populate
+// tmux's normal scroll history the way regular shell output does — the
+// user was left unable to scroll up through conversation history at
+// all, seeing only tmux's own copy-mode position indicator over a
+// frozen, uneditable snapshot of the pane. Claiming mouse input here
+// means the wheel now reaches tutorModel.Update's tea.MouseMsg case
+// (forwarded straight to the viewport) instead of ever reaching tmux.
 func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Writer) error {
-	fmt.Fprintf(stdout, "tutor (%s, mode=%s) — connected to %s. Ctrl-D to exit.\n", cfg.Model, cfg.Mode, cfg.OllamaHost)
-
-	cm, err := newChatModel(ctx, cfg)
+	m, err := newTutorModel(ctx, cfg, stderr)
 	if err != nil {
 		return err
 	}
-	tools, err := buildTools(cfg)
+	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(stdin), tea.WithOutput(stdout)).Run()
+	return err
+}
+
+// leakedToolCallPattern matches a reply that describes a tool call as
+// literal JSON text in Content instead of the model making a real eino
+// tool_calls invocation — e.g. `{"name": "read_solution_file", "parameters": {}}`
+// showing up as part of the assistant's visible reply. prompts.go's
+// toolsInstruction already tells the model never to do this, but a
+// real-sample-size repro (12 sessions x 4 turns each against
+// llama3.1:8b) found the leak rate climbs as a conversation goes on
+// regardless: 0/12 on turn 1, up to 5/12 by turn 4. In every observed
+// case the tool name and arguments were well-formed and real (never a
+// hallucinated tool) — the model correctly decided what to call, it
+// just wrote that decision out as text instead of actually calling it.
+// Chasing this further with prompt wording alone risks repeating a
+// known regression (see toolsInstruction's doc comment: a longer
+// instruction fixed a related narration case but measurably hurt
+// tool-calling on unrelated tools) — this is handled as model output
+// the caller must detect and recover from instead.
+var leakedToolCallPattern = regexp.MustCompile(`\{"name"\s*:\s*"[a-zA-Z_]+"`)
+
+func looksLikeLeakedToolCall(content string) bool {
+	return leakedToolCallPattern.MatchString(content)
+}
+
+// leakedToolCallRetryNote is appended as an ephemeral system message
+// (never persisted to history, same pattern as turnMessages' hint-count
+// note) when generateWithLeakRetry needs a second attempt.
+const leakedToolCallRetryNote = "Your last reply described calling a tool by writing out JSON like {\"name\": ...} instead of actually calling it. Try again: call the tool for real this time. Your reply must not contain any JSON or description of what tool you're using — only your real answer, written after you actually have the tool's result."
+
+// leakedToolCallFallbackReply is shown when even the retry leaks (or
+// the retry itself can't reach Ollama) — the user must never be shown
+// raw tool-call JSON, so this is an honest admission instead of a
+// second garbled attempt.
+const leakedToolCallFallbackReply = "Sorry, I wasn't able to get a grounded answer for that just now — could you try asking again?"
+
+// turnFailedFallbackReply is shown in the chat (not just logged to
+// stderr, which the user may never see once bubbletea's alt-screen has
+// taken over the terminal) when a turn's Generate call fails outright — a bad
+// host, a rejected request, an upstream rate limit, anything. A real bug
+// found live: without this, a failed turn printed nothing to stdout at
+// all and just silently moved on to the next prompt, so any transient
+// failure looked exactly like the tutor being completely unresponsive
+// rather than a one-off hiccup worth retrying.
+const turnFailedFallbackReply = "Sorry, I couldn't reach the model just now — please try asking again."
+
+// generateWithLeakRetry wraps agent.Generate with one retry: if the
+// model leaks a fake tool-call JSON blob into its reply instead of
+// making a real tool call (see leakedToolCallPattern), retries once
+// with a corrective note, and falls back to an honest message rather
+// than ever showing the user raw tool-call JSON. The leaked reply is
+// never added to messages/history beyond this one retry attempt, so it
+// can't bias later turns toward repeating the same pattern.
+//
+// opts is threaded into both Generate calls unchanged — in practice this
+// is model.go's buildActivityChannelOption (see startTurn), so a retry's
+// own tool calls stay visible in the same activity feed as the original
+// attempt's, not a separate one. Variadic and additive: the only direct
+// external caller (cmd/tutor-eval, via GenerateWithLeakRetry) passes
+// none, unaffected.
+func generateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*schema.Message, opts ...agentopt.AgentOption) (*schema.Message, error) {
+	reply, err := agent.Generate(ctx, messages, opts...)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	agent, err := newAgent(ctx, cm, tools)
-	if err != nil {
-		return err
-	}
-
-	history := []*schema.Message{schema.SystemMessage(systemPromptForMode(cfg.Mode))}
-	comprehensionCheckPending := wantsComprehensionCheck(cfg.Mode)
-	helpRequestCount := 0
-
-	scanner := bufio.NewScanner(stdin)
-	for {
-		fmt.Fprint(stdout, "> ")
-		if !scanner.Scan() {
-			break
-		}
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-
-		if comprehensionCheckPending {
-			comprehensionCheckPending = false
-			if runComprehensionCheck(ctx, agent, cfg.OllamaHost, cfg.WorkDir, line, &history, stdout, stderr) {
-				continue
-			}
-			// Couldn't reach Ollama for the check — fall through and
-			// handle this message normally below rather than silently
-			// dropping it.
-		}
-
-		helpRequestCount++
-		requestMessages := append(append([]*schema.Message{}, history...), turnMessages(cfg.Mode, helpRequestCount, line)...)
-		reply, err := agent.Generate(ctx, requestMessages)
-		if err != nil {
-			fmt.Fprintf(stderr, "tutor: could not reach %s\n", cfg.OllamaHost)
-			continue
-		}
-
-		fmt.Fprintln(stdout, reply.Content)
-
-		// Persist only the clean (user, assistant reply) pair — no
-		// intermediate tool-call scaffolding — matching chat.sh's
-		// history, which never accumulated the per-turn file context
-		// either.
-		history = append(history, schema.UserMessage(line), schema.AssistantMessage(reply.Content, nil))
+	if !looksLikeLeakedToolCall(reply.Content) {
+		return reply, nil
 	}
 
-	fmt.Fprintln(stdout)
-	return nil
+	retryMessages := append(append([]*schema.Message{}, messages...),
+		schema.AssistantMessage(reply.Content, nil),
+		schema.SystemMessage(leakedToolCallRetryNote),
+	)
+	retryReply, err := agent.Generate(ctx, retryMessages, opts...)
+	if err == nil && !looksLikeLeakedToolCall(retryReply.Content) {
+		return retryReply, nil
+	}
+	return schema.AssistantMessage(leakedToolCallFallbackReply, nil), nil
+}
+
+// GenerateWithLeakRetry is generateWithLeakRetry, exported for
+// cmd/tutor-eval — evaluating tool-calling/mode behavior needs the
+// tutor's real protected Generate path, not a bare agent.Generate call
+// that can fail in ways a real session (which always goes through this)
+// never would surface to a user. A real, newly-found gap: without this,
+// cmd/tutor-eval's own runs showed a hints-first scenario failing ~25%
+// of the time on a leaked fake tool-call JSON — a failure mode that
+// can't actually reach a real user, since Run() always retries and
+// falls back to an honest message instead, but the eval was reporting
+// it as a raw scenario failure anyway.
+func GenerateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*schema.Message) (*schema.Message, error) {
+	return generateWithLeakRetry(ctx, agent, messages)
 }
 
 // turnMessages returns the messages appended to history for one real
@@ -144,49 +264,14 @@ func turnMessages(mode string, helpRequestCount int, line string) []*schema.Mess
 	return []*schema.Message{schema.SystemMessage(note), schema.UserMessage(line)}
 }
 
-// runComprehensionCheck issues one isolated Generate call asking the
-// agent ONLY to restate the problem and ask clarifying questions —
-// deliberately never including userFirstMessage, so there's nothing
-// concrete for the model to answer instead of doing the check (port of
-// tutor/chat.sh's run_comprehension_check; see its header comment for
-// why this is enforced here rather than left to a prompt instruction the
-// model might ignore).
-//
-// The problem statement is injected directly as ephemeral context
-// (readProblemStatement, not a tool call) rather than leaving the model
-// to call read_problem_statement itself. Manual repro testing found the
-// check's combined "call a tool, then restate, then ask questions" task
-// only actually invoked the tool 40-60% of the time regardless of
-// instruction wording/length — well below the ~100% reliability normal
-// single-purpose tool-calling turns get (see cmd/tutor-eval) — and on
-// failure the model would hallucinate a plausible-looking but entirely
-// fabricated tool result instead. This is the one place in the package
-// that still stuffs context directly rather than using a real tool
-// call, deliberately: it's the single highest-stakes moment (every
-// session's first exchange) to get reliably right, and with the content
-// provided directly there's nothing left to call.
-//
-// On success, appends (userFirstMessage, reply) to *history — the
-// caller's real message is the persisted turn, so history reads
-// naturally even though it was never sent to the model in this request —
-// and returns true. Returns false if Ollama couldn't be reached, so the
-// caller falls through to handling userFirstMessage normally instead of
-// dropping it.
-func runComprehensionCheck(ctx context.Context, agent *react.Agent, ollamaHost, workDir, userFirstMessage string, history *[]*schema.Message, stdout, stderr io.Writer) bool {
-	checkMessages := append([]*schema.Message{}, (*history)...)
-	if problem := readProblemStatement(workDir); problem != "" {
-		checkMessages = append(checkMessages, schema.SystemMessage("The exercise's problem statement:\n\n"+problem))
-	}
-	checkMessages = append(checkMessages, schema.UserMessage(comprehensionCheckInstruction))
-
-	reply, err := agent.Generate(ctx, checkMessages)
-	if err != nil {
-		fmt.Fprintf(stderr, "tutor: could not reach %s\n", ollamaHost)
-		return false
-	}
-
-	fmt.Fprintln(stdout, reply.Content)
-
-	*history = append(*history, schema.UserMessage(userFirstMessage), schema.AssistantMessage(reply.Content, nil))
-	return true
+// TurnMessages is turnMessages, exported for cmd/tutor-eval — a real
+// gap found live: cmd/tutor-eval's runScenario built each turn as a
+// bare schema.UserMessage(turn), never including the hint-count note
+// hintsFirstPrompt (prompts.go) explicitly tells the model to trust.
+// That made a hints-first scenario's own eval numbers (5-6/8) look far
+// worse than real production reliability (15/16 in a direct real-Ollama
+// repro through the actual Run() loop) — the eval wasn't testing the
+// real code path.
+func TurnMessages(mode string, helpRequestCount int, line string) []*schema.Message {
+	return turnMessages(mode, helpRequestCount, line)
 }
