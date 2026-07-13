@@ -313,6 +313,44 @@ func TestPulsedCallLines_HeaderTruncatesNotTheEscapeSequence(t *testing.T) {
 	}
 }
 
+// --- toolUsageSummary -- the permanent, settled record of which tools
+// a completed turn used, appended to tutorModel's displayLines (unlike
+// the live activity region, which vanishes entirely once the turn ends).
+
+func TestToolUsageSummary_EmptyForNoCalls(t *testing.T) {
+	if got := toolUsageSummary(nil); got != "" {
+		t.Errorf("toolUsageSummary(nil) = %q, want empty", got)
+	}
+	if got := toolUsageSummary([]activityCall{}); got != "" {
+		t.Errorf("toolUsageSummary([]) = %q, want empty", got)
+	}
+}
+
+func TestToolUsageSummary_OneDoneCallShowsJustTheName(t *testing.T) {
+	calls := []activityCall{{name: "read_solution_file", status: "done", detail: "312 bytes"}}
+	if got := toolUsageSummary(calls); got != "● read_solution_file" {
+		t.Errorf("toolUsageSummary(...) = %q, want just the name, no result detail", got)
+	}
+}
+
+func TestToolUsageSummary_FailedCallShowsFailedSuffix(t *testing.T) {
+	calls := []activityCall{{name: "read_test_output", status: "failed", detail: "no test run yet"}}
+	if got := toolUsageSummary(calls); got != "● read_test_output - failed" {
+		t.Errorf("toolUsageSummary(...) = %q, want the name flagged failed", got)
+	}
+}
+
+func TestToolUsageSummary_MultipleCallsOnePerLineInOrder(t *testing.T) {
+	calls := []activityCall{
+		{name: "read_solution_file", status: "done"},
+		{name: "read_problem_statement", status: "done"},
+	}
+	want := "● read_solution_file\n● read_problem_statement"
+	if got := toolUsageSummary(calls); got != want {
+		t.Errorf("toolUsageSummary(...) = %q, want %q", got, want)
+	}
+}
+
 func TestActivityFeed_ConcurrentStartedFinishedDoNotRace(t *testing.T) {
 	f := &activityFeed{}
 	var wg sync.WaitGroup

@@ -782,6 +782,60 @@ func TestTutorModel_SubmitShowsLiveToolCallActivity(t *testing.T) {
 	}
 }
 
+// TestTutorModel_ToolNameLeftBehindInHistoryAfterTurnCompletes is a
+// regression test for a real feature request: once a turn ends, the
+// live activity region disappears entirely (turnInFlight clears), so
+// there was previously no lasting trace in the conversation that a tool
+// was ever called -- only the final reply remained visible. The tool
+// name must now survive as a permanent part of displayLines, still
+// visible after a later, unrelated turn has happened.
+func TestTutorModel_ToolNameLeftBehindInHistoryAfterTurnCompletes(t *testing.T) {
+	mock := newToolCallOllama(t, "read_solution_file")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+	cfg.WorkDir = t.TempDir()
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "what does my code look like?")
+
+	view := got.viewport.View()
+	if !strings.Contains(view, "read_solution_file") {
+		t.Fatalf("viewport view %q, want the tool name left behind after the turn completed", view)
+	}
+	if !strings.Contains(view, "pong received") {
+		t.Fatalf("viewport view %q, want the final reply too", view)
+	}
+
+	// A later, unrelated turn (no tool calls) must not push the earlier
+	// tool name out of the permanent record.
+	mock2 := newSequencedOllama(t, "a plain reply")
+	cfg2 := testConfig(mock2.URL)
+	cfg2.Mode = exercise.TutorModeSyntaxOnly
+	m2, err := newTutorModel(context.Background(), cfg2, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM2, _ := m2.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m2 = newM2.(tutorModel)
+	m2.displayLines = got.displayLines
+	m2.refreshViewport()
+
+	got2 := submitAndRun(t, m2, "a follow-up question")
+	view2 := got2.viewport.View()
+	if !strings.Contains(view2, "read_solution_file") {
+		t.Errorf("viewport view %q, want the earlier tool name still present after a later turn", view2)
+	}
+	if !strings.Contains(view2, "a plain reply") {
+		t.Errorf("viewport view %q, want the later turn's own reply too", view2)
+	}
+}
+
 // --- Stage 4: remaining regression coverage re-homed from tutor_test.go's
 // old Run()-level suite -- scenarios not already exercised by the Stage
 // 2/3 tests above.

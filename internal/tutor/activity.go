@@ -289,6 +289,26 @@ func pulsedCallLines(c activityCall, phase, cols int) []string {
 	return append([]string{header}, activityOutputLines(c, cols)...)
 }
 
+// toolUsageSummary renders a permanent, settled record of which tools a
+// completed turn used — one plain "● name" line per call, in the order
+// they were made. Unlike the live activity region (which disappears
+// entirely once the turn ends, see tutorModel.activityView), this gets
+// appended to displayLines so the conversation history keeps showing
+// what the model actually did, not just its final reply — a real
+// feature request from live use ("leave behind the toolname it used").
+// Empty for a turn that made no tool calls at all, so a normal
+// reasoning-only turn doesn't get a spurious blank entry.
+func toolUsageSummary(calls []activityCall) string {
+	if len(calls) == 0 {
+		return ""
+	}
+	lines := make([]string, len(calls))
+	for i, c := range calls {
+		lines[i] = "● " + activityCallHeader(c)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // activityPulseInterval is a var (not const) so tests can substitute a
 // much shorter cadence instead of waiting on the real ~120ms production
 // interval — same pattern this package already uses for

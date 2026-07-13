@@ -304,9 +304,21 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case turnCompleteMsg:
 		m.turnInFlight = false
+		calls := m.activeCalls
 		m.activeCalls = nil
 		m.helpRequestCount = msg.helpRequestCount
 		m.recomputeLayout()
+		// toolUsageSummary leaves a permanent record of which tools this
+		// turn used -- the live activity region above is about to
+		// disappear entirely now that turnInFlight is false, so without
+		// this the conversation history would show no trace a tool was
+		// ever called, only the final reply. Applies on both success and
+		// failure: a turn can call tools and still fail on the final
+		// reply, and that's still worth showing. Empty (a no-op append)
+		// for a turn that made no tool calls at all.
+		if summary := toolUsageSummary(calls); summary != "" {
+			m.displayLines = append(m.displayLines, summary)
+		}
 		if msg.err != nil {
 			fmt.Fprintf(m.stderr, "tutor: could not reach %s: %v\n", msg.endpoint, msg.err)
 			m.displayLines = append(m.displayLines, turnFailedFallbackReply)
