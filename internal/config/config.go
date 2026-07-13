@@ -90,11 +90,20 @@ type Config struct {
 	DBPath       string // DataDir/tracker.db
 	DockerImage  string
 	TutorModel   string // Ollama tag, or an "openrouter:"-prefixed model slug (see internal/tutor.OpenRouterModelPrefix), passed to the container as TUTOR_MODEL
+	// OrchestratorModel, when non-empty, enables per-turn routing (see
+	// internal/tutor.Run): this model decides whether a turn needs
+	// TutorModel's coding-specialist attention or can be answered
+	// directly. Empty (the default) means no routing at all -- TutorModel
+	// handles every turn by itself, identical to this project's
+	// single-model behavior before routing existed.
+	OrchestratorModel string
 	// OpenRouterAPIKey authenticates OpenRouter requests when TutorModel
-	// is openrouter:-prefixed; unused otherwise. Resolved in Load: the
-	// persisted settings.json value if present, else the
-	// OPENROUTER_API_KEY env var, else empty (not an error at Load
-	// time -- only matters if an openrouter: model is actually used).
+	// or OrchestratorModel is openrouter:-prefixed; unused otherwise.
+	// Resolved in Load: the persisted settings.json value if present,
+	// else the OPENROUTER_API_KEY env var, else empty (not an error at
+	// Load time -- only matters if an openrouter: model is actually
+	// used). One key authenticates every model on the account, so this
+	// stays a single shared field even with two model roles.
 	OpenRouterAPIKey string
 }
 
@@ -102,6 +111,11 @@ type Config struct {
 // last model picked in the TUI's model picker.
 type Settings struct {
 	TutorModel string `json:"tutor_model"`
+	// OrchestratorModel mirrors Config.OrchestratorModel -- see its doc
+	// comment. No env-var fallback (unlike OpenRouterAPIKey): this isn't
+	// a secret, and routing being on/off should be an explicit, durable
+	// choice rather than something that flips based on ambient env vars.
+	OrchestratorModel string `json:"orchestrator_model"`
 	// OpenRouterAPIKey is saved here so the TUI's model picker only ever
 	// needs to ask for it once (see internal/tui/app.go's key-entry
 	// stage) instead of requiring OPENROUTER_API_KEY to be exported in
@@ -190,6 +204,7 @@ func Load() (Config, error) {
 	if cfg.TutorModel == "" {
 		cfg.TutorModel = DefaultTutorModel
 	}
+	cfg.OrchestratorModel = settings.OrchestratorModel
 	cfg.OpenRouterAPIKey = settings.OpenRouterAPIKey
 	if cfg.OpenRouterAPIKey == "" {
 		cfg.OpenRouterAPIKey = os.Getenv("OPENROUTER_API_KEY")

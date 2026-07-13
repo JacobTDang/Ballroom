@@ -24,7 +24,7 @@ func TestAgent_RoundTripsThroughMockOllama(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := Config{OllamaHost: mock.URL, Model: "test-model"}
-	cm, err := newChatModel(ctx, cfg)
+	cm, err := newChatModel(ctx, cfg.Model, cfg.OllamaHost, cfg.APIKey)
 	if err != nil {
 		t.Fatalf("newChatModel: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestNewChatModel_TimesOutIfOllamaHangs(t *testing.T) {
 
 	ctx := context.Background()
 	cfg := Config{OllamaHost: mock.URL, Model: "test-model"}
-	cm, err := newChatModel(ctx, cfg)
+	cm, err := newChatModel(ctx, cfg.Model, cfg.OllamaHost, cfg.APIKey)
 	if err != nil {
 		t.Fatalf("newChatModel: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestNewAgent_SurvivesManyToolCallRoundsWithinRaisedMaxStep(t *testing.T) {
 
 	ctx := context.Background()
 	cfg := Config{OllamaHost: mock.URL, Model: "test-model"}
-	cm, err := newChatModel(ctx, cfg)
+	cm, err := newChatModel(ctx, cfg.Model, cfg.OllamaHost, cfg.APIKey)
 	if err != nil {
 		t.Fatalf("newChatModel: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestNewChatModel_RoutesOpenRouterPrefixedModelToOpenAICompatibleClient(t *t
 
 	ctx := context.Background()
 	cfg := Config{Model: OpenRouterModelPrefix + "anthropic/claude-3.5-sonnet", APIKey: "sk-test-key"}
-	cm, err := newChatModel(ctx, cfg)
+	cm, err := newChatModel(ctx, cfg.Model, cfg.OllamaHost, cfg.APIKey)
 	if err != nil {
 		t.Fatalf("newChatModel: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestGenerateWithLeakRetry_ExportedWrapperProtectsAgainstLeaks(t *testing.T)
 	ctx := context.Background()
 
 	cfg := Config{OllamaHost: mock.URL, Model: "test-model"}
-	cm, err := newChatModel(ctx, cfg)
+	cm, err := newChatModel(ctx, cfg.Model, cfg.OllamaHost, cfg.APIKey)
 	if err != nil {
 		t.Fatalf("newChatModel: %v", err)
 	}

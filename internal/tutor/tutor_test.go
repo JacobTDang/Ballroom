@@ -578,3 +578,194 @@ func TestTurnMessages_HintsFirstRepeatRequestNotesCount(t *testing.T) {
 		t.Errorf("messages[0].Content = %q, want it to explicitly tell the model not to ask the user to confirm", msgs[0].Content)
 	}
 }
+
+// --- decideHandoff (orchestrator/worker routing) ---
+
+func TestDecideHandoff_YesRepliesMeanHandoff(t *testing.T) {
+	mock := newSequencedOllama(t, "YES")
+	ctx := context.Background()
+	cm, err := newChatModel(ctx, "test-model", mock.URL, "")
+	if err != nil {
+		t.Fatalf("newChatModel: %v", err)
+	}
+
+	handoff, err := decideHandoff(ctx, cm, "how do I solve this with a hash map")
+	if err != nil {
+		t.Fatalf("decideHandoff: %v", err)
+	}
+	if !handoff {
+		t.Error("handoff = false, want true for a YES reply")
+	}
+}
+
+func TestDecideHandoff_NoRepliesMeanNoHandoff(t *testing.T) {
+	mock := newSequencedOllama(t, "no")
+	ctx := context.Background()
+	cm, err := newChatModel(ctx, "test-model", mock.URL, "")
+	if err != nil {
+		t.Fatalf("newChatModel: %v", err)
+	}
+
+	handoff, err := decideHandoff(ctx, cm, "hi")
+	if err != nil {
+		t.Fatalf("decideHandoff: %v", err)
+	}
+	if handoff {
+		t.Error("handoff = true, want false for a (lowercase) no reply")
+	}
+}
+
+func TestDecideHandoff_NoWithTrailingTextStillMeansNoHandoff(t *testing.T) {
+	mock := newSequencedOllama(t, "No, this is just a greeting.")
+	ctx := context.Background()
+	cm, err := newChatModel(ctx, "test-model", mock.URL, "")
+	if err != nil {
+		t.Fatalf("newChatModel: %v", err)
+	}
+
+	handoff, err := decideHandoff(ctx, cm, "hi there")
+	if err != nil {
+		t.Fatalf("decideHandoff: %v", err)
+	}
+	if handoff {
+		t.Error("handoff = true, want false -- reply starts with No even with trailing explanation")
+	}
+}
+
+func TestDecideHandoff_AmbiguousReplyDefaultsToHandoff(t *testing.T) {
+	mock := newSequencedOllama(t, "I'm not sure, could go either way")
+	ctx := context.Background()
+	cm, err := newChatModel(ctx, "test-model", mock.URL, "")
+	if err != nil {
+		t.Fatalf("newChatModel: %v", err)
+	}
+
+	handoff, err := decideHandoff(ctx, cm, "something ambiguous")
+	if err != nil {
+		t.Fatalf("decideHandoff: %v", err)
+	}
+	if !handoff {
+		t.Error("handoff = false, want true -- anything not clearly starting with No defaults to handoff (safer to over-use the specialist)")
+	}
+}
+
+func TestDecideHandoff_RequestErrorDefaultsToHandoffAndReturnsError(t *testing.T) {
+	ctx := context.Background()
+	cm, err := newChatModel(ctx, "test-model", "http://127.0.0.1:1", "")
+	if err != nil {
+		t.Fatalf("newChatModel: %v", err)
+	}
+
+	handoff, err := decideHandoff(ctx, cm, "hi")
+	if err == nil {
+		t.Fatal("expected an error for an unreachable host")
+	}
+	if !handoff {
+		t.Error("handoff = false, want true -- a routing failure must default to handoff, not silently leave the turn unanswered")
+	}
+}
+
+// --- Run() orchestrator/worker routing (single mock server; the
+// worker and orchestrator model NAMES differ, so which "role" made a
+// given request is verified via sequencedOllama's own recorded
+// req.Model, not separate servers) ---
+
+func TestRun_NoRoutingWhenOrchestratorModelEmpty(t *testing.T) {
+	// OrchestratorModel unset (the zero value, matching every config
+	// this package built before routing existed) must never make an
+	// extra routing-decision call -- exactly one request per turn, all
+	// against cfg.Model, identical to pre-routing behavior.
+	mock := newSequencedOllama(t, "the only reply")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly // skip the comprehension check
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("hi\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	reqs := mock.allRequests()
+	if len(reqs) != 1 {
+		t.Fatalf("expected exactly 1 request (no routing decision), got %d: %+v", len(reqs), reqs)
+	}
+	if reqs[0].Model != "test-model" {
+		t.Errorf("request model = %q, want %q", reqs[0].Model, "test-model")
+	}
+}
+
+func TestRun_RoutesToOrchestratorWhenDecisionIsNo(t *testing.T) {
+	mock := newSequencedOllama(t, "NO", "orchestrator answered")
+	cfg := testConfig(mock.URL)
+	cfg.Model = "worker-model"
+	cfg.OrchestratorModel = "orchestrator-model"
+	cfg.Mode = exercise.TutorModeSyntaxOnly // skip the comprehension check
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("hi\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !strings.Contains(stripAnsi(stdout.String()), "orchestrator answered") {
+		t.Errorf("stdout = %q, want the orchestrator's reply", stdout.String())
+	}
+	reqs := mock.allRequests()
+	if len(reqs) != 2 {
+		t.Fatalf("expected exactly 2 requests (routing decision + orchestrator answer), got %d: %+v", len(reqs), reqs)
+	}
+	for i, req := range reqs {
+		if req.Model != "orchestrator-model" {
+			t.Errorf("request[%d].Model = %q, want %q -- worker must never be touched when the decision is No", i, req.Model, "orchestrator-model")
+		}
+	}
+}
+
+func TestRun_RoutesToWorkerWhenDecisionIsYes(t *testing.T) {
+	mock := newSequencedOllama(t, "YES", "worker answered")
+	cfg := testConfig(mock.URL)
+	cfg.Model = "worker-model"
+	cfg.OrchestratorModel = "orchestrator-model"
+	cfg.Mode = exercise.TutorModeSyntaxOnly // skip the comprehension check
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("how do I solve this\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !strings.Contains(stripAnsi(stdout.String()), "worker answered") {
+		t.Errorf("stdout = %q, want the worker's reply", stdout.String())
+	}
+	reqs := mock.allRequests()
+	if len(reqs) != 2 {
+		t.Fatalf("expected exactly 2 requests (routing decision + worker answer), got %d: %+v", len(reqs), reqs)
+	}
+	if reqs[0].Model != "orchestrator-model" {
+		t.Errorf("request[0].Model = %q, want %q -- the routing decision itself always goes to the orchestrator", reqs[0].Model, "orchestrator-model")
+	}
+	if reqs[1].Model != "worker-model" {
+		t.Errorf("request[1].Model = %q, want %q -- a Yes decision must hand off to the worker", reqs[1].Model, "worker-model")
+	}
+}
+
+func TestRun_ComprehensionCheckAlwaysUsesOrchestratorWhenRoutingEnabled(t *testing.T) {
+	// The comprehension check is a fixed, generic, single-purpose task
+	// (restate + ask questions) -- it never goes through decideHandoff,
+	// regardless of what the user's first message looks like.
+	mock := newSequencedOllama(t, "restated problem + questions")
+	cfg := testConfig(mock.URL)
+	cfg.Model = "worker-model"
+	cfg.OrchestratorModel = "orchestrator-model"
+	cfg.Mode = exercise.TutorModeFullAssist // wants the comprehension check
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("hi\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	reqs := mock.allRequests()
+	if len(reqs) != 1 {
+		t.Fatalf("expected exactly 1 request (the comprehension check, no routing decision), got %d: %+v", len(reqs), reqs)
+	}
+	if reqs[0].Model != "orchestrator-model" {
+		t.Errorf("request[0].Model = %q, want %q -- the comprehension check always uses the orchestrator", reqs[0].Model, "orchestrator-model")
+	}
+}

@@ -317,3 +317,60 @@ func TestLoad_OpenRouterAPIKeyEmptyWhenNeitherSourceHasIt(t *testing.T) {
 		t.Errorf("OpenRouterAPIKey = %q, want empty", cfg.OpenRouterAPIKey)
 	}
 }
+
+func TestSaveSettings_ThenLoadRoundTripsOrchestratorModel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	want := Settings{TutorModel: "openrouter:openai/gpt-oss-120b:free", OrchestratorModel: "openrouter:nvidia/nemotron-3-nano-30b-a3b:free"}
+	if err := SaveSettings(path, want); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	got, err := LoadSettings(path)
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if got != want {
+		t.Errorf("LoadSettings = %+v, want %+v", got, want)
+	}
+}
+
+func TestLoad_ReadsPersistedOrchestratorModel(t *testing.T) {
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	t.Setenv("PRACTICE_ROOT", resolved)
+
+	settingsPath := filepath.Join(resolved, "data", "settings.json")
+	if err := SaveSettings(settingsPath, Settings{TutorModel: "llama3:8b", OrchestratorModel: "openrouter:nvidia/nemotron-3-nano-30b-a3b:free"}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OrchestratorModel != "openrouter:nvidia/nemotron-3-nano-30b-a3b:free" {
+		t.Errorf("OrchestratorModel = %q, want %q", cfg.OrchestratorModel, "openrouter:nvidia/nemotron-3-nano-30b-a3b:free")
+	}
+}
+
+func TestLoad_OrchestratorModelEmptyByDefault(t *testing.T) {
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	t.Setenv("PRACTICE_ROOT", resolved)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OrchestratorModel != "" {
+		t.Errorf("OrchestratorModel = %q, want empty (routing off by default)", cfg.OrchestratorModel)
+	}
+}

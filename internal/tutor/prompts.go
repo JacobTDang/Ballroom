@@ -122,6 +122,18 @@ const (
 	// it's specific to the model reading a bare greeting as satisfying
 	// the whole instruction rather than just its first clause.
 	comprehensionCheckInstruction = "Respond to the user's next message naturally first (briefly, if it's just a greeting or small talk). Both parts are required in the same reply, even if their message is only a bare greeting with nothing else to respond to: after that brief natural response, you must ALSO, in the same reply, use the problem statement above to restate the problem in your own words in 1-2 sentences and ask 1-2 short clarifying questions about it (constraints, edge cases, expected output). Never end your reply after just the greeting. Do not ask the user anything about your own conversation state (e.g. whether this is their first question) — that is tracked for you separately. Do not answer, hint, or give code yet."
+
+	// routingInstruction drives decideHandoff (tutor.go) — a single
+	// yes/no classification call on the orchestrator's raw chat model
+	// (no tools, no react.Agent), asking only whether the coding
+	// specialist should handle this turn. Deliberately biased toward
+	// YES on anything unclear: a wrong "No" silently leaves a real code
+	// question with the weaker/cheaper model with no way for the user
+	// to notice, while a wrong "Yes" just costs one unnecessary
+	// specialist call — asymmetric costs, so the instruction (and
+	// decideHandoff's own error/parse-failure fallback) both lean
+	// toward the safer side.
+	routingInstruction = "You are deciding whether a coding-interview tutor question needs a coding specialist's attention. Reply with exactly one word: NO if the message is a greeting, small talk, or a general clarifying question that doesn't require reading or reasoning about code. Reply YES for anything about the problem's approach, algorithm, code review, debugging, or hints. When unsure, reply YES."
 )
 
 // systemPromptForMode returns the tutor's persona/rules for mode,

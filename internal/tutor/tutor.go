@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 
@@ -37,8 +38,17 @@ type Config struct {
 	// qwen2.5-coder:7b does not (it emits tool-call-shaped JSON as plain
 	// text content instead), while llama3.1:8b does.
 	Model string
-	// APIKey authenticates OpenRouter requests when Model is
-	// OpenRouterModelPrefix-prefixed; unused otherwise.
+	// OrchestratorModel, when non-empty, enables per-turn routing: this
+	// model decides (see decideHandoff) whether a turn needs Model's
+	// coding-specialist attention or can be answered directly, and
+	// always handles the comprehension check. Empty (the default) means
+	// no routing at all — Model handles every turn by itself, identical
+	// to this project's behavior before routing existed.
+	OrchestratorModel string
+	// APIKey authenticates OpenRouter requests when Model or
+	// OrchestratorModel is OpenRouterModelPrefix-prefixed; unused
+	// otherwise. One key authenticates every model on an OpenRouter
+	// account, so this stays a single shared field even with two roles.
 	APIKey string
 	// Mode is the tutor_mode (syntax-only / hints-first / full-assist)
 	// selecting the system prompt and whether the comprehension check
@@ -70,6 +80,29 @@ func providerEndpoint(model, ollamaHost string) string {
 		return "OpenRouter"
 	}
 	return ollamaHost
+}
+
+// decideHandoff asks orchestratorCM (a raw chat model, not a
+// react.Agent — no tools needed for a classification call, and
+// avoiding the agent graph means this can't hit the MaxStep issue
+// react.Agent turns can) whether userMessage needs Model's coding-
+// specialist attention. See prompts.go's routingInstruction for the
+// exact instruction and the reasoning behind biasing toward handoff on
+// anything unclear.
+//
+// Defaults to (true, err) on a request failure — same asymmetric-cost
+// reasoning as an ambiguous reply: silently leaving a real code
+// question with the orchestrator on a routing bug is a much worse
+// failure than one unnecessary specialist call.
+func decideHandoff(ctx context.Context, orchestratorCM model.ToolCallingChatModel, userMessage string) (bool, error) {
+	reply, err := orchestratorCM.Generate(ctx, []*schema.Message{
+		schema.SystemMessage(routingInstruction),
+		schema.UserMessage(userMessage),
+	})
+	if err != nil {
+		return true, err
+	}
+	return !strings.HasPrefix(strings.ToUpper(strings.TrimSpace(reply.Content)), "NO"), nil
 }
 
 // Run drives one tutor session: read a line from stdin, get the agent's
@@ -118,20 +151,48 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 		defer stopWatch()
 	}
 
-	endpoint := providerEndpoint(cfg.Model, cfg.OllamaHost)
-	fmt.Fprintf(stdout, "tutor (%s, mode=%s) — connected to %s. Ctrl-D to exit.\n", cfg.Model, cfg.Mode, endpoint)
-
-	cm, err := newChatModel(ctx, cfg)
-	if err != nil {
-		return err
+	workerEndpoint := providerEndpoint(cfg.Model, cfg.OllamaHost)
+	routingEnabled := cfg.OrchestratorModel != ""
+	if routingEnabled {
+		orchestratorEndpoint := providerEndpoint(cfg.OrchestratorModel, cfg.OllamaHost)
+		fmt.Fprintf(stdout, "tutor (worker=%s, orchestrator=%s, mode=%s) — connected to %s / %s. Ctrl-D to exit.\n", cfg.Model, cfg.OrchestratorModel, cfg.Mode, workerEndpoint, orchestratorEndpoint)
+	} else {
+		fmt.Fprintf(stdout, "tutor (%s, mode=%s) — connected to %s. Ctrl-D to exit.\n", cfg.Model, cfg.Mode, workerEndpoint)
 	}
+
 	tools, err := buildTools(cfg)
 	if err != nil {
 		return err
 	}
-	agent, err := newAgent(ctx, cm, tools)
+
+	workerCM, err := newChatModel(ctx, cfg.Model, cfg.OllamaHost, cfg.APIKey)
 	if err != nil {
 		return err
+	}
+	workerAgent, err := newAgent(ctx, workerCM, tools)
+	if err != nil {
+		return err
+	}
+
+	// orchestratorCM/orchestratorAgent stay nil when routing is
+	// disabled (cfg.OrchestratorModel == "") -- every use below is
+	// guarded by routingEnabled, so a session with no orchestrator
+	// configured behaves exactly as it did before routing existed: one
+	// model, one agent, every turn (including the comprehension check)
+	// goes through workerAgent.
+	var orchestratorCM model.ToolCallingChatModel
+	var orchestratorAgent *react.Agent
+	var orchestratorEndpoint string
+	if routingEnabled {
+		orchestratorEndpoint = providerEndpoint(cfg.OrchestratorModel, cfg.OllamaHost)
+		orchestratorCM, err = newChatModel(ctx, cfg.OrchestratorModel, cfg.OllamaHost, cfg.APIKey)
+		if err != nil {
+			return err
+		}
+		orchestratorAgent, err = newAgent(ctx, orchestratorCM, tools)
+		if err != nil {
+			return err
+		}
 	}
 
 	history := []*schema.Message{schema.SystemMessage(systemPromptForMode(cfg.Mode))}
@@ -191,7 +252,15 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 
 		if comprehensionCheckPending {
 			comprehensionCheckPending = false
-			if runComprehensionCheck(ctx, agent, endpoint, cfg.WorkDir, line, &history, stdout, stderr, drainResize) {
+			// Always the orchestrator when routing is enabled -- it's a
+			// fixed, generic, single-purpose task (restate + ask
+			// questions) that never needs the coding specialist, so
+			// there's no decideHandoff call for it specifically.
+			checkAgent, checkEndpoint := workerAgent, workerEndpoint
+			if routingEnabled {
+				checkAgent, checkEndpoint = orchestratorAgent, orchestratorEndpoint
+			}
+			if runComprehensionCheck(ctx, checkAgent, checkEndpoint, cfg.WorkDir, line, &history, stdout, stderr, drainResize) {
 				continue
 			}
 			// Couldn't reach the provider for the check — fall through
@@ -199,9 +268,25 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 			// silently dropping it.
 		}
 
+		turnAgent, turnEndpoint := workerAgent, workerEndpoint
+		if routingEnabled {
+			handoff, err := decideHandoff(ctx, orchestratorCM, line)
+			if err != nil {
+				// Doesn't abort the turn -- decideHandoff already
+				// defaulted to handoff (true) on this same error, so
+				// the turn still gets answered by the specialist; this
+				// is just visibility into why, matching every other
+				// "log the real error, keep going" spot in this file.
+				fmt.Fprintf(stderr, "tutor: routing decision failed, defaulting to handoff: %v\n", err)
+			}
+			if !handoff {
+				turnAgent, turnEndpoint = orchestratorAgent, orchestratorEndpoint
+			}
+		}
+
 		helpRequestCount++
 		requestMessages := append(append([]*schema.Message{}, history...), turnMessages(cfg.Mode, helpRequestCount, line)...)
-		reply, err := generateWithLeakRetry(ctx, agent, requestMessages)
+		reply, err := generateWithLeakRetry(ctx, turnAgent, requestMessages)
 		if err != nil {
 			// The real err is included, not just the endpoint -- a real
 			// bug found live: "could not reach" reads as a network
@@ -213,7 +298,7 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 			// Showing only the generic message sent a live debugging
 			// session chasing a nonexistent Docker-networking problem
 			// instead of straight to the actual cause.
-			fmt.Fprintf(stderr, "tutor: could not reach %s: %v\n", endpoint, err)
+			fmt.Fprintf(stderr, "tutor: could not reach %s: %v\n", turnEndpoint, err)
 			continue
 		}
 

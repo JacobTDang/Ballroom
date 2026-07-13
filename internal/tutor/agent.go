@@ -41,12 +41,21 @@ const OpenRouterModelPrefix = "openrouter:"
 // than hardcoded.
 var openRouterBaseURL = "https://openrouter.ai/api/v1"
 
-// newChatModel builds the chat model the agent calls — Ollama-backed by
-// default, or OpenRouter (an OpenAI-compatible API) when cfg.Model has
-// the OpenRouterModelPrefix. Returns the interface type (not either
+// newChatModel builds a chat model — Ollama-backed by default, or
+// OpenRouter (an OpenAI-compatible API) when modelName has the
+// OpenRouterModelPrefix. Returns the interface type (not either
 // concrete *ollama.ChatModel or *openai.ChatModel) since callers
-// (newAgent, and eventually CheckToolCalling) only ever need
-// model.ToolCallingChatModel — both concrete types satisfy it.
+// (newAgent, CheckToolCalling) only ever need model.ToolCallingChatModel
+// — both concrete types satisfy it.
+//
+// Takes modelName/ollamaHost/apiKey directly rather than a whole Config
+// so it can build a chat model for either role once orchestrator/worker
+// routing exists (internal/tutor.Run — a session may need two chat
+// models, only one of which corresponds to cfg.Model): ollamaHost and
+// apiKey are shared across both roles regardless (one local Ollama
+// server, one OpenRouter account key, confirmed live this session --
+// "one key works for all models"), only the model name actually
+// differs per role.
 //
 // Temperature matches tutor/chat.sh's previous options.temperature —
 // kept low so the tutor's tone/behavior stays consistent across turns
@@ -54,12 +63,12 @@ var openRouterBaseURL = "https://openrouter.ai/api/v1"
 // Ollama path for now; openai.ChatModelConfig's equivalent (Temperature
 // *float32) can be wired the same way if OpenRouter's default proves
 // too high-variance in practice.
-func newChatModel(ctx context.Context, cfg Config) (model.ToolCallingChatModel, error) {
-	if strings.HasPrefix(cfg.Model, OpenRouterModelPrefix) {
+func newChatModel(ctx context.Context, modelName, ollamaHost, apiKey string) (model.ToolCallingChatModel, error) {
+	if strings.HasPrefix(modelName, OpenRouterModelPrefix) {
 		cm, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
 			BaseURL: openRouterBaseURL,
-			APIKey:  cfg.APIKey,
-			Model:   strings.TrimPrefix(cfg.Model, OpenRouterModelPrefix),
+			APIKey:  apiKey,
+			Model:   strings.TrimPrefix(modelName, OpenRouterModelPrefix),
 			Timeout: ollamaRequestTimeout,
 		})
 		if err != nil {
@@ -69,9 +78,9 @@ func newChatModel(ctx context.Context, cfg Config) (model.ToolCallingChatModel, 
 	}
 
 	cm, err := ollama.NewChatModel(ctx, &ollama.ChatModelConfig{
-		BaseURL: cfg.OllamaHost,
+		BaseURL: ollamaHost,
 		Timeout: ollamaRequestTimeout,
-		Model:   cfg.Model,
+		Model:   modelName,
 		Options: &ollama.Options{Temperature: 0.2},
 	})
 	if err != nil {

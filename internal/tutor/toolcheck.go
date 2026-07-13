@@ -31,7 +31,7 @@ type pingArgs struct {
 func CheckToolCalling(ollamaHost, model, apiKey string) (bool, error) {
 	ctx := context.Background()
 
-	cm, err := newChatModel(ctx, Config{OllamaHost: ollamaHost, Model: model, APIKey: apiKey})
+	cm, err := newChatModel(ctx, model, ollamaHost, apiKey)
 	if err != nil {
 		return false, fmt.Errorf("tutor: check tool calling: %w", err)
 	}
