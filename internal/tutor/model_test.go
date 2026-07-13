@@ -3,6 +3,10 @@ package tutor
 import (
 	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -606,5 +610,370 @@ func TestTutorModel_SubmitShowsLiveToolCallActivity(t *testing.T) {
 	}
 	if !strings.Contains(m.viewport.View(), "pong received") {
 		t.Errorf("viewport view %q, want the final reply", m.viewport.View())
+	}
+}
+
+// --- Stage 4: remaining regression coverage re-homed from tutor_test.go's
+// old Run()-level suite -- scenarios not already exercised by the Stage
+// 2/3 tests above.
+
+func TestTutorModel_ErrorMessageIncludesRealUnderlyingDetail(t *testing.T) {
+	// Ollama's own real error responses are JSON with an "error" field
+	// (see eino-contrib/ollama/api's checkError), not a plain-text body --
+	// matching that shape here so the client actually decodes the message
+	// instead of failing on JSON unmarshal first. Regression test for a
+	// real bug found live: a model picked without real tool-calling
+	// support made Ollama reject every request with 400 "does not support
+	// tools", but a generic "could not reach <host>" message swallowed
+	// that detail entirely.
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"does not support tools"}`))
+	}))
+	defer mock.Close()
+
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	var stderr strings.Builder
+	m, err := newTutorModel(context.Background(), cfg, &stderr)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	submitAndRun(t, m, "hello")
+
+	got := stderr.String()
+	if !strings.Contains(got, "could not reach") {
+		t.Errorf("stderr = %q, want the generic message preserved", got)
+	}
+	if !strings.Contains(got, "does not support tools") {
+		t.Errorf("stderr = %q, want the real underlying error detail included, not just the generic host message", got)
+	}
+}
+
+func TestTutorModel_ComprehensionCheckErrorMessageIncludesRealUnderlyingDetail(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"does not support tools"}`))
+	}))
+	defer mock.Close()
+
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeFullAssist // wants the comprehension check
+
+	var stderr strings.Builder
+	m, err := newTutorModel(context.Background(), cfg, &stderr)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	submitAndRun(t, m, "hi")
+
+	got := stderr.String()
+	if !strings.Contains(got, "could not reach") || !strings.Contains(got, "does not support tools") {
+		t.Errorf("stderr = %q, want the real underlying error detail included", got)
+	}
+}
+
+// TestTutorModel_OpenRouterModelShowsOpenRouterInBannerAndErrors is a
+// regression test for a real bug found live (via a real OpenRouter
+// session): the banner and error messages printed cfg.OllamaHost
+// directly, which is meaningless -- empty, in practice -- for an
+// OpenRouterModelPrefix-prefixed model.
+func TestTutorModel_OpenRouterModelShowsOpenRouterInBannerAndErrors(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+	}))
+	defer mock.Close()
+
+	origBaseURL := openRouterBaseURL
+	openRouterBaseURL = mock.URL
+	defer func() { openRouterBaseURL = origBaseURL }()
+
+	cfg := testConfig("") // OllamaHost deliberately empty/unused for this path
+	cfg.Model = OpenRouterModelPrefix + "some/model"
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	var stderr strings.Builder
+	m, err := newTutorModel(context.Background(), cfg, &stderr)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	if !strings.Contains(m.banner, "connected to OpenRouter") {
+		t.Errorf("banner = %q, want it to say \"connected to OpenRouter\"", m.banner)
+	}
+
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+	submitAndRun(t, m, "hello")
+
+	errOut := stderr.String()
+	if !strings.Contains(errOut, "could not reach OpenRouter:") {
+		t.Errorf("stderr = %q, want \"could not reach OpenRouter:\", not the empty/meaningless OllamaHost", errOut)
+	}
+	if !strings.Contains(errOut, "rate limited") {
+		t.Errorf("stderr = %q, want the real underlying error detail included too", errOut)
+	}
+}
+
+func TestTutorModel_ComprehensionCheckIncludesUsersRealFirstMessage(t *testing.T) {
+	// A real bug found live: an earlier version excluded the user's actual
+	// first message from the comprehension-check request, so literally
+	// any first message -- including a plain "hi" -- got back the exact
+	// same canned restate-and-ask-questions reply with no acknowledgment
+	// of what the user said.
+	mock := newSequencedOllama(t, "hey! restated problem + questions")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeFullAssist
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	greeting := "hi"
+	got := submitAndRun(t, m, greeting)
+
+	reqs := mock.allRequests()
+	if len(reqs) == 0 {
+		t.Fatal("expected at least 1 request (the comprehension check), got 0")
+	}
+	found := false
+	for _, msg := range reqs[0].Messages {
+		if msg.Content == greeting {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("comprehension check request never included the user's real first message %q: %+v", greeting, reqs[0].Messages)
+	}
+	if !strings.Contains(got.viewport.View(), "hey! restated problem + questions") {
+		t.Errorf("viewport view %q, want the comprehension check's reply", got.viewport.View())
+	}
+}
+
+func TestTutorModel_ComprehensionCheckRetriesWhenReplyLeaksFakeToolCallJSON(t *testing.T) {
+	mock := newSequencedOllama(t, `{"name": "read_problem_statement", "parameters": {}}`, "clean restated problem + questions")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeFullAssist
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "hi")
+
+	view := got.viewport.View()
+	if strings.Contains(view, `{"name"`) {
+		t.Errorf("viewport view still contains leaked tool-call JSON: %q", view)
+	}
+	if !strings.Contains(view, "clean restated problem + questions") {
+		t.Errorf("viewport view %q, want the retry's clean reply", view)
+	}
+	if n := len(mock.allRequests()); n != 2 {
+		t.Errorf("requests = %d, want exactly 2 (original comprehension check + one retry)", n)
+	}
+}
+
+func TestTutorModel_ComprehensionCheckInjectsProblemStatementDirectly(t *testing.T) {
+	mock := newSequencedOllama(t, "restated problem + questions")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeFullAssist
+	cfg.WorkDir = t.TempDir()
+
+	want := "# Two Sum\n\nReturn indices of the two numbers that add up to target."
+	if err := os.WriteFile(filepath.Join(cfg.WorkDir, "problem.md"), []byte(want), 0o644); err != nil {
+		t.Fatalf("write problem.md: %v", err)
+	}
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	submitAndRun(t, m, "what's the problem?")
+
+	reqs := mock.allRequests()
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request (the comprehension check), got %d", len(reqs))
+	}
+	found := false
+	for _, msg := range reqs[0].Messages {
+		if strings.Contains(msg.Content, want) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("comprehension check request never included the injected problem statement %q: %+v", want, reqs[0].Messages)
+	}
+}
+
+func TestTutorModel_ComprehensionCheckHistoryPersistsBothTurns(t *testing.T) {
+	mock := newSequencedOllama(t, "restated + questions", "real answer")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeHintsFirst
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "real question")
+	submitAndRun(t, got, "follow up")
+
+	reqs := mock.allRequests()
+	// Only 2 requests total: the check consumes the first input line's
+	// turn entirely (no separate normal request is also sent for it),
+	// then the second input line is one normal turn.
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 requests (check, then 1 real turn), got %d", len(reqs))
+	}
+
+	// Second request's history should include the check's exchange --
+	// persisted using the real first question as the user turn -- followed
+	// by the ephemeral hint-count note (hints-first mode, see
+	// turnMessages) and the second line.
+	second := reqs[1].Messages
+	if len(second) != 5 {
+		t.Fatalf("second request: expected [system, user1, assistant1, hint-note, user2] = 5 messages, got %d: %+v", len(second), second)
+	}
+	if second[1].Content != "real question" {
+		t.Errorf("second request messages[1] = %q, want the real first question %q", second[1].Content, "real question")
+	}
+	if second[2].Content != "restated + questions" {
+		t.Errorf("second request messages[2] = %q, want the check's reply", second[2].Content)
+	}
+	if second[3].Role != "system" || !strings.Contains(second[3].Content, "1st help request") {
+		t.Errorf("second request messages[3] = %+v, want an ephemeral system note about the 1st help request", second[3])
+	}
+	if second[4].Content != "follow up" {
+		t.Errorf("second request messages[4] = %q, want %q", second[4].Content, "follow up")
+	}
+}
+
+func TestTutorModel_FallsBackToHonestMessageWhenRetryAlsoLeaks(t *testing.T) {
+	mock := newSequencedOllama(t, `{"name": "read_solution_file", "parameters": {}}`, `{"name": "read_cursor_position", "parameters": {}}`)
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	// Wide enough that leakedToolCallFallbackReply renders on one
+	// unbroken line -- the viewport word-wraps its content at the real
+	// terminal width, so a narrower width would split this assertion's
+	// target string across a line break.
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 200, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "where is my cursor?")
+
+	view := got.viewport.View()
+	if strings.Contains(view, `{"name"`) {
+		t.Errorf("viewport view still contains leaked tool-call JSON: %q", view)
+	}
+	if !strings.Contains(view, leakedToolCallFallbackReply) {
+		t.Errorf("viewport view %q, want the honest fallback message", view)
+	}
+}
+
+func TestTutorModel_DoesNotRetryWhenReplyIsClean(t *testing.T) {
+	mock := newSequencedOllama(t, "the answer is 42")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	submitAndRun(t, m, "question")
+
+	if n := len(mock.allRequests()); n != 1 {
+		t.Errorf("requests = %d, want exactly 1 (no retry for a clean reply)", n)
+	}
+}
+
+func TestTutorModel_LeakedReplyNeverPersistedToHistory(t *testing.T) {
+	mock := newSequencedOllama(t, `{"name": "read_solution_file", "parameters": {}}`, "your code looks fine", "second reply")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "what does my code look like?")
+	submitAndRun(t, got, "another question")
+
+	reqs := mock.allRequests()
+	if len(reqs) != 3 {
+		t.Fatalf("requests = %d, want exactly 3 (leaked original + retry + second turn)", len(reqs))
+	}
+	// The second turn's request carries history from the first turn --
+	// confirm the leaked (never-shown) reply isn't in it, only the clean
+	// retry reply.
+	for _, msg := range reqs[2].Messages {
+		if strings.Contains(msg.Content, `{"name"`) {
+			t.Errorf("second turn's request carries leaked JSON in history: %+v", reqs[2].Messages)
+		}
+	}
+}
+
+func TestTutorModel_RetainsConversationHistoryAcrossTurns(t *testing.T) {
+	mock := newSequencedOllama(t, "assistant-reply-1", "assistant-reply-2")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "first line")
+	submitAndRun(t, got, "second line")
+
+	reqs := mock.allRequests()
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 requests (one per input line), got %d", len(reqs))
+	}
+	if len(reqs[0].Messages) != 2 {
+		t.Errorf("first request: expected [system, user1] = 2 messages, got %d: %+v", len(reqs[0].Messages), reqs[0].Messages)
+	}
+	second := reqs[1].Messages
+	if len(second) != 4 {
+		t.Fatalf("second request: expected [system, user1, assistant1, user2] = 4 messages, got %d: %+v", len(second), second)
+	}
+	if second[1].Content != "first line" {
+		t.Errorf("second request messages[1] (user1) = %q, want %q", second[1].Content, "first line")
+	}
+	if second[2].Role != "assistant" || second[2].Content != "assistant-reply-1" {
+		t.Errorf("second request messages[2] (assistant1) = %+v, want role=assistant content=%q", second[2], "assistant-reply-1")
+	}
+	if second[3].Content != "second line" {
+		t.Errorf("second request messages[3] (user2) = %q, want %q", second[3].Content, "second line")
 	}
 }

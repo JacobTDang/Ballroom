@@ -177,6 +177,50 @@ func newTutorModel(ctx context.Context, cfg Config, stderr io.Writer) (tutorMode
 	return m, nil
 }
 
+// RunOneTurn builds a tutor session and submits exactly one message,
+// synchronously draining the turn to completion -- for headless callers
+// (cmd/tutor-eval's grounding checks) that need one turn's real result
+// without driving a full interactive tea.Program.
+//
+// This deliberately does NOT go through Run()/tea.Program: a real
+// interactive terminal never types its next input (including Ctrl-D)
+// before seeing the current turn's reply, but a scripted byte stream fed
+// through tea.WithInput has no such guarantee -- bubbletea delivers
+// queued input immediately, so a trailing Ctrl-D appended right after a
+// message would very likely reach Update() and quit the program before
+// the turn's async goroutine (a real network round trip) ever finishes,
+// racing the very thing the caller wants to observe. Calling
+// newTutorModel + Update(KeyEnter) directly and draining the returned
+// tea.Cmd chain synchronously (same pattern as this package's own
+// submitAndRun test helper) sidesteps that race entirely: there is no
+// second input source that can outrun the turn.
+func RunOneTurn(ctx context.Context, cfg Config, message string, stderr io.Writer) (reply string, err error) {
+	m, err := newTutorModel(ctx, cfg, stderr)
+	if err != nil {
+		return "", err
+	}
+	m.textarea.SetValue(message)
+	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newModel.(tutorModel)
+	if cmd == nil {
+		return "", fmt.Errorf("tutor: empty message produced no turn")
+	}
+	for {
+		msg := cmd()
+		newModel, cmd = m.Update(msg)
+		m = newModel.(tutorModel)
+		if tc, ok := msg.(turnCompleteMsg); ok {
+			if tc.err != nil {
+				return "", tc.err
+			}
+			return tc.reply.Content, nil
+		}
+		if cmd == nil {
+			return "", fmt.Errorf("tutor: turn ended without a result")
+		}
+	}
+}
+
 func (m tutorModel) Init() tea.Cmd {
 	return tea.Batch(textarea.Blink, pulseTickCmd())
 }
@@ -189,6 +233,16 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ClearScreen
 
 	case tea.KeyMsg:
+		if msg.Type == tea.KeyCtrlD {
+			// bubbletea does not quit on its own when the underlying
+			// io.Reader hits EOF (confirmed directly from tty.go's
+			// readLoop: io.EOF is explicitly excluded from the errors it
+			// forwards as a shutdown) -- unlike the old bufio.Scanner
+			// loop, which exited naturally when Scan() returned false.
+			// This is the explicit replacement, matching the banner's
+			// own "Ctrl-D to exit." text.
+			return m, tea.Quit
+		}
 		if msg.Type == tea.KeyEnter {
 			return m.submit()
 		}
@@ -213,6 +267,7 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case turnCompleteMsg:
 		m.turnInFlight = false
 		m.activeCalls = nil
+		m.helpRequestCount = msg.helpRequestCount
 		m.recomputeLayout()
 		if msg.err != nil {
 			fmt.Fprintf(m.stderr, "tutor: could not reach %s: %v\n", msg.endpoint, msg.err)
@@ -313,6 +368,16 @@ func (m *tutorModel) refreshViewport() {
 // exactly: the flag clears unconditionally on the very first message,
 // whether the check succeeds or fails (see startTurn's comment on what
 // happens on failure).
+//
+// helpRequestCount is deliberately NOT incremented here -- a successful
+// comprehension check consumes this line without it ever counting as a
+// hints-first "help request" (matching the old Run() loop's own
+// placement: its helpRequestCount++ sat after the check's early
+// `continue`, so it only ever ran for a genuine normal turn). Since
+// whether this line ends up on the check path or the normal path is
+// only known once startTurn's goroutine runs, the actual increment
+// happens there, and the resulting count comes back on turnCompleteMsg
+// for Update to apply.
 func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 	line := strings.TrimSpace(m.textarea.Value())
 	if line == "" {
@@ -323,7 +388,6 @@ func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 
 	m.textarea.Reset()
 	m.turnInFlight = true
-	m.helpRequestCount++
 	m.recomputeLayout()
 	m.displayLines = append(m.displayLines, "> "+line)
 	m.refreshViewport()
@@ -337,12 +401,16 @@ func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 // the result-handling shape is identical either way: on success, persist
 // (userMessage, reply) to history and show the reply; on failure, show
 // turnFailedFallbackReply and persist nothing (see Update's case for
-// this message).
+// this message). helpRequestCount is always the count Update should
+// adopt regardless of outcome -- unchanged from the pre-turn snapshot
+// for a successful comprehension check, incremented for any real
+// (non-check) turn attempt, success or failure (see startTurn).
 type turnCompleteMsg struct {
-	reply       *schema.Message
-	err         error
-	endpoint    string
-	userMessage string
+	reply            *schema.Message
+	err              error
+	endpoint         string
+	userMessage      string
+	helpRequestCount int
 }
 
 // activityEventMsg carries one live snapshot of the turn's tool calls so
@@ -406,7 +474,10 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 			checkMessages := comprehensionCheckMessages(m.history, m.cfg.WorkDir, line)
 			reply, err := generateWithLeakRetry(m.ctx, checkAgent, checkMessages, activityOpt)
 			if err == nil {
-				doneCh <- turnCompleteMsg{reply: reply, userMessage: line}
+				// helpRequestCount stays at its pre-turn snapshot -- a
+				// successful comprehension check never counts as a
+				// hints-first "help request" (see submit's doc comment).
+				doneCh <- turnCompleteMsg{reply: reply, userMessage: line, helpRequestCount: m.helpRequestCount}
 				return
 			}
 			// Couldn't reach the provider for the check -- fall through
@@ -429,26 +500,30 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 			}
 		}
 
-		requestMessages := append(append([]*schema.Message{}, m.history...), turnMessages(m.cfg.Mode, m.helpRequestCount, line)...)
+		// A real (non-check) turn attempt always counts as a help
+		// request, success or failure -- matching the old Run() loop's
+		// own placement of helpRequestCount++ (unconditional, right
+		// before this same call).
+		newHelpRequestCount := m.helpRequestCount + 1
+		requestMessages := append(append([]*schema.Message{}, m.history...), turnMessages(m.cfg.Mode, newHelpRequestCount, line)...)
 		reply, err := generateWithLeakRetry(m.ctx, turnAgent, requestMessages, activityOpt)
 		if err != nil {
-			doneCh <- turnCompleteMsg{err: err, endpoint: turnEndpoint, userMessage: line}
+			doneCh <- turnCompleteMsg{err: err, endpoint: turnEndpoint, userMessage: line, helpRequestCount: newHelpRequestCount}
 			return
 		}
-		doneCh <- turnCompleteMsg{reply: reply, userMessage: line}
+		doneCh <- turnCompleteMsg{reply: reply, userMessage: line, helpRequestCount: newHelpRequestCount}
 	}()
 
 	return activityCh, doneCh
 }
 
-// buildActivityChannelOption mirrors the eino callback wiring
+// buildActivityChannelOption wires the eino callback machinery
 // react.BuildAgentCallback/utils/callbacks.ToolCallbackHandler give real
-// OnStart/OnEnd/OnError events for (see activity.go's now-dead
-// buildActivityCallbackOption, which did the same thing for the old
-// box-based rendering) but pushes activityFeed snapshots onto a channel
-// for the bubbletea Update loop to pick up, instead of writing directly
-// to a terminal. feed's started/finished/failed/currentCalls are reused
-// completely unchanged from that earlier design.
+// OnStart/OnEnd/OnError events for, pushing activityFeed snapshots onto
+// a channel for the bubbletea Update loop to pick up (see startTurn,
+// Update's activityEventMsg case) instead of writing directly to a
+// terminal, which is how this package's now-deleted hand-rolled ANSI box
+// (internal/tutor/scrollbox.go) rendered them.
 func buildActivityChannelOption(feed *activityFeed, activityCh chan<- []activityCall) agentopt.AgentOption {
 	push := func() {
 		select {

@@ -868,12 +868,17 @@ func runComprehensionCheckGroundingCheckCase(ctx context.Context, label, firstMe
 			OllamaHost: ollamaHost, Model: model, Mode: "hints-first",
 			WorkDir: dir, MaxContextBytes: 8000,
 		}
-		var stdout, stderr strings.Builder
-		if err := tutor.Run(ctx, cfg, strings.NewReader(firstMessage+"\n"), &stdout, &stderr); err != nil {
-			lastDetail = fmt.Sprintf("Run error: %v", err)
+		// RunOneTurn (not Run) -- this needs exactly one synchronous
+		// turn's result, not a full interactive tea.Program session; see
+		// its doc comment for why driving Run() with a scripted
+		// Ctrl-D-terminated input stream would race the turn's own async
+		// completion.
+		var stderr strings.Builder
+		out, err := tutor.RunOneTurn(ctx, cfg, firstMessage, &stderr)
+		if err != nil {
+			lastDetail = fmt.Sprintf("RunOneTurn error: %v (stderr: %s)", err, stderr.String())
 			continue
 		}
-		out := stdout.String()
 		if !strings.Contains(strings.ToLower(out), "duplicate") {
 			lastDetail = "reply never mentioned the real problem ('duplicate') -- likely hallucinated, or skipped restating it entirely: " + out
 			continue

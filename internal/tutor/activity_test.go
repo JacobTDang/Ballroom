@@ -5,18 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
-
-// fakeActivityPulseInterval substitutes activityPulseInterval so pulse
-// tests run in milliseconds instead of waiting on the real ~120ms
-// production cadence — same var-swap-and-restore pattern this package
-// already uses for ollamaRequestTimeout. Returns a restore func to defer.
-func fakeActivityPulseInterval(d time.Duration) func() {
-	orig := activityPulseInterval
-	activityPulseInterval = d
-	return func() { activityPulseInterval = orig }
-}
 
 func TestActivityFeed_StartedAddsARunningLine(t *testing.T) {
 	f := &activityFeed{}
@@ -227,58 +216,39 @@ func TestActivityFeed_ConcurrentStartedFinishedDoNotRace(t *testing.T) {
 	wg.Wait()
 }
 
-// --- activityPulse ---
+// --- truncateLine (moved from scrollbox_test.go alongside truncateLine
+// itself when scrollbox.go's hand-rolled ANSI box was deleted) ---
 
-func TestActivityPulse_TicksAndRedraws(t *testing.T) {
-	defer fakeActivityPulseInterval(2 * time.Millisecond)()
-
-	var buf countingWriter
-	box, err := newInputBoxAt(&buf, 24, 80)
-	if err != nil {
-		t.Fatalf("newInputBoxAt: %v", err)
-	}
-	buf.writes = 0
-	feed := &activityFeed{}
-	feed.started("call-1", "read_solution_file", "")
-
-	pulse := startActivityPulse(box, feed)
-	time.Sleep(20 * time.Millisecond) // several ticks at 2ms each
-	pulse.close()
-
-	if buf.writes == 0 {
-		t.Error("expected the pulse ticker to have redrawn the activity region at least once")
+func TestTruncateLine_ShortStringUnchanged(t *testing.T) {
+	if got := truncateLine("hello", 10); got != "hello" {
+		t.Errorf("truncateLine(%q, 10) = %q, want unchanged", "hello", got)
 	}
 }
 
-func TestActivityPulse_CloseStopsFurtherWrites(t *testing.T) {
-	defer fakeActivityPulseInterval(2 * time.Millisecond)()
-
-	var buf countingWriter
-	box, err := newInputBoxAt(&buf, 24, 80)
-	if err != nil {
-		t.Fatalf("newInputBoxAt: %v", err)
+func TestTruncateLine_LongStringTruncatedWithEllipsis(t *testing.T) {
+	// ASCII "..." only -- a real bug found live: the Unicode ellipsis
+	// (…) and every other symbol this package originally used (⟳ → ✓ ✗)
+	// rendered as unrecognizable fallback glyphs (tofu, looking like
+	// stray underscores) in a real user's terminal font. Everything this
+	// package writes must be plain ASCII plus the one glyph confirmed to
+	// render everywhere: ● (see formatActivityLine).
+	got := truncateLine("this is a much longer string than the limit allows", 10)
+	if runes := []rune(got); len(runes) != 10 {
+		t.Errorf("truncateLine(...) = %q (len %d), want exactly 10 runes", got, len(runes))
 	}
-	feed := &activityFeed{}
-
-	pulse := startActivityPulse(box, feed)
-	time.Sleep(10 * time.Millisecond)
-	pulse.close()
-
-	afterClose := buf.writes
-	time.Sleep(20 * time.Millisecond) // long enough for several more ticks, if the goroutine were still running
-
-	if buf.writes != afterClose {
-		t.Errorf("writes continued after close() returned (%d -> %d) -- the ticker goroutine did not actually stop", afterClose, buf.writes)
+	if !strings.HasSuffix(got, "...") {
+		t.Errorf("truncateLine(...) = %q, want it to end with \"...\"", got)
 	}
 }
 
-func TestStartActivitySession_NilBoxIsSafeAndReturnsAUsableStopFunc(t *testing.T) {
-	// A nil box means no real terminal (e.g. cmd/tutor-eval) -- there's
-	// no reserved region to draw into, matching how every other
-	// box-dependent feature in this package already degrades. The
-	// AgentOption's internals aren't inspectable from this package, so
-	// this only asserts the call is safe end to end: it doesn't panic,
-	// and the returned stop func is callable.
-	_, stop := startActivitySession(nil)
-	stop()
+func TestTruncateLine_MaxOfZeroOrLessReturnsEmpty(t *testing.T) {
+	if got := truncateLine("anything", 0); got != "" {
+		t.Errorf("truncateLine(_, 0) = %q, want empty", got)
+	}
+}
+
+func TestTruncateLine_MaxSmallerThanEllipsisTruncatesTheEllipsisItself(t *testing.T) {
+	if got := truncateLine("anything long enough to truncate", 2); got != ".." {
+		t.Errorf("truncateLine(_, 2) = %q, want \"..\"", got)
+	}
 }

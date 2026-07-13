@@ -88,7 +88,7 @@ const (
 	toolsInstruction = "You have tools to read the user's actual code, the problem statement, their last test run, and their cursor position, and to highlight lines in their editor with a note. Always use a tool instead of guessing, asking the user to paste something you can just read yourself, or trusting what you read earlier in this conversation — it may have changed since. Calling a tool is just gathering information — it never conflicts with any rule below, even in a restricted mode. Call tools directly and silently, never narrate them (e.g. never say 'I'll use the tool X') — the user only sees your final answer. "
 
 	// comprehensionCheckInstruction drives the one-time check (see
-	// runComprehensionCheck in tutor.go), which injects the problem
+	// comprehensionCheckMessages/startTurn in model.go), which injects the problem
 	// statement directly as ephemeral context rather than having the
 	// model call read_problem_statement itself — manual repro testing
 	// found that combined "call a tool, then restate, then ask
@@ -100,14 +100,14 @@ const (
 	// there's nothing left to call.
 	//
 	// The "respond to it naturally first" sentence exists because an
-	// earlier version of runComprehensionCheck never even sent the
+	// earlier version of the comprehension check never even sent the
 	// user's real first message to the model at all (deliberately, to
 	// keep this high-stakes call single-purpose) — a real bug found
 	// live: literally any first message, including a plain "hi", got
 	// back the exact same canned restate-and-ask-questions reply with
 	// no acknowledgment of what the user actually said. The message is
-	// included now (see runComprehensionCheck), so this instruction
-	// tells the model what to do with it.
+	// included now (see comprehensionCheckMessages in model.go), so this
+	// instruction tells the model what to do with it.
 	//
 	// "Both parts are required in the same reply, even if..." was added
 	// after a second, opposite real bug found live (via cmd/tutor-eval's
