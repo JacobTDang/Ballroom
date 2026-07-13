@@ -276,18 +276,36 @@ func TestActivityOutputLines_CapsAtThreeLinesWithEllipsisMarkerOnLast(t *testing
 	}
 	last := got[len(got)-1]
 	// Not HasSuffix -- the line's true suffix is now the color reset
-	// escape (activityOutputLines highlights the content in yellow), so
-	// the ellipsis marker itself is Contains'd instead.
+	// escape (activityOutputLines colors the content gray), so the
+	// ellipsis marker itself is Contains'd instead.
 	if !strings.Contains(last, truncateLineEllipsis) {
 		t.Errorf("last line %q, want it to contain %q to signal the result was cut off", last, truncateLineEllipsis)
 	}
 }
 
-func TestActivityOutputLines_ContentIsColoredYellow(t *testing.T) {
+func TestActivityOutputLines_ContentIsColoredGray(t *testing.T) {
 	c := activityCall{name: "read_solution_file", status: "done", detail: "312 bytes"}
 	got := activityOutputLines(c, 80)
-	if len(got) != 1 || !strings.Contains(got[0], "\033[38;2;") {
-		t.Errorf("activityOutputLines(...) = %v, want the output highlighted in color (per explicit request: \"highlight the tool output with yellow\")", got)
+	want := fmt.Sprintf("\033[38;2;%d;%d;%dm", activityOutputHighlightR, activityOutputHighlightG, activityOutputHighlightB)
+	if len(got) != 1 || !strings.Contains(got[0], want) {
+		t.Errorf("activityOutputLines(...) = %v, want the output colored faded gray", got)
+	}
+}
+
+func TestActivityOutputLines_ColorEscapeStartsWithADefensiveReset(t *testing.T) {
+	// Guards the fix for a real bug found live: a later, supposedly
+	// uncolored line was seen visibly inheriting an earlier line's
+	// color in the real terminal renderer. Every colored span now opens
+	// with an explicit \033[0m before its own color code so it can
+	// never inherit stray state from whatever rendered immediately
+	// before it.
+	c := activityCall{name: "read_solution_file", status: "done", detail: "312 bytes"}
+	got := activityOutputLines(c, 80)
+	if len(got) != 1 {
+		t.Fatalf("activityOutputLines(...) = %v, want exactly 1 line", got)
+	}
+	if !strings.Contains(got[0], "\033[0m\033[38;2;") {
+		t.Errorf("activityOutputLines(...)[0] = %q, want the color escape prefixed with an explicit reset", got[0])
 	}
 }
 
@@ -381,11 +399,27 @@ func TestToolUsageSummary_MultipleCallsEachGetTheirOwnHeaderAndOutput(t *testing
 	}
 }
 
-func TestToolUsageSummary_OutputContentIsColoredYellow(t *testing.T) {
+func TestToolUsageSummary_OutputContentIsColoredGray(t *testing.T) {
 	calls := []activityCall{{name: "read_solution_file", status: "done", detail: "312 bytes"}}
 	got := toolUsageSummary(calls, 80)
-	if !strings.Contains(got, "\033[38;2;") {
-		t.Errorf("toolUsageSummary(...) = %q, want the output highlighted in color", got)
+	want := fmt.Sprintf("\033[38;2;%d;%d;%dm", activityOutputHighlightR, activityOutputHighlightG, activityOutputHighlightB)
+	if !strings.Contains(got, want) {
+		t.Errorf("toolUsageSummary(...) = %q, want the output colored faded gray", got)
+	}
+}
+
+// TestToolUsageSummary_HeaderLineNeverCarriesTheOutputColor guards a
+// real design correction from live use: the tool call's own name
+// should stay the normal (unhighlighted) text color -- only the raw
+// output beneath it gets colored.
+func TestToolUsageSummary_HeaderLineNeverCarriesTheOutputColor(t *testing.T) {
+	calls := []activityCall{{name: "read_solution_file", status: "done", detail: "312 bytes"}}
+	got := toolUsageSummary(calls, 80)
+	lines := strings.Split(got, "\n")
+	headerLine := lines[0]
+	outputColor := fmt.Sprintf("\033[38;2;%d;%d;%dm", activityOutputHighlightR, activityOutputHighlightG, activityOutputHighlightB)
+	if strings.Contains(headerLine, outputColor) {
+		t.Errorf("header line %q, want it to never contain the output's gray color escape", headerLine)
 	}
 }
 

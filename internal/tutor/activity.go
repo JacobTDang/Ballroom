@@ -209,8 +209,25 @@ func activityDotColor(status string, phase int) (r, g, b int) {
 // enables truecolor passthrough (`terminal-features ",*:RGB"`) for this
 // project's session, so this is safe to rely on inside the practice
 // container.
+//
+// The color-open escape is prefixed with an explicit plain reset
+// (\033[0m) — defensive, not decorative: a real bug found live had a
+// later, supposedly-uncolored line (a tool call's plain-text name)
+// visibly inheriting an earlier line's color. Every one of this
+// function's own escape spans was independently self-contained when
+// checked directly (open, content, close, all present, verified via raw
+// -e captures), so the leak wasn't from a missing reset here — it's
+// bubbletea's real terminal renderer doing incremental, diffed redraws
+// across frames (the pulsing activity region redraws every ~120ms while
+// idle content around it does not), which this package has no way to
+// fully audit without a live terminal. Rather than depend on "the
+// previous span definitely reset cleanly" holding across renderer
+// internals this package doesn't control, every colored span now
+// explicitly forces a clean slate before applying its own color, so it
+// can never inherit stray state from whatever rendered immediately
+// before it, regardless of the cause.
 func coloredDot(r, g, b int) string {
-	return fmt.Sprintf("\033[38;2;%d;%d;%dm%s\033[0m", r, g, b, activityDotGlyph)
+	return fmt.Sprintf("\033[0m\033[38;2;%d;%d;%dm%s\033[0m", r, g, b, activityDotGlyph)
 }
 
 // pulsedStatusLine builds the activity region's status line for one
@@ -257,22 +274,26 @@ const activityIndent = "  "
 // call (and the input box below the whole region) off-screen.
 const activityOutputPreviewLines = 3
 
-// activityOutputHighlightR/G/B is the tool output preview's highlight
-// color — a deliberately loud yellow, per an explicit request from live
-// use ("could we like highlight the tool output with yellow for now")
-// to make a completed/failed call's result visually unmistakable as
-// belonging to the header above it, independent of the indentation
-// alone. "for now" in the request itself flags this as provisional.
+// activityOutputHighlightR/G/B is the tool output preview's color — a
+// faded gray, per explicit live feedback: yellow was tried first (per
+// an earlier request to "highlight the tool output with yellow for
+// now") but read as highlighting the wrong thing — the actual ask was
+// to visually de-emphasize the raw tool output as secondary/quieter
+// text, not draw the eye to it, while the tool call header above it
+// stays the normal (unhighlighted) text color.
 const (
-	activityOutputHighlightR = 0xE6
-	activityOutputHighlightG = 0xC3
-	activityOutputHighlightB = 0x00
+	activityOutputHighlightR = 0x80
+	activityOutputHighlightG = 0x80
+	activityOutputHighlightB = 0x80
 )
 
-// activityOutputHighlight wraps s in the yellow foreground escape,
-// same truecolor mechanism as coloredDot.
+// activityOutputHighlight wraps s in the faded-gray foreground escape,
+// same truecolor mechanism as coloredDot -- including the same
+// defensive leading reset (see coloredDot's doc comment for why: a real
+// bug found live had this color bleeding into the plain-text header
+// line above it).
 func activityOutputHighlight(s string) string {
-	return fmt.Sprintf("\033[38;2;%d;%d;%dm%s\033[0m", activityOutputHighlightR, activityOutputHighlightG, activityOutputHighlightB, s)
+	return fmt.Sprintf("\033[0m\033[38;2;%d;%d;%dm%s\033[0m", activityOutputHighlightR, activityOutputHighlightG, activityOutputHighlightB, s)
 }
 
 // activityOutputLines returns c's result (done) or error (failed)
