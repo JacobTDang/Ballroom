@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -17,6 +18,20 @@ import (
 // reserves at the bottom of the pane: top border, one content row, and
 // bottom border.
 const scrollBoxHeight = 3
+
+// activityHeight is how many terminal rows are reserved directly above
+// the input box for the live tool-call activity display: one status
+// line plus activityToolLines tool-call lines. Reserved unconditionally
+// (like the box itself), not dynamically resized per turn — DECSTBM's
+// scroll-region boundaries are fixed by whatever control sequence last
+// set them, so making this region "sometimes present" would mean
+// re-running setup()-like logic on every turn, risking exactly the kind
+// of resize/redraw churn that caused real bugs in this file's history
+// (see reconfigureAt's doc comment). Blank rows when there's no activity
+// to show are the trade-off, matching how the box's own content row is
+// always reserved whether or not there's text in it.
+const activityHeight = 5
+const activityToolLines = activityHeight - 1
 
 // terminalSize shells out to `stty size`, the same technique
 // docker/entrypoint.sh already uses to query the real terminal size
@@ -77,20 +92,30 @@ func boxBottomLine(cols int) string {
 // verifies standalone and tutor.go's real turn loop uses live.
 type inputBox struct {
 	w io.Writer
-	// regionBottom is the last row of the confined scroll region — the
-	// box occupies the scrollBoxHeight rows directly below it
-	// (regionBottom+1: top border, regionBottom+2: content/prompt row,
-	// regionBottom+3: bottom border, i.e. the terminal's last row).
+	// regionBottom is the last row of the confined scroll region —
+	// directly below it sits the activityHeight-row activity display
+	// (regionBottom+1: status line, regionBottom+2..+1+activityToolLines:
+	// tool-call lines), then the box itself (regionBottom+activityHeight+1:
+	// top border, +2: content/prompt row, +3: bottom border, i.e. the
+	// terminal's last row).
 	regionBottom int
 	cols         int
+	// mu guards showActivity/clearActivity only. Every other method here
+	// only ever runs on tutor.go's single main loop goroutine and is
+	// never called while a Generate call (the only source of concurrent
+	// writers, via eino's tool-call callbacks) is in flight, so they need
+	// no locking of their own — only showActivity/clearActivity can be
+	// invoked concurrently with each other (eino can run multiple tool
+	// calls for one turn in parallel).
+	mu sync.Mutex
 }
 
 // newInputBoxAt is the testable core of newInputBox, taking an
 // already-known rows/cols instead of querying a real terminal.
 func newInputBoxAt(w io.Writer, rows, cols int) (*inputBox, error) {
-	regionBottom := rows - scrollBoxHeight
+	regionBottom := rows - scrollBoxHeight - activityHeight
 	if regionBottom < 1 {
-		return nil, fmt.Errorf("tutor: terminal too short (%d rows) for a %d-row input box", rows, scrollBoxHeight)
+		return nil, fmt.Errorf("tutor: terminal too short (%d rows) for a %d-row input box and %d-row activity display", rows, scrollBoxHeight, activityHeight)
 	}
 	b := &inputBox{w: w, regionBottom: regionBottom, cols: cols}
 	b.setup()
@@ -139,16 +164,16 @@ func (b *inputBox) setup() {
 }
 
 func (b *inputBox) drawBorders() {
-	fmt.Fprintf(b.w, "\033[%d;1H\033[2K%s", b.regionBottom+1, boxTopLine(b.cols))
-	fmt.Fprintf(b.w, "\033[%d;1H\033[2K%s", b.regionBottom+2, boxMiddleLine(b.cols))
-	fmt.Fprintf(b.w, "\033[%d;1H\033[2K%s", b.regionBottom+3, boxBottomLine(b.cols))
+	fmt.Fprintf(b.w, "\033[%d;1H\033[2K%s", b.regionBottom+activityHeight+1, boxTopLine(b.cols))
+	fmt.Fprintf(b.w, "\033[%d;1H\033[2K%s", b.regionBottom+activityHeight+2, boxMiddleLine(b.cols))
+	fmt.Fprintf(b.w, "\033[%d;1H\033[2K%s", b.regionBottom+activityHeight+3, boxBottomLine(b.cols))
 }
 
 // showPrompt positions the cursor at the box's content row and prints
 // the "> " prompt, ready for the terminal's own cooked-mode line
 // editing to echo whatever gets typed next inside the box.
 func (b *inputBox) showPrompt() {
-	fmt.Fprintf(b.w, "\033[%d;1H\033[2K> ", b.regionBottom+2)
+	fmt.Fprintf(b.w, "\033[%d;1H\033[2K> ", b.regionBottom+activityHeight+2)
 }
 
 // returnToScroll repositions the cursor to the bottom row of the
@@ -178,8 +203,62 @@ func (b *inputBox) showPrompt() {
 // self-corrects on the next prompt, but in between it reads as a
 // duplicate, confusing enough to look like a bug.
 func (b *inputBox) returnToScroll() {
-	fmt.Fprintf(b.w, "\033[%d;1H\033[2K", b.regionBottom+2)
+	fmt.Fprintf(b.w, "\033[%d;1H\033[2K", b.regionBottom+activityHeight+2)
 	fmt.Fprintf(b.w, "\033[%d;1H\033[2K", b.regionBottom)
+}
+
+// truncateLine caps s at max runes, replacing the last rune with an
+// ellipsis when it's cut — used both as a hard rendering safety net
+// (showActivity: a line must never exceed the box's width, or it wraps
+// onto and corrupts the row below it) and for shortening tool-call
+// argument/result previews to something readable at a glance (activity.go).
+// max <= 0 returns empty rather than panicking on the slice below.
+func truncateLine(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	if max == 1 {
+		return "…"
+	}
+	return string(runes[:max-1]) + "…"
+}
+
+// showActivity redraws the whole activity region in one buffered write:
+// row regionBottom+1 gets status, the activityToolLines rows below it
+// get toolLines (padded with cleared-but-empty rows for any index beyond
+// len(toolLines), so a feed that's shrunk — or an idle clearActivity call
+// — never leaves a longer previous frame's lines dangling). Every line is
+// truncated to the box's current width first. A single Write for the
+// whole frame, not one per row, avoids the partial-frame
+// flicker/interleaving risk of many small writes — more important here
+// than for drawBorders (called once per setup/resize) since this can run
+// once per tool-call event, potentially from concurrent goroutines (see
+// mu's doc comment on inputBox).
+func (b *inputBox) showActivity(status string, toolLines []string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "\033[%d;1H\033[2K%s", b.regionBottom+1, truncateLine(status, b.cols))
+	for i := 0; i < activityToolLines; i++ {
+		var line string
+		if i < len(toolLines) {
+			line = truncateLine(toolLines[i], b.cols)
+		}
+		fmt.Fprintf(&sb, "\033[%d;1H\033[2K%s", b.regionBottom+2+i, line)
+	}
+	io.WriteString(b.w, sb.String())
+}
+
+// clearActivity blanks the whole activity region — called once a turn
+// finishes, before the reply prints, so a completed turn's tool-call
+// chatter doesn't linger into the next one (mirrors returnToScroll's own
+// clear-before-print discipline).
+func (b *inputBox) clearActivity() {
+	b.showActivity("", nil)
 }
 
 // reconfigureAt is the testable core of reconfigure, taking an
@@ -226,7 +305,7 @@ func (b *inputBox) returnToScroll() {
 // attempting a "clever" partial redraw that's been shown twice now not
 // to survive tmux's actual reflow behavior.
 func (b *inputBox) reconfigureAt(rows, cols int) {
-	regionBottom := rows - scrollBoxHeight
+	regionBottom := rows - scrollBoxHeight - activityHeight
 	if regionBottom < 1 {
 		return
 	}
