@@ -135,20 +135,37 @@ func TestFormatActivityLine_IsADotFollowedByActivityLineBody(t *testing.T) {
 	}
 }
 
-func TestActivityDotColor_RunningAtPhaseZeroIsFullBrightness(t *testing.T) {
-	r, g, b := activityDotColor("running", 0)
+// TestActivityDotColor_RunningAtHalfPeriodIsExactlyBaseColor and
+// TestActivityDotColor_RunningAtPhaseZeroGlowsBrighterThanBase replace
+// the old dim-toward-black pulse's tests -- per live feedback ("I would
+// like a glowing dot") the pulse now blends from the base teal (the
+// resting point, at the half-period mark) toward a brighter, paler
+// highlight at the peak (phase 0), instead of dimming the base color
+// down toward black. It never gets darker than the resting base color
+// at any point in the cycle.
+func TestActivityDotColor_RunningAtHalfPeriodIsExactlyBaseColor(t *testing.T) {
+	r, g, b := activityDotColor("running", activityPulsePeriodTicks/2)
 	if r != activityPulseBaseR || g != activityPulseBaseG || b != activityPulseBaseB {
-		t.Errorf("activityDotColor(running, 0) = (%d,%d,%d), want the full base color (%d,%d,%d)", r, g, b, activityPulseBaseR, activityPulseBaseG, activityPulseBaseB)
+		t.Errorf("activityDotColor(running, period/2) = (%d,%d,%d), want exactly the resting base color (%d,%d,%d)", r, g, b, activityPulseBaseR, activityPulseBaseG, activityPulseBaseB)
 	}
 }
 
-func TestActivityDotColor_RunningAtHalfPeriodIsDimmerThanBase(t *testing.T) {
-	r, _, _ := activityDotColor("running", activityPulsePeriodTicks/2)
-	if r >= activityPulseBaseR {
-		t.Errorf("activityDotColor(running, period/2) red = %d, want dimmer than the base %d", r, activityPulseBaseR)
+func TestActivityDotColor_RunningAtPhaseZeroGlowsBrighterThanBase(t *testing.T) {
+	r, g, b := activityDotColor("running", 0)
+	if r < activityPulseBaseR || g < activityPulseBaseG || b < activityPulseBaseB {
+		t.Errorf("activityDotColor(running, 0) = (%d,%d,%d), want every channel at least as bright as the base (%d,%d,%d) -- this is the glow peak", r, g, b, activityPulseBaseR, activityPulseBaseG, activityPulseBaseB)
 	}
-	if r <= 0 {
-		t.Errorf("activityDotColor(running, period/2) red = %d, want never fully dark (min brightness floor)", r)
+	if r == activityPulseBaseR && g == activityPulseBaseG && b == activityPulseBaseB {
+		t.Error("activityDotColor(running, 0) equals the base color exactly, want a visibly brighter glow at the peak")
+	}
+}
+
+func TestActivityDotColor_RunningNeverDimmerThanBase(t *testing.T) {
+	for phase := 0; phase < activityPulsePeriodTicks; phase++ {
+		r, g, b := activityDotColor("running", phase)
+		if r < activityPulseBaseR || g < activityPulseBaseG || b < activityPulseBaseB {
+			t.Errorf("activityDotColor(running, %d) = (%d,%d,%d), want no channel dimmer than the base (%d,%d,%d) anywhere in the cycle", phase, r, g, b, activityPulseBaseR, activityPulseBaseG, activityPulseBaseB)
+		}
 	}
 }
 
