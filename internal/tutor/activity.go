@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	colorful "github.com/lucasb-eyer/go-colorful"
 )
 
 // activityToolLines caps how many concurrent tool-call lines the
@@ -159,49 +160,65 @@ func formatActivityLine(c activityCall) string {
 	return activityDotGlyph + " " + activityLineBody(c)
 }
 
-// activityPulseBaseR/G/B is the activity dot's base color — the same
+// activityPulseBaseR/G/B is the activity dot's resting color — the same
 // teal used elsewhere in this project's palette (docker/tmux.conf,
 // internal/catalog/theme.go: #2FA6A6), so the tutor pane's own animation
-// reads as the same app rather than a mismatched accent.
+// reads as the same app rather than a mismatched accent. This is the
+// pulse's trough, not a floor to dim below (see activityPulseGlow*).
 const (
 	activityPulseBaseR = 0x2F
 	activityPulseBaseG = 0xA6
 	activityPulseBaseB = 0xA6
 )
 
-// activityPulseMinBrightness floors how dim a pulsing dot ever gets — a
-// full fade to black would read as the dot disappearing/flickering
-// rather than "breathing"; capping the low end keeps it always at least
-// faintly visible while still giving a clear fade. Raised from an
-// earlier, more extreme 0.35: at that floor the dot dimmed to a barely
-// perceptible smudge against a black background — a real complaint from
-// live use ("I would like a glowing dot not just line") — closer to
-// looking flat/off than a glow. 0.6 keeps the dot clearly, consistently
-// lit while still leaving real breathing motion (0.6 -> 1.0 -> 0.6).
-const activityPulseMinBrightness = 0.6
+// activityPulseGlowR/G/B is the pulse's peak color — a pale, brighter
+// tint of the same teal. Per live feedback ("I would like a glowing dot
+// not just line"), the pulse blends toward THIS at its brightest point
+// instead of dimming the base color down toward black: it never reads
+// as flickering/off, only ever brightening above a color that's already
+// clearly lit.
+const (
+	activityPulseGlowR = 0xBF
+	activityPulseGlowG = 0xFC
+	activityPulseGlowB = 0xF7
+)
+
+// activityPulseBaseColor/activityPulseGlowColor are the same two colors
+// above, pre-converted for go-colorful's blend functions.
+var (
+	activityPulseBaseColor = colorful.Color{R: activityPulseBaseR / 255.0, G: activityPulseBaseG / 255.0, B: activityPulseBaseB / 255.0}
+	activityPulseGlowColor = colorful.Color{R: activityPulseGlowR / 255.0, G: activityPulseGlowG / 255.0, B: activityPulseGlowB / 255.0}
+)
 
 // activityPulsePeriodTicks is how many activityPulseInterval ticks make
-// up one full fade cycle (dim -> bright -> dim). At the production
-// interval (120ms) this is roughly a 1.5s breathing cadence — slow and
-// calm, not frantic.
-const activityPulsePeriodTicks = 12
+// up one full pulse cycle (glow -> base -> glow). At the production
+// interval this is roughly a 1.4s breathing cadence — slow and calm,
+// not frantic. 36 ticks (up from an earlier 12, at a proportionally
+// shorter interval — see activityPulseInterval) keeps the same overall
+// cadence while giving the animation three times as many discrete
+// positions to move through, for a visibly smoother motion.
+const activityPulsePeriodTicks = 36
 
-// activityDotColor returns the dot's color for one redraw: a smooth
-// brightness pulse while status is "running" (the call is actively in
-// flight — this is the "fade in and out while it's running" effect),
-// or the static full-brightness base color once a call has settled
-// (done/failed) — a real design choice, not an oversight: a
-// still-pulsing dot next to a call that already finished would read as
-// "still working" when it isn't.
+// activityDotColor returns the dot's color for one redraw: while status
+// is "running" (the call is actively in flight), a smooth glow pulse
+// between activityPulseBaseColor (the resting point, at the half-period
+// mark) and activityPulseGlowColor (the peak, at phase 0) — blended in
+// Luv, a perceptually-uniform color space, via go-colorful, so the
+// transition stays visually smooth end to end instead of passing
+// through a muddy off-hue midpoint the way plain per-channel RGB
+// interpolation can between two different colors. Once a call has
+// settled (done/failed), always the static base color — a real design
+// choice, not an oversight: a still-pulsing dot next to a call that
+// already finished would read as "still working" when it isn't.
 func activityDotColor(status string, phase int) (r, g, b int) {
 	if status != "running" {
 		return activityPulseBaseR, activityPulseBaseG, activityPulseBaseB
 	}
 	t := float64(phase%activityPulsePeriodTicks) / float64(activityPulsePeriodTicks)
-	brightness := activityPulseMinBrightness + (1-activityPulseMinBrightness)*(1+math.Cos(2*math.Pi*t))/2
-	return int(float64(activityPulseBaseR) * brightness),
-		int(float64(activityPulseBaseG) * brightness),
-		int(float64(activityPulseBaseB) * brightness)
+	glow := (1 + math.Cos(2*math.Pi*t)) / 2 // 1 at phase 0 (peak glow), 0 at half period (resting base)
+	blended := activityPulseBaseColor.BlendLuv(activityPulseGlowColor, glow)
+	r8, g8, b8 := blended.RGB255()
+	return int(r8), int(g8), int(b8)
 }
 
 // coloredDot returns activityDotGlyph wrapped in a 24-bit truecolor
@@ -367,10 +384,14 @@ func toolUsageSummary(calls []activityCall, cols int) string {
 }
 
 // activityPulseInterval is a var (not const) so tests can substitute a
-// much shorter cadence instead of waiting on the real ~120ms production
+// much shorter cadence instead of waiting on the real ~40ms production
 // interval — same pattern this package already uses for
-// ollamaRequestTimeout.
-var activityPulseInterval = 120 * time.Millisecond
+// ollamaRequestTimeout. Lowered from an earlier 120ms (paired with
+// activityPulsePeriodTicks going from 12 to 36, keeping the same overall
+// ~1.4s cadence) specifically for smoother-looking motion: three times
+// as many redraws per cycle to step through, per a live request to make
+// the animation smoother.
+var activityPulseInterval = 40 * time.Millisecond
 
 // truncateLineEllipsis is deliberately plain ASCII, not the Unicode
 // ellipsis (…) — a real bug found live: that character (and every other
