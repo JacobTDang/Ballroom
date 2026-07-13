@@ -80,6 +80,22 @@ func newChatModel(ctx context.Context, cfg Config) (model.ToolCallingChatModel, 
 	return cm, nil
 }
 
+// reactMaxStep bounds how many graph steps (each model call and each
+// tool execution is one step) a single agent.Generate can take before
+// eino's react.Agent gives up with "[GraphRunError] exceeds max steps".
+// Left unset, react.AgentConfig.MaxStep defaults to eino's own internal
+// ~12 (node count + 10, per react.go's own comment) — only ~5-6
+// tool-call rounds, which a real OpenRouter session (openai/gpt-oss-120b:free)
+// hit live mid-conversation. Isolated re-tests of the identical failing
+// scenario succeeded cleanly afterward, pointing to transient
+// OpenRouter free-tier rate-limit pressure (this project's own
+// concurrent testing, moments earlier) as the likely trigger rather
+// than genuine model looping — but raising this is real, low-risk
+// headroom against exactly this failure mode regardless of root cause,
+// not a guess: verified via a mock requiring 8 tool-call rounds (16
+// steps), comfortably past the old default but within this one.
+const reactMaxStep = 30
+
 // newAgent wires a ReAct agent (github.com/cloudwego/eino/flow/agent/react)
 // around cm and tools. The agent handles the full call-model -> tool-calls
 // -> execute -> feed-back -> loop cycle internally; callers only ever call
@@ -91,6 +107,7 @@ func newAgent(ctx context.Context, cm model.ToolCallingChatModel, tools []tool.B
 	a, err := react.NewAgent(ctx, &react.AgentConfig{
 		ToolCallingModel: cm,
 		ToolsConfig:      compose.ToolsNodeConfig{Tools: tools},
+		MaxStep:          reactMaxStep,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("tutor: new agent: %w", err)

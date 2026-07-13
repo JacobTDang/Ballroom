@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -91,6 +93,74 @@ func TestNewChatModel_TimesOutIfOllamaHangs(t *testing.T) {
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("agent.Generate took %v to return, want it to time out quickly (~%v)", elapsed, ollamaRequestTimeout)
+	}
+}
+
+// TestNewAgent_SurvivesManyToolCallRoundsWithinRaisedMaxStep is a
+// regression test for a real bug found live: a real OpenRouter session
+// (openai/gpt-oss-120b:free) failed mid-conversation with eino's own
+// "[GraphRunError] exceeds max steps" — react.AgentConfig.MaxStep
+// wasn't set, defaulting to eino's internal ~12 (node count + 10, per
+// react.go's own comment), which only covers ~5-6 tool-call rounds
+// (each round is 2 graph steps: one model-call node, one tool-exec
+// node). Isolated re-tests of the identical failing scenario succeeded
+// cleanly (twice), pointing to transient OpenRouter free-tier rate-limit
+// pressure from concurrent testing as the likely trigger rather than
+// genuine model looping — but raising MaxStep is a real, low-risk
+// hardening regardless of root cause: it's cheap headroom against
+// exactly this failure mode, verified here with a mock that requires 8
+// tool-call rounds (16 steps), comfortably past the old ~12-step default
+// but within the raised limit.
+func TestNewAgent_SurvivesManyToolCallRoundsWithinRaisedMaxStep(t *testing.T) {
+	const rounds = 8
+	calls := 0
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls <= rounds {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"message": map[string]any{
+					"role": "assistant", "content": "",
+					"tool_calls": []map[string]any{
+						{"function": map[string]any{"name": "ping", "arguments": map[string]any{"reason": "check"}}},
+					},
+				},
+				"done": true,
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"message": map[string]string{"role": "assistant", "content": "done after many rounds"},
+			"done":    true,
+		})
+	}))
+	t.Cleanup(mock.Close)
+
+	ctx := context.Background()
+	cfg := Config{OllamaHost: mock.URL, Model: "test-model"}
+	cm, err := newChatModel(ctx, cfg)
+	if err != nil {
+		t.Fatalf("newChatModel: %v", err)
+	}
+	pingTool, err := utils.InferTool("ping", "Call this tool.", func(_ context.Context, _ struct {
+		Reason string `json:"reason"`
+	}) (string, error) {
+		return "pong", nil
+	})
+	if err != nil {
+		t.Fatalf("InferTool: %v", err)
+	}
+	agent, err := newAgent(ctx, cm, []tool.BaseTool{pingTool})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	reply, err := agent.Generate(ctx, []*schema.Message{schema.UserMessage("go")})
+	if err != nil {
+		t.Fatalf("agent.Generate: %v (want it to survive %d tool-call rounds without exceeding max steps)", err, rounds)
+	}
+	if reply.Content != "done after many rounds" {
+		t.Errorf("reply.Content = %q, want %q", reply.Content, "done after many rounds")
 	}
 }
 
