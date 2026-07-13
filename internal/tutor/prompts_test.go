@@ -35,6 +35,24 @@ func TestSystemPromptForMode_UnknownModeDefaultsToFullAssist(t *testing.T) {
 	}
 }
 
+func TestModePrompts_HasEntryForEveryKnownMode(t *testing.T) {
+	for _, mode := range []string{exercise.TutorModeSyntaxOnly, exercise.TutorModeHintsFirst, exercise.TutorModeFullAssist} {
+		if modePrompts[mode] == "" {
+			t.Errorf("modePrompts[%q] is empty, want a real prompt body", mode)
+		}
+	}
+}
+
+func TestToolsInstructions_HasNativeEntry(t *testing.T) {
+	got := toolsInstructions[nativeToolCalling]
+	if got == "" {
+		t.Fatal("toolsInstructions[nativeToolCalling] is empty")
+	}
+	if got != toolsInstruction {
+		t.Errorf("toolsInstructions[nativeToolCalling] = %q, want it to match the toolsInstruction constant", got)
+	}
+}
+
 func TestWantsComprehensionCheck(t *testing.T) {
 	cases := []struct {
 		mode string
