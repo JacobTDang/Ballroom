@@ -136,18 +136,45 @@ const (
 	routingInstruction = "You are deciding whether a coding-interview tutor question needs a coding specialist's attention. Reply with exactly one word: NO if the message is a greeting, small talk, or a general clarifying question that doesn't require reading or reasoning about code. Reply YES for anything about the problem's approach, algorithm, code review, debugging, or hints. When unsure, reply YES."
 )
 
+// toolCallingStrategy selects which tool-calling instruction variant a
+// session's model needs.
+type toolCallingStrategy string
+
+const nativeToolCalling toolCallingStrategy = "native"
+
+// toolsInstructions maps a toolCallingStrategy to the instruction text
+// that teaches the model how tools work at all. A dictionary instead of
+// a bare constant so a second strategy (for a model toolcheck.go's
+// CheckToolCalling confirms doesn't populate a real tool_calls field --
+// needing fundamentally different instruction text, e.g. "emit a fenced
+// JSON block", not a wording tweak) can be added as a data entry later
+// without restructuring systemPromptForMode again. Only "native" is
+// populated for now -- nothing yet detects or requests another strategy.
+var toolsInstructions = map[toolCallingStrategy]string{
+	nativeToolCalling: toolsInstruction,
+}
+
+// modePrompts maps each tutor mode to its persona/rule text (excluding
+// toolsInstruction, selected separately above). A plain data lookup
+// instead of a switch, so adding/removing/swapping a mode's prompt is a
+// one-line map edit -- same pattern internal/exercise's validTutorModes
+// already uses for mode validation.
+var modePrompts = map[string]string{
+	exercise.TutorModeSyntaxOnly: syntaxOnlyPrompt,
+	exercise.TutorModeHintsFirst: hintsFirstPrompt,
+	exercise.TutorModeFullAssist: fullAssistPrompt,
+}
+
 // systemPromptForMode returns the tutor's persona/rules for mode,
 // falling back to full-assist for an unrecognized mode — matches
-// tutor/chat.sh's case statement default.
+// tutor/chat.sh's case statement default. Always composed with the
+// native tool-calling strategy for now (see toolsInstructions).
 func systemPromptForMode(mode string) string {
-	switch mode {
-	case exercise.TutorModeSyntaxOnly:
-		return toolsInstruction + syntaxOnlyPrompt
-	case exercise.TutorModeHintsFirst:
-		return toolsInstruction + hintsFirstPrompt
-	default:
-		return toolsInstruction + fullAssistPrompt
+	prompt, ok := modePrompts[mode]
+	if !ok {
+		prompt = fullAssistPrompt
 	}
+	return toolsInstructions[nativeToolCalling] + prompt
 }
 
 // wantsComprehensionCheck reports whether mode runs the one-time
