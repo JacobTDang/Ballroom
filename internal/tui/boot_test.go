@@ -10,6 +10,7 @@ import (
 
 	"github.com/JacobTDang/Ballroom/internal/config"
 	"github.com/JacobTDang/Ballroom/internal/preflight"
+	"github.com/JacobTDang/Ballroom/internal/tutor"
 )
 
 // fakeBuildImage substitutes buildImageFn in tests so triggering a live
@@ -312,6 +313,71 @@ func TestBootModel_ModelCheckOKSkipsPullFallback(t *testing.T) {
 	bm := newM.(bootModel)
 	if bm.pullingModel {
 		t.Error("should not attempt a fallback pull when the model check already passed")
+	}
+	if len(bm.checks) != 4 || !bm.checks[3].OK {
+		t.Errorf("expected a passing model check appended, got %+v", bm.checks)
+	}
+}
+
+// TestNewBootModel_OpenRouterTutorModelSkipsLocalOllamaModelCheck is a
+// regression test for a real bug found live: preflight.CheckModel only
+// ever checks Ollama's own local /api/tags -- it has no OpenRouter
+// awareness at all, so it always reported an OpenRouter-prefixed worker
+// model as "not pulled". That always triggered the pull-fallback path
+// below (Ollama itself was reachable), which pulled config.DefaultTutorModel
+// and overwrote cfg.TutorModel for the rest of the session -- and that
+// corrupted value then got persisted back to settings.json the next
+// time *any* setting was saved, permanently reverting the user's real
+// OpenRouter pick back to the local default. An OpenRouter model was
+// never a candidate for a local Ollama pull in the first place, so the
+// check itself must never run for one.
+func TestNewBootModel_OpenRouterTutorModelSkipsLocalOllamaModelCheck(t *testing.T) {
+	openRouterModel := tutor.OpenRouterModelPrefix + "nvidia/nemotron-3-ultra-550b-a55b:free"
+	m := newBootModel(config.Config{TutorModel: openRouterModel})
+
+	if len(m.pending) != 4 {
+		t.Fatalf("pending has %d checks, want 4", len(m.pending))
+	}
+	check := m.pending[3]()
+	if check.Name != preflight.CheckNameModel {
+		t.Fatalf("check.Name = %q, want %q", check.Name, preflight.CheckNameModel)
+	}
+	if !check.OK {
+		t.Errorf("check.OK = false for an OpenRouter model, want true -- it was never a candidate for a local Ollama pull check")
+	}
+}
+
+// TestBootModel_OpenRouterTutorModelNeverTriggersPullFallbackOrCorruptsCfg
+// exercises the same bug end to end through Update(), confirming the
+// downstream pull-fallback path never fires and cfg.TutorModel survives
+// the boot sequence unchanged.
+func TestBootModel_OpenRouterTutorModelNeverTriggersPullFallbackOrCorruptsCfg(t *testing.T) {
+	openRouterModel := tutor.OpenRouterModelPrefix + "nvidia/nemotron-3-ultra-550b-a55b:free"
+	m := newBootModel(config.Config{TutorModel: openRouterModel})
+	m.checks = []preflight.Check{
+		{Name: "Docker", OK: true},
+		{Name: preflight.CheckNameImage, OK: true},
+		{Name: preflight.CheckNameOllama, OK: true},
+	}
+
+	check := m.pending[3]() // the real check function this model uses, not a fake
+	newM, cmd := m.Update(checkDoneMsg(check))
+	bm := newM.(bootModel)
+
+	if bm.pullingModel {
+		t.Error("an OpenRouter tutor model must never trigger the local-Ollama pull fallback")
+	}
+	if bm.cfg.TutorModel != openRouterModel {
+		t.Errorf("cfg.TutorModel = %q, want it left untouched at %q", bm.cfg.TutorModel, openRouterModel)
+	}
+	// This was the last of the 4 checks, so advance() sets ready=true and
+	// returns a nil cmd (nothing left to schedule) -- not evidence of a
+	// stuck/failed advance.
+	if !bm.ready {
+		t.Error("expected the check to advance normally and reach ready")
+	}
+	if cmd != nil {
+		t.Errorf("expected a nil cmd (no more checks queued after the last one), got %v", cmd)
 	}
 	if len(bm.checks) != 4 || !bm.checks[3].OK {
 		t.Errorf("expected a passing model check appended, got %+v", bm.checks)

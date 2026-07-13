@@ -38,6 +38,15 @@ func fakeCheckModel(result preflight.Check) func() {
 	return func() { checkModelFn = orig }
 }
 
+// fakeCheckToolCalling substitutes checkToolCallingFn in tests so
+// selectModel's background check never makes a real Ollama round-trip.
+// Returns a restore func to defer.
+func fakeCheckToolCalling(supported bool, err error) func() {
+	orig := checkToolCallingFn
+	checkToolCallingFn = func(string, string, string) (bool, error) { return supported, err }
+	return func() { checkToolCallingFn = orig }
+}
+
 // fakeCatalogList substitutes catalogListFn in tests so no real exercises
 // dir / sqlite db is touched — same indirection pattern as
 // listModelsFn/checkModelFn.
@@ -205,13 +214,59 @@ func TestAppModel_StatsAnyKeyGoesBackToMain(t *testing.T) {
 
 // --- stageMain -> stageModelPicker ---
 
-func TestAppModel_EnterOnModel_KicksOffAsyncLoad(t *testing.T) {
-	defer fakeListModels([]string{"a", "b"}, nil)()
-
+func TestAppModel_EnterOnSettings_GoesToStageSettingsNoAsyncLoadYet(t *testing.T) {
+	// Settings leads with the Worker/Orchestrator role choice, not
+	// straight into a provider choice or the Ollama picker — no async
+	// load should happen until Local is chosen several levels in (see
+	// TestAppModel_ProviderChoice_SelectingLocal...).
 	m := appModel{cursor: 3}
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no command yet — the role choice itself needs no data")
+	}
+	got := newM.(appModel)
+	if got.stage != stageSettings {
+		t.Fatalf("stage = %v, want stageSettings", got.stage)
+	}
+}
+
+func TestAppModel_Settings_SelectingWorkerGoesToProviderChoiceTargetingWorker(t *testing.T) {
+	m := appModel{stage: stageSettings, settingsCursor: 0} // 0 = Worker model
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command — entering the provider choice is an internal stage change")
+	}
+	got := newM.(appModel)
+	if got.stage != stageProviderChoice {
+		t.Fatalf("stage = %v, want stageProviderChoice", got.stage)
+	}
+	if got.settingsEditing != settingsTargetWorker {
+		t.Errorf("settingsEditing = %v, want settingsTargetWorker", got.settingsEditing)
+	}
+}
+
+func TestAppModel_Settings_SelectingOrchestratorGoesToProviderChoiceTargetingOrchestrator(t *testing.T) {
+	m := appModel{stage: stageSettings, settingsCursor: 1} // 1 = Orchestrator model
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	got := newM.(appModel)
+	if got.stage != stageProviderChoice {
+		t.Fatalf("stage = %v, want stageProviderChoice", got.stage)
+	}
+	if got.settingsEditing != settingsTargetOrchestrator {
+		t.Errorf("settingsEditing = %v, want settingsTargetOrchestrator", got.settingsEditing)
+	}
+}
+
+func TestAppModel_ProviderChoice_SelectingLocalKicksOffAsyncModelLoad(t *testing.T) {
+	defer fakeListModels([]string{"a", "b"}, nil)()
+
+	m := appModel{stage: stageProviderChoice, settingsCursor: 0, settingsEditing: settingsTargetWorker} // 0 = Local
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("expected enter on Model to kick off an async models-loading command")
+		t.Fatal("expected enter on Local to kick off an async models-loading command")
 	}
 	got := newM.(appModel)
 	if got.stage != stageModelPicker {
@@ -236,6 +291,225 @@ func TestAppModel_EnterOnModel_KicksOffAsyncLoad(t *testing.T) {
 	// discoverability behavior itself.
 	if len(got2.modelFiltered) != 4 {
 		t.Errorf("modelFiltered = %v, want 4 entries (2 local + 2 suggested)", got2.modelFiltered)
+	}
+}
+
+func TestAppModel_ProviderChoice_SelectingAPIGoesToAPIModelEntry(t *testing.T) {
+	m := appModel{stage: stageProviderChoice, settingsCursor: 1, settingsEditing: settingsTargetWorker} // 1 = API
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command — entering the slug-entry stage is an internal stage change")
+	}
+	got := newM.(appModel)
+	if got.stage != stageAPIModelEntry {
+		t.Fatalf("stage = %v, want stageAPIModelEntry", got.stage)
+	}
+	if len(got.apiModelFiltered) == 0 {
+		t.Error("expected apiModelFiltered to be seeded with suggestedOpenRouterModels, got none")
+	}
+	if got.apiModelCursor != 0 {
+		t.Errorf("apiModelCursor = %d, want 0", got.apiModelCursor)
+	}
+}
+
+func TestAppModel_ProviderChoice_OrchestratorGetsAThirdNoneOption(t *testing.T) {
+	m := appModel{
+		cfg:             config.Config{DataDir: t.TempDir(), TutorModel: "worker-model", OrchestratorModel: "orchestrator-model"},
+		stage:           stageProviderChoice,
+		settingsCursor:  2, // None (disable routing) -- only present for the orchestrator target
+		settingsEditing: settingsTargetOrchestrator,
+	}
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	got := newM.(appModel)
+	if got.stage != stageSettings {
+		t.Fatalf("stage = %v, want stageSettings (back out after clearing)", got.stage)
+	}
+	if got.cfg.OrchestratorModel != "" {
+		t.Errorf("cfg.OrchestratorModel = %q, want empty after selecting None", got.cfg.OrchestratorModel)
+	}
+	if got.cfg.TutorModel != "worker-model" {
+		t.Errorf("cfg.TutorModel = %q, want it preserved", got.cfg.TutorModel)
+	}
+
+	saved, err := config.LoadSettings(m.cfg.SettingsPath())
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if saved.OrchestratorModel != "" {
+		t.Errorf("persisted OrchestratorModel = %q, want empty", saved.OrchestratorModel)
+	}
+	if saved.TutorModel != "worker-model" {
+		t.Errorf("persisted TutorModel = %q, want it preserved", saved.TutorModel)
+	}
+}
+
+func TestAppModel_ProviderChoice_WorkerTargetHasNoNoneOption(t *testing.T) {
+	// The worker model is never optional -- there must always be one --
+	// so its provider choice list stays at 2 items (Local/API), unlike
+	// the orchestrator's 3.
+	m := appModel{stage: stageProviderChoice, settingsCursor: 1, settingsEditing: settingsTargetWorker}
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := newM.(appModel)
+	if got.settingsCursor != 1 {
+		t.Errorf("settingsCursor = %d, want to stay at 1 (only 2 items: Local, API)", got.settingsCursor)
+	}
+}
+
+func TestAppModel_ProviderChoice_EscGoesBackToSettings(t *testing.T) {
+	m := appModel{stage: stageProviderChoice}
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	if newM.(appModel).stage != stageSettings {
+		t.Errorf("stage = %v, want stageSettings", newM.(appModel).stage)
+	}
+}
+
+func TestAppModel_Settings_EscGoesBackToMain(t *testing.T) {
+	m := appModel{stage: stageSettings}
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	if newM.(appModel).stage != stageMain {
+		t.Errorf("stage = %v, want stageMain", newM.(appModel).stage)
+	}
+}
+
+func TestAppModel_RenderSettings_ShowsCurrentModel(t *testing.T) {
+	m := appModel{cfg: config.Config{TutorModel: "llama3.1:8b"}, stage: stageSettings}
+	view := stripAnsiTUI(m.View())
+	if !strings.Contains(view, "llama3.1:8b") {
+		t.Errorf("expected the current model in the view, got:\n%s", view)
+	}
+}
+
+func TestAppModel_APIModelEntry_EnterWithKeyAlreadySetSelectsImmediately(t *testing.T) {
+	defer fakeCheckToolCalling(true, nil)()
+
+	dir := t.TempDir()
+	m := appModel{cfg: config.Config{DataDir: dir, OpenRouterAPIKey: "sk-existing"}, stage: stageAPIModelEntry, apiModelInput: "anthropic/claude-3.5-sonnet"}
+
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Error("expected a background command kicking off the tool-calling check")
+	}
+	got := newM.(appModel)
+	if got.stage != stageMain {
+		t.Fatalf("stage = %v, want stageMain", got.stage)
+	}
+	if got.cfg.TutorModel != "openrouter:anthropic/claude-3.5-sonnet" {
+		t.Errorf("cfg.TutorModel = %q, want %q", got.cfg.TutorModel, "openrouter:anthropic/claude-3.5-sonnet")
+	}
+}
+
+func TestAppModel_APIModelEntry_EnterWithNoKeyGoesToKeyEntry(t *testing.T) {
+	m := appModel{cfg: config.Config{DataDir: t.TempDir()}, stage: stageAPIModelEntry, apiModelInput: "anthropic/claude-3.5-sonnet"}
+
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command — no key yet, just an internal stage change")
+	}
+	got := newM.(appModel)
+	if got.stage != stageOpenRouterKeyEntry {
+		t.Fatalf("stage = %v, want stageOpenRouterKeyEntry", got.stage)
+	}
+	if got.openRouterPendingModel != "openrouter:anthropic/claude-3.5-sonnet" {
+		t.Errorf("openRouterPendingModel = %q, want %q", got.openRouterPendingModel, "openrouter:anthropic/claude-3.5-sonnet")
+	}
+}
+
+func TestAppModel_APIModelEntry_EscGoesBackToProviderChoice(t *testing.T) {
+	m := appModel{stage: stageAPIModelEntry, apiModelInput: "partial"}
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	if newM.(appModel).stage != stageProviderChoice {
+		t.Errorf("stage = %v, want stageProviderChoice", newM.(appModel).stage)
+	}
+}
+
+func TestAppModel_APIModelEntry_BackspaceRemovesLastCharacter(t *testing.T) {
+	m := appModel{stage: stageAPIModelEntry, apiModelInput: "anthropic/x"}
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	got := newM.(appModel)
+	if got.apiModelInput != "anthropic/" {
+		t.Errorf("apiModelInput = %q, want %q", got.apiModelInput, "anthropic/")
+	}
+}
+
+// apiModelEntryFixture enters stageAPIModelEntry the real way (via
+// stageProviderChoice), so apiModelFiltered starts seeded with
+// suggestedOpenRouterModels exactly like a real session.
+func apiModelEntryFixture(t *testing.T) appModel {
+	t.Helper()
+	m := appModel{stage: stageProviderChoice, settingsCursor: 1, settingsEditing: settingsTargetWorker}
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	return newM.(appModel)
+}
+
+func TestAppModel_APIModelEntry_TypingFiltersSuggestedModels(t *testing.T) {
+	m := apiModelEntryFixture(t)
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("gpt-oss-20b")})
+	got := newM.(appModel)
+	if len(got.apiModelFiltered) != 1 || got.apiModelFiltered[0] != "openai/gpt-oss-20b:free" {
+		t.Errorf("apiModelFiltered = %v, want [openai/gpt-oss-20b:free]", got.apiModelFiltered)
+	}
+}
+
+func TestAppModel_APIModelEntry_DownMovesCursorWithinFilteredList(t *testing.T) {
+	m := apiModelEntryFixture(t)
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := newM.(appModel)
+	if got.apiModelCursor != 1 {
+		t.Errorf("apiModelCursor = %d, want 1", got.apiModelCursor)
+	}
+}
+
+func TestAppModel_APIModelEntry_DownStopsAtLastFilteredEntry(t *testing.T) {
+	m := apiModelEntryFixture(t)
+	for i := 0; i < len(m.apiModelFiltered)+5; i++ {
+		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = newM.(appModel)
+	}
+	if m.apiModelCursor != len(m.apiModelFiltered)-1 {
+		t.Errorf("apiModelCursor = %d, want %d (last entry)", m.apiModelCursor, len(m.apiModelFiltered)-1)
+	}
+}
+
+func TestAppModel_APIModelEntry_EnterOnHighlightedSuggestionSelectsItWithOpenRouterPrefix(t *testing.T) {
+	defer fakeCheckToolCalling(true, nil)()
+	dir := t.TempDir()
+
+	m := apiModelEntryFixture(t)
+	m.cfg = config.Config{DataDir: dir, OpenRouterAPIKey: "sk-existing"}
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = newM.(appModel)
+	want := "openrouter:" + m.apiModelFiltered[m.apiModelCursor]
+
+	newM2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Error("expected a background command kicking off the tool-calling check")
+	}
+	got := newM2.(appModel)
+	if got.cfg.TutorModel != want {
+		t.Errorf("cfg.TutorModel = %q, want %q", got.cfg.TutorModel, want)
+	}
+}
+
+func TestAppModel_APIModelEntry_QWithNoFilterGoesBackToProviderChoice(t *testing.T) {
+	m := apiModelEntryFixture(t)
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd != nil {
+		t.Error("expected no external command — back to the provider choice is an internal stage change")
+	}
+	if newM.(appModel).stage != stageProviderChoice {
+		t.Error("expected q with no filter to return to stageProviderChoice")
 	}
 }
 
@@ -462,18 +736,23 @@ func TestAppModel_ModelPicker_TypingFilters(t *testing.T) {
 	}
 }
 
-func TestAppModel_ModelPicker_QWithNoFilterGoesBackToMain(t *testing.T) {
+func TestAppModel_ModelPicker_QWithNoFilterGoesBackToProviderChoice(t *testing.T) {
+	// The model picker is now only reachable via Settings -> (Worker or
+	// Orchestrator) -> Local, so backing out lands on the provider
+	// choice, not all the way back to the main menu.
 	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b"})
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if cmd != nil {
-		t.Error("expected no external command — back to main is an internal stage change")
+		t.Error("expected no external command — back to the provider choice is an internal stage change")
 	}
-	if newM.(appModel).stage != stageMain {
-		t.Error("expected q with no filter to return to stageMain")
+	if newM.(appModel).stage != stageProviderChoice {
+		t.Error("expected q with no filter to return to stageProviderChoice")
 	}
 }
 
 func TestAppModel_ModelPicker_EnterOnLocalModelPersistsAndReturnsToMain(t *testing.T) {
+	defer fakeCheckToolCalling(true, nil)()
+
 	dir := t.TempDir()
 	cfg := config.Config{DataDir: dir, TutorModel: "old-model"}
 	m := appModel{cfg: cfg, stage: stageModelPicker, modelLoading: true}
@@ -484,8 +763,8 @@ func TestAppModel_ModelPicker_EnterOnLocalModelPersistsAndReturnsToMain(t *testi
 	m = newM2.(appModel)
 
 	newM3, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil {
-		t.Error("expected no external command — selecting a model doesn't leave the program")
+	if cmd == nil {
+		t.Error("expected a background command kicking off the tool-calling check")
 	}
 	got := newM3.(appModel)
 	if got.stage != stageMain {
@@ -608,6 +887,7 @@ func TestAppModel_ModelPicker_SelectingSuggestedNotPulledModelWarnsFirst(t *test
 
 func TestAppModel_ModelPicker_YOnDownloadPromptStartsLivePullAndSelectsOnSuccess(t *testing.T) {
 	defer fakeCheckModel(preflight.Check{OK: false, Detail: config.Qwen25Coder14BModel + " not pulled — ollama pull " + config.Qwen25Coder14BModel})()
+	defer fakeCheckToolCalling(true, nil)()
 
 	lineCh := make(chan string, 1)
 	errCh := make(chan error, 1)
@@ -647,8 +927,8 @@ func TestAppModel_ModelPicker_YOnDownloadPromptStartsLivePullAndSelectsOnSuccess
 	}
 
 	newM3, cmd3 := m.Update(pullDoneMsg{err: nil})
-	if cmd3 != nil {
-		t.Error("expected no external command once the pull succeeds — selecting a model is an internal stage change")
+	if cmd3 == nil {
+		t.Error("expected a background command kicking off the tool-calling check once the pull succeeds")
 	}
 	got := newM3.(appModel)
 	if got.stage != stageMain {
@@ -775,11 +1055,14 @@ func TestAppModel_ModelPicker_SelectingLocalModelNeverCallsCheckModel(t *testing
 	// already-pulled local model called checkModelFn at all, this test
 	// would hit the real network-calling default and could hang/flake in
 	// CI. Selecting a genuinely local entry must short-circuit before
-	// ever reaching that call.
+	// ever reaching that call. checkToolCallingFn is faked separately —
+	// selecting a model always kicks that check off, local or not.
+	defer fakeCheckToolCalling(true, nil)()
+
 	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b", "llama3:8b"})
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil {
-		t.Error("expected enter to select immediately for an already-pulled local model, no external command")
+	if cmd == nil {
+		t.Error("expected a background command kicking off the tool-calling check")
 	}
 	got := newM.(appModel)
 	if got.stage != stageMain {
@@ -787,6 +1070,283 @@ func TestAppModel_ModelPicker_SelectingLocalModelNeverCallsCheckModel(t *testing
 	}
 	if got.cfg.TutorModel != "qwen2.5-coder:7b" {
 		t.Errorf("cfg.TutorModel = %q, want %q", got.cfg.TutorModel, "qwen2.5-coder:7b")
+	}
+}
+
+// --- OpenRouter model selection (handleModelEnter routing + key entry) ---
+
+func TestAppModel_ModelPicker_TypingOpenRouterTagWithNoKeySetGoesToKeyEntry(t *testing.T) {
+	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b"})
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("openrouter:anthropic/claude-3.5-sonnet")})
+	m = newM.(appModel)
+
+	newM2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command — entering the key-entry stage is an internal stage change")
+	}
+	got := newM2.(appModel)
+	if got.stage != stageOpenRouterKeyEntry {
+		t.Errorf("stage = %v, want stageOpenRouterKeyEntry", got.stage)
+	}
+	if got.openRouterPendingModel != "openrouter:anthropic/claude-3.5-sonnet" {
+		t.Errorf("openRouterPendingModel = %q, want %q", got.openRouterPendingModel, "openrouter:anthropic/claude-3.5-sonnet")
+	}
+	// checkModelFn must never be reached for an openrouter: tag — it's
+	// meaningless against Ollama's /api/tags and would misreport it as
+	// "not pulled".
+}
+
+func TestAppModel_ModelPicker_TypingOpenRouterTagWithKeyAlreadySetSelectsImmediately(t *testing.T) {
+	defer fakeCheckToolCalling(true, nil)()
+
+	dir := t.TempDir()
+	m := appModel{cfg: config.Config{DataDir: dir, OpenRouterAPIKey: "sk-existing"}, stage: stageModelPicker, modelLoading: true}
+	newM, _ := m.Update(modelsLoadedMsg{models: []string{"qwen2.5-coder:7b"}})
+	m = newM.(appModel)
+	newM2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("openrouter:anthropic/claude-3.5-sonnet")})
+	m = newM2.(appModel)
+
+	newM3, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Error("expected a background command kicking off the tool-calling check")
+	}
+	got := newM3.(appModel)
+	if got.stage != stageMain {
+		t.Errorf("stage = %v, want stageMain (key already available, should select immediately)", got.stage)
+	}
+	if got.cfg.TutorModel != "openrouter:anthropic/claude-3.5-sonnet" {
+		t.Errorf("cfg.TutorModel = %q, want %q", got.cfg.TutorModel, "openrouter:anthropic/claude-3.5-sonnet")
+	}
+}
+
+func TestAppModel_OpenRouterKeyEntry_EnterSavesKeyAndSelectsPendingModel(t *testing.T) {
+	defer fakeCheckToolCalling(true, nil)()
+
+	dir := t.TempDir()
+	cfg := config.Config{DataDir: dir, TutorModel: "old-model"}
+	m := appModel{cfg: cfg, stage: stageOpenRouterKeyEntry, openRouterPendingModel: "openrouter:anthropic/claude-3.5-sonnet"}
+
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("sk-typed-key")})
+	m = newM.(appModel)
+
+	newM2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Error("expected a background command kicking off the tool-calling check")
+	}
+	got := newM2.(appModel)
+	if got.stage != stageMain {
+		t.Fatalf("stage = %v, want stageMain", got.stage)
+	}
+	if got.cfg.OpenRouterAPIKey != "sk-typed-key" {
+		t.Errorf("cfg.OpenRouterAPIKey = %q, want %q", got.cfg.OpenRouterAPIKey, "sk-typed-key")
+	}
+	if got.cfg.TutorModel != "openrouter:anthropic/claude-3.5-sonnet" {
+		t.Errorf("cfg.TutorModel = %q, want %q", got.cfg.TutorModel, "openrouter:anthropic/claude-3.5-sonnet")
+	}
+
+	saved, err := config.LoadSettings(cfg.SettingsPath())
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if saved.OpenRouterAPIKey != "sk-typed-key" {
+		t.Errorf("persisted OpenRouterAPIKey = %q, want %q", saved.OpenRouterAPIKey, "sk-typed-key")
+	}
+	if saved.TutorModel != "openrouter:anthropic/claude-3.5-sonnet" {
+		t.Errorf("persisted TutorModel = %q, want %q", saved.TutorModel, "openrouter:anthropic/claude-3.5-sonnet")
+	}
+}
+
+func TestAppModel_OpenRouterKeyEntry_EnterWithEmptyKeyDoesNothing(t *testing.T) {
+	m := appModel{cfg: config.Config{DataDir: t.TempDir()}, stage: stageOpenRouterKeyEntry, openRouterPendingModel: "openrouter:x/y"}
+
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no command when the key input is empty")
+	}
+	got := newM.(appModel)
+	if got.stage != stageOpenRouterKeyEntry {
+		t.Errorf("stage = %v, want to stay at stageOpenRouterKeyEntry with nothing typed", got.stage)
+	}
+}
+
+func TestAppModel_OpenRouterKeyEntry_EscCancelsBackToProviderChoiceWithoutSelecting(t *testing.T) {
+	// A single consistent "cancel returns to the provider choice"
+	// behavior, regardless of whether this stage was reached by typing
+	// openrouter: directly in the local picker or via the newer
+	// Settings -> API -> slug-entry path.
+	m := appModel{cfg: config.Config{DataDir: t.TempDir(), TutorModel: "old-model"}, stage: stageOpenRouterKeyEntry, openRouterPendingModel: "openrouter:x/y", openRouterKeyInput: "sk-partial"}
+
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd != nil {
+		t.Error("expected no external command on cancel")
+	}
+	got := newM.(appModel)
+	if got.stage != stageProviderChoice {
+		t.Errorf("stage = %v, want stageProviderChoice", got.stage)
+	}
+	if got.cfg.TutorModel != "old-model" {
+		t.Errorf("cfg.TutorModel = %q, want unchanged %q", got.cfg.TutorModel, "old-model")
+	}
+	if got.cfg.OpenRouterAPIKey != "" {
+		t.Error("expected the partially-typed key to be discarded, not saved")
+	}
+}
+
+func TestAppModel_OpenRouterKeyEntry_BackspaceRemovesLastCharacter(t *testing.T) {
+	m := appModel{cfg: config.Config{DataDir: t.TempDir()}, stage: stageOpenRouterKeyEntry, openRouterKeyInput: "sk-abc"}
+
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	got := newM.(appModel)
+	if got.openRouterKeyInput != "sk-ab" {
+		t.Errorf("openRouterKeyInput = %q, want %q", got.openRouterKeyInput, "sk-ab")
+	}
+}
+
+func TestAppModel_SelectModel_PreservesOpenRouterAPIKeyAcrossAnOllamaPick(t *testing.T) {
+	defer fakeCheckToolCalling(true, nil)()
+
+	dir := t.TempDir()
+	cfg := config.Config{DataDir: dir, OpenRouterAPIKey: "sk-preserve-me"}
+	m := appModel{cfg: cfg}
+
+	newM, _ := m.selectModel("llama3:8b")
+	got := newM.(appModel)
+	if got.cfg.OpenRouterAPIKey != "sk-preserve-me" {
+		t.Errorf("cfg.OpenRouterAPIKey = %q, want it preserved across an unrelated Ollama pick", got.cfg.OpenRouterAPIKey)
+	}
+
+	saved, err := config.LoadSettings(cfg.SettingsPath())
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if saved.OpenRouterAPIKey != "sk-preserve-me" {
+		t.Errorf("persisted OpenRouterAPIKey = %q, want it preserved, not wiped by picking an unrelated Ollama model", saved.OpenRouterAPIKey)
+	}
+}
+
+func TestAppModel_SelectModel_WritesOrchestratorModelWhenTargetingOrchestrator(t *testing.T) {
+	defer fakeCheckToolCalling(true, nil)()
+
+	dir := t.TempDir()
+	cfg := config.Config{DataDir: dir, TutorModel: "worker-model"}
+	m := appModel{cfg: cfg, settingsEditing: settingsTargetOrchestrator}
+
+	newM, _ := m.selectModel("orchestrator-model")
+	got := newM.(appModel)
+	if got.cfg.OrchestratorModel != "orchestrator-model" {
+		t.Errorf("cfg.OrchestratorModel = %q, want %q", got.cfg.OrchestratorModel, "orchestrator-model")
+	}
+	if got.cfg.TutorModel != "worker-model" {
+		t.Errorf("cfg.TutorModel = %q, want it preserved (unaffected by an orchestrator pick)", got.cfg.TutorModel)
+	}
+
+	saved, err := config.LoadSettings(cfg.SettingsPath())
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if saved.OrchestratorModel != "orchestrator-model" {
+		t.Errorf("persisted OrchestratorModel = %q, want %q", saved.OrchestratorModel, "orchestrator-model")
+	}
+	if saved.TutorModel != "worker-model" {
+		t.Errorf("persisted TutorModel = %q, want it preserved", saved.TutorModel)
+	}
+}
+
+func TestAppModel_RenderOpenRouterKeyEntry_MasksTypedKey(t *testing.T) {
+	m := appModel{cfg: config.Config{}, stage: stageOpenRouterKeyEntry, openRouterPendingModel: "openrouter:x/y", openRouterKeyInput: "sk-secret-value"}
+	view := stripAnsiTUI(m.View())
+	if strings.Contains(view, "sk-secret-value") {
+		t.Error("expected the typed API key to be masked, not shown in plain text")
+	}
+}
+
+// --- tool-calling validation (selectModel's checkToolCallingCmd) ---
+
+func TestAppModel_SelectModel_RunningItsCmdReportsUnsupportedToolCalling(t *testing.T) {
+	defer fakeCheckToolCalling(false, nil)()
+
+	m := appModel{cfg: config.Config{DataDir: t.TempDir()}}
+	newM, cmd := m.selectModel("qwen2.5-coder:7b")
+	if cmd == nil {
+		t.Fatal("expected selectModel to return the tool-calling check command")
+	}
+
+	msg := cmd()
+	checkMsg, ok := msg.(toolCallingCheckMsg)
+	if !ok {
+		t.Fatalf("cmd() returned %T, want toolCallingCheckMsg", msg)
+	}
+	if checkMsg.model != "qwen2.5-coder:7b" || checkMsg.supported {
+		t.Errorf("toolCallingCheckMsg = %+v, want model=qwen2.5-coder:7b supported=false", checkMsg)
+	}
+
+	got, _ := newM.Update(checkMsg)
+	final := got.(appModel)
+	if final.toolCallingWarning == "" {
+		t.Error("expected toolCallingWarning to be set for an unsupported model")
+	}
+	if !strings.Contains(final.toolCallingWarning, "qwen2.5-coder:7b") {
+		t.Errorf("toolCallingWarning = %q, want it to name the model", final.toolCallingWarning)
+	}
+}
+
+func TestAppModel_ToolCallingCheckMsg_SupportedLeavesNoWarning(t *testing.T) {
+	m := appModel{cfg: config.Config{TutorModel: "llama3.1:8b"}}
+	newM, cmd := m.Update(toolCallingCheckMsg{model: "llama3.1:8b", supported: true})
+	if cmd != nil {
+		t.Error("expected no further command once the check resolves")
+	}
+	got := newM.(appModel)
+	if got.toolCallingWarning != "" {
+		t.Errorf("toolCallingWarning = %q, want empty for a supported model", got.toolCallingWarning)
+	}
+}
+
+func TestAppModel_ToolCallingCheckMsg_ErrorSetsWarningWithRealDetail(t *testing.T) {
+	// A real bug found live: this used to leave toolCallingWarning empty
+	// on any error, on the reasoning that a network blip checking a
+	// perfectly fine model shouldn't scare the user into thinking that
+	// model is broken. In practice this swallowed a much more
+	// significant case: Ollama hard-rejecting a request with 400 "does
+	// not support tools" for a model picked without real tool-calling
+	// support IS an error here (CheckToolCalling returns it as such,
+	// not just supported=false) — so the picker went completely silent,
+	// and the problem only surfaced once inside a live tutor session as
+	// a confusing "could not reach" message. An error must still warn,
+	// just phrased as the check having failed rather than flatly
+	// blaming the model, since it could still be a transient issue.
+	m := appModel{cfg: config.Config{TutorModel: "llama3.1:8b"}}
+	newM, _ := m.Update(toolCallingCheckMsg{model: "llama3.1:8b", supported: false, err: errors.New("does not support tools")})
+	got := newM.(appModel)
+	if got.toolCallingWarning == "" {
+		t.Fatal("expected toolCallingWarning to be set when the check itself errored")
+	}
+	if !strings.Contains(got.toolCallingWarning, "llama3.1:8b") {
+		t.Errorf("toolCallingWarning = %q, want it to name the model", got.toolCallingWarning)
+	}
+	if !strings.Contains(got.toolCallingWarning, "does not support tools") {
+		t.Errorf("toolCallingWarning = %q, want the real underlying error detail included", got.toolCallingWarning)
+	}
+}
+
+func TestAppModel_ToolCallingCheckMsg_StaleResultForReplacedModelIgnored(t *testing.T) {
+	// The user picked "llama3.1:8b" again (or something else) before the
+	// check for the earlier "qwen2.5-coder:7b" pick resolved — that
+	// stale result must not set a warning about a model that isn't even
+	// selected anymore.
+	m := appModel{cfg: config.Config{TutorModel: "llama3.1:8b"}, toolCallingWarning: ""}
+	newM, _ := m.Update(toolCallingCheckMsg{model: "qwen2.5-coder:7b", supported: false})
+	got := newM.(appModel)
+	if got.toolCallingWarning != "" {
+		t.Errorf("toolCallingWarning = %q, want empty — result was for a model that is no longer selected", got.toolCallingWarning)
+	}
+}
+
+func TestAppModel_RenderMain_ShowsToolCallingWarning(t *testing.T) {
+	m := appModel{stage: stageMain, toolCallingWarning: "qwen2.5-coder:7b may not support real tool calling"}
+	view := stripAnsiTUI(m.View())
+	if !strings.Contains(view, "may not support real tool calling") {
+		t.Errorf("expected the tool-calling warning in the main menu view, got:\n%s", view)
 	}
 }
 

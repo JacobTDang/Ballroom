@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -14,11 +13,21 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 )
 
+// ansiPattern/stripAnsi strip terminal escape sequences (cursor
+// movement, color) out of captured stdout so tests can assert on the
+// visible text content — shared by discoball_test.go, thinkingdisplay_test.go,
+// and this file's own Run-level smoke test.
+var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+
+func stripAnsi(s string) string {
+	return ansiPattern.ReplaceAllString(s, "")
+}
+
 // tutorChatRequest/sequencedOllama are the package's Ollama mock server
-// for Go-native tests — used here and by agent_test.go. Originally kept
-// independent of chat_test.go's now-deleted mockOllama (which tested
-// tutor/chat.sh, the bash implementation this package replaced) so this
-// file wouldn't need to change when that one went away.
+// for Go-native tests — used here and by model_test.go/agent_test.go.
+// Originally kept independent of chat_test.go's now-deleted mockOllama
+// (which tested tutor/chat.sh, the bash implementation this package
+// replaced) so this file wouldn't need to change when that one went away.
 type tutorChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -91,184 +100,52 @@ func testConfig(ollamaHost string) Config {
 	}
 }
 
-func TestRun_PrintsAssistantReply(t *testing.T) {
-	mock := newSequencedOllama(t, "the answer is 42")
-	cfg := testConfig(mock.URL)
-	cfg.Mode = exercise.TutorModeSyntaxOnly // skip the comprehension check for a single-turn test
-
-	var stdout, stderr strings.Builder
-	if err := Run(context.Background(), cfg, strings.NewReader("question\n"), &stdout, &stderr); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if !strings.Contains(stdout.String(), "the answer is 42") {
-		t.Errorf("stdout = %q, want it to contain the assistant reply", stdout.String())
-	}
-}
-
-func TestRun_RetainsConversationHistory(t *testing.T) {
-	mock := newSequencedOllama(t, "assistant-reply-1", "assistant-reply-2")
-	cfg := testConfig(mock.URL)
-	cfg.Mode = exercise.TutorModeSyntaxOnly // skip the comprehension check to isolate history behavior
-
-	var stdout, stderr strings.Builder
-	if err := Run(context.Background(), cfg, strings.NewReader("first line\nsecond line\n"), &stdout, &stderr); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	reqs := mock.allRequests()
-	if len(reqs) != 2 {
-		t.Fatalf("expected 2 requests (one per input line), got %d", len(reqs))
-	}
-
-	if len(reqs[0].Messages) != 2 {
-		t.Errorf("first request: expected [system, user1] = 2 messages, got %d: %+v", len(reqs[0].Messages), reqs[0].Messages)
-	}
-
-	second := reqs[1].Messages
-	if len(second) != 4 {
-		t.Fatalf("second request: expected [system, user1, assistant1, user2] = 4 messages, got %d: %+v", len(second), second)
-	}
-	if second[1].Content != "first line" {
-		t.Errorf("second request messages[1] (user1) = %q, want %q", second[1].Content, "first line")
-	}
-	if second[2].Role != "assistant" || second[2].Content != "assistant-reply-1" {
-		t.Errorf("second request messages[2] (assistant1) = %+v, want role=assistant content=%q", second[2], "assistant-reply-1")
-	}
-	if second[3].Content != "second line" {
-		t.Errorf("second request messages[3] (user2) = %q, want %q", second[3].Content, "second line")
-	}
-}
-
-func TestRun_HandlesUnreachableHostGracefully(t *testing.T) {
-	cfg := testConfig("http://127.0.0.1:1") // port 1 is reserved/unlisted, refuses immediately
-	cfg.Mode = exercise.TutorModeSyntaxOnly
-
-	var stdout, stderr strings.Builder
-	if err := Run(context.Background(), cfg, strings.NewReader("hello\n"), &stdout, &stderr); err != nil {
-		t.Fatalf("Run should exit cleanly even when Ollama is unreachable, got error: %v", err)
-	}
-	if !strings.Contains(stderr.String(), "could not reach") {
-		t.Errorf("stderr = %q, want a message about being unable to reach the host", stderr.String())
-	}
-}
-
-func TestRun_ComprehensionCheckIsolatesRealQuestion(t *testing.T) {
-	mock := newSequencedOllama(t, "restated problem + questions", "real answer")
-	cfg := testConfig(mock.URL)
-	cfg.Mode = exercise.TutorModeFullAssist // wants the comprehension check
-
-	secretQuestion := "what is the secret algorithm here"
-	var stdout, stderr strings.Builder
-	if err := Run(context.Background(), cfg, strings.NewReader(secretQuestion+"\n"), &stdout, &stderr); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	reqs := mock.allRequests()
-	if len(reqs) == 0 {
-		t.Fatal("expected at least 1 request (the comprehension check), got 0")
-	}
-
-	checkReq := reqs[0]
-	for _, m := range checkReq.Messages {
-		if strings.Contains(m.Content, secretQuestion) {
-			t.Errorf("comprehension check request contained the user's real question %q — isolation broken: %+v", secretQuestion, checkReq.Messages)
-		}
-	}
-
-	if !strings.Contains(stdout.String(), "restated problem + questions") {
-		t.Errorf("stdout = %q, want the comprehension check's reply printed", stdout.String())
-	}
-}
-
-func TestRun_ComprehensionCheckInjectsProblemStatementDirectly(t *testing.T) {
-	mock := newSequencedOllama(t, "restated problem + questions")
-	cfg := testConfig(mock.URL)
-	cfg.Mode = exercise.TutorModeFullAssist
-	cfg.WorkDir = t.TempDir()
-
-	want := "# Two Sum\n\nReturn indices of the two numbers that add up to target."
-	if err := os.WriteFile(filepath.Join(cfg.WorkDir, "problem.md"), []byte(want), 0o644); err != nil {
-		t.Fatalf("write problem.md: %v", err)
-	}
-
-	var stdout, stderr strings.Builder
-	if err := Run(context.Background(), cfg, strings.NewReader("what's the problem?\n"), &stdout, &stderr); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	reqs := mock.allRequests()
-	if len(reqs) != 1 {
-		t.Fatalf("expected 1 request (the comprehension check), got %d", len(reqs))
-	}
-
-	found := false
-	for _, m := range reqs[0].Messages {
-		if strings.Contains(m.Content, want) {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("comprehension check request never included the injected problem statement %q: %+v", want, reqs[0].Messages)
-	}
-}
-
-func TestRun_ComprehensionCheckSkippedForSyntaxOnly(t *testing.T) {
-	mock := newSequencedOllama(t, "direct reply")
+// TestRun_ExitsCleanlyOnCtrlDWithNoInput is Run()'s one true
+// program-level smoke test: it proves the thin wrapper actually builds a
+// real tutorModel and drives a real tea.Program against a fake
+// io.Reader/io.Writer end to end. It deliberately submits no message --
+// a scripted input stream that both submits a message AND appends Ctrl-D
+// races the turn's own async completion against the queued Ctrl-D (see
+// RunOneTurn's doc comment), so real turn-loop behavior is covered by
+// model_test.go's direct tutorModel.Update() tests instead, which have
+// no such race.
+//
+// Asserts on the textarea's placeholder, not the viewport's banner text
+// -- a real tty triggers bubbletea's own initial tea.WindowSizeMsg query,
+// but a fake, non-tty io.Writer (as used here and by every other test in
+// this package) never does, so the viewport (whose View() renders
+// exactly Height rows) stays at its zero-value height and paints
+// nothing; the textarea renders unconditionally regardless of that.
+func TestRun_ExitsCleanlyOnCtrlDWithNoInput(t *testing.T) {
+	mock := newSequencedOllama(t, "unused")
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
 
 	var stdout, stderr strings.Builder
-	if err := Run(context.Background(), cfg, strings.NewReader("what's wrong with my code\n"), &stdout, &stderr); err != nil {
+	if err := Run(context.Background(), cfg, strings.NewReader("\x04"), &stdout, &stderr); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-
-	reqs := mock.allRequests()
-	if len(reqs) != 1 {
-		t.Fatalf("expected exactly 1 request (no comprehension check for syntax-only), got %d", len(reqs))
-	}
-	if !strings.Contains(stdout.String(), "direct reply") {
-		t.Errorf("stdout = %q, want the direct reply printed with no check", stdout.String())
+	if got := stripAnsi(stdout.String()); !strings.Contains(got, "Ask a question") {
+		t.Errorf("stdout = %q, want the textarea's placeholder, proving a real frame was rendered", got)
 	}
 }
 
-func TestRun_ComprehensionCheckHistoryPersistsBothTurns(t *testing.T) {
-	mock := newSequencedOllama(t, "restated + questions", "real answer")
-	cfg := testConfig(mock.URL)
-	cfg.Mode = exercise.TutorModeHintsFirst
-
-	var stdout, stderr strings.Builder
-	if err := Run(context.Background(), cfg, strings.NewReader("real question\nfollow up\n"), &stdout, &stderr); err != nil {
-		t.Fatalf("Run: %v", err)
+func TestLooksLikeLeakedToolCall_DetectsRawJSONShape(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"bare JSON", `{"name": "read_solution_file", "parameters": {}}`, true},
+		{"prose then JSON", "To answer this, I need to check your code.\n\n" + `{"name": "read_cursor_position", "parameters": {}}`, true},
+		{"hallucinated tool name still matches the shape", `{"name": "read_user_code", "parameters": {}}`, true},
+		{"clean reply", "your code looks fine to me", false},
+		{"empty", "", false},
 	}
-
-	reqs := mock.allRequests()
-	// Only 2 requests total: the check consumes the first input line's
-	// turn entirely (no separate normal request is also sent for it),
-	// then the second input line is one normal turn.
-	if len(reqs) != 2 {
-		t.Fatalf("expected 2 requests (check, then 1 real turn), got %d", len(reqs))
-	}
-
-	// Second request's history should include the check's exchange —
-	// persisted using the real first question as the user turn, per
-	// runComprehensionCheck's doc comment — followed by the ephemeral
-	// hint-count note (hints-first mode, see turnMessages) and the
-	// second line.
-	second := reqs[1].Messages
-	if len(second) != 5 {
-		t.Fatalf("second request: expected [system, user1, assistant1, hint-note, user2] = 5 messages, got %d: %+v", len(second), second)
-	}
-	if second[1].Content != "real question" {
-		t.Errorf("second request messages[1] = %q, want the real first question %q", second[1].Content, "real question")
-	}
-	if second[2].Content != "restated + questions" {
-		t.Errorf("second request messages[2] = %q, want the check's reply", second[2].Content)
-	}
-	if second[3].Role != "system" || !strings.Contains(second[3].Content, "1st help request") {
-		t.Errorf("second request messages[3] = %+v, want an ephemeral system note about the 1st help request", second[3])
-	}
-	if second[4].Content != "follow up" {
-		t.Errorf("second request messages[4] = %q, want %q", second[4].Content, "follow up")
+	for _, c := range cases {
+		if got := looksLikeLeakedToolCall(c.content); got != c.want {
+			t.Errorf("%s: looksLikeLeakedToolCall(%q) = %v, want %v", c.name, c.content, got, c.want)
+		}
 	}
 }
 
@@ -308,5 +185,91 @@ func TestTurnMessages_HintsFirstRepeatRequestNotesCount(t *testing.T) {
 	}
 	if !strings.Contains(msgs[0].Content, "don't ask them to confirm") {
 		t.Errorf("messages[0].Content = %q, want it to explicitly tell the model not to ask the user to confirm", msgs[0].Content)
+	}
+}
+
+// --- decideHandoff (orchestrator/worker routing) ---
+
+func TestDecideHandoff_YesRepliesMeanHandoff(t *testing.T) {
+	mock := newSequencedOllama(t, "YES")
+	ctx := context.Background()
+	cm, err := newChatModel(ctx, "test-model", mock.URL, "")
+	if err != nil {
+		t.Fatalf("newChatModel: %v", err)
+	}
+
+	handoff, err := decideHandoff(ctx, cm, "how do I solve this with a hash map")
+	if err != nil {
+		t.Fatalf("decideHandoff: %v", err)
+	}
+	if !handoff {
+		t.Error("handoff = false, want true for a YES reply")
+	}
+}
+
+func TestDecideHandoff_NoRepliesMeanNoHandoff(t *testing.T) {
+	mock := newSequencedOllama(t, "no")
+	ctx := context.Background()
+	cm, err := newChatModel(ctx, "test-model", mock.URL, "")
+	if err != nil {
+		t.Fatalf("newChatModel: %v", err)
+	}
+
+	handoff, err := decideHandoff(ctx, cm, "hi")
+	if err != nil {
+		t.Fatalf("decideHandoff: %v", err)
+	}
+	if handoff {
+		t.Error("handoff = true, want false for a (lowercase) no reply")
+	}
+}
+
+func TestDecideHandoff_NoWithTrailingTextStillMeansNoHandoff(t *testing.T) {
+	mock := newSequencedOllama(t, "No, this is just a greeting.")
+	ctx := context.Background()
+	cm, err := newChatModel(ctx, "test-model", mock.URL, "")
+	if err != nil {
+		t.Fatalf("newChatModel: %v", err)
+	}
+
+	handoff, err := decideHandoff(ctx, cm, "hi there")
+	if err != nil {
+		t.Fatalf("decideHandoff: %v", err)
+	}
+	if handoff {
+		t.Error("handoff = true, want false -- reply starts with No even with trailing explanation")
+	}
+}
+
+func TestDecideHandoff_AmbiguousReplyDefaultsToHandoff(t *testing.T) {
+	mock := newSequencedOllama(t, "I'm not sure, could go either way")
+	ctx := context.Background()
+	cm, err := newChatModel(ctx, "test-model", mock.URL, "")
+	if err != nil {
+		t.Fatalf("newChatModel: %v", err)
+	}
+
+	handoff, err := decideHandoff(ctx, cm, "something ambiguous")
+	if err != nil {
+		t.Fatalf("decideHandoff: %v", err)
+	}
+	if !handoff {
+		t.Error("handoff = false, want true -- anything not clearly starting with No defaults to handoff (safer to over-use the specialist)")
+	}
+}
+
+func TestDecideHandoff_RequestErrorDefaultsToHandoffAndReturnsError(t *testing.T) {
+	ctx := context.Background()
+	cm, err := newChatModel(ctx, "test-model", "http://127.0.0.1:1", "")
+	if err != nil {
+		t.Fatalf("newChatModel: %v", err)
+	}
+
+	handoff, err := decideHandoff(ctx, cm, "hi")
+	if err == nil {
+		t.Fatal("expected an error for an unreachable host")
+	}
+	if !handoff {
+		t.Error("handoff = false, want true -- a routing failure must default to handoff, not silently leave the turn unanswered")
 	}
 }
