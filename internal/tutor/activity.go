@@ -113,8 +113,22 @@ func (f *activityFeed) currentCalls() []activityCall {
 	return out
 }
 
+// activityDotGlyph is the activity indicator's dot — plain ASCII, not a
+// Unicode symbol. This project already burned itself once on this exact
+// mistake: an earlier version used a different glyph per state
+// (⟳ → ✓ ✗) plus a Unicode ellipsis (…), all of which rendered as
+// unrecognizable fallback glyphs (tofu) in a real user's terminal font,
+// and was replaced with "●" (U+25CF) as "confirmed to render everywhere
+// it's been tested." That confirmation turned out to be wrong too — a
+// real user later reported ● itself rendering as a bare underscore in
+// their terminal/font. There is no Unicode code point this project can
+// actually promise will render as a real dot everywhere; plain ASCII
+// "o" is the only thing guaranteed to render identically in every
+// terminal, encoding, and font, full stop.
+const activityDotGlyph = "o"
+
 // activityLineBody renders one call's current state, everything after
-// the leading "● " dot (see formatActivityLine/pulsedCallLine, its two
+// the leading dot (see formatActivityLine/pulsedCallLine, its two
 // callers — one plain, one color-wraps the dot). "{}" (an empty JSON
 // object -- what eino sends for a no-argument tool) is treated the same
 // as no args at all, since showing "({})" on every no-arg tool call
@@ -140,15 +154,9 @@ func activityLineBody(c activityCall) string {
 // used by activityFeed's own started/finished/failed for the channel
 // snapshot pushed to the bubbletea Update loop; pulsedCallLine (below)
 // renders the same body but color-wraps the leading dot for the pulse
-// animation. Every line leads with a single ● — a real bug
-// found live: the previous version used a different glyph per state
-// (⟳ → ✓ ✗) plus a Unicode ellipsis (…), and in a real user's terminal
-// font every one of those rendered as an unrecognizable fallback glyph
-// (tofu, reading like stray underscores). ● alone is confirmed to render
-// correctly everywhere it's been tested (it's an extremely old,
-// near-universally-supported code point).
+// animation. Every line leads with activityDotGlyph.
 func formatActivityLine(c activityCall) string {
-	return "● " + activityLineBody(c)
+	return activityDotGlyph + " " + activityLineBody(c)
 }
 
 // activityPulseBaseR/G/B is the activity dot's base color — the same
@@ -196,12 +204,13 @@ func activityDotColor(status string, phase int) (r, g, b int) {
 		int(float64(activityPulseBaseB) * brightness)
 }
 
-// coloredDot returns a single ● wrapped in a 24-bit truecolor escape for
-// (r,g,b), reset immediately after — tmux.conf already enables truecolor
-// passthrough (`terminal-features ",*:RGB"`) for this project's session,
-// so this is safe to rely on inside the practice container.
+// coloredDot returns activityDotGlyph wrapped in a 24-bit truecolor
+// escape for (r,g,b), reset immediately after — tmux.conf already
+// enables truecolor passthrough (`terminal-features ",*:RGB"`) for this
+// project's session, so this is safe to rely on inside the practice
+// container.
 func coloredDot(r, g, b int) string {
-	return fmt.Sprintf("\033[38;2;%d;%d;%dm●\033[0m", r, g, b)
+	return fmt.Sprintf("\033[38;2;%d;%d;%dm%s\033[0m", r, g, b, activityDotGlyph)
 }
 
 // pulsedStatusLine builds the activity region's status line for one
@@ -290,21 +299,26 @@ func pulsedCallLines(c activityCall, phase, cols int) []string {
 }
 
 // toolUsageSummary renders a permanent, settled record of which tools a
-// completed turn used — one plain "● name" line per call, in the order
-// they were made. Unlike the live activity region (which disappears
-// entirely once the turn ends, see tutorModel.activityView), this gets
-// appended to displayLines so the conversation history keeps showing
-// what the model actually did, not just its final reply — a real
-// feature request from live use ("leave behind the toolname it used").
-// Empty for a turn that made no tool calls at all, so a normal
-// reasoning-only turn doesn't get a spurious blank entry.
-func toolUsageSummary(calls []activityCall) string {
+// completed turn used, plus each one's indented output preview — reuses
+// pulsedCallLines exactly as the live activity region does (phase is
+// irrelevant here: activityDotColor only varies by phase for a
+// "running" call, and every settled call is "done"/"failed" by the time
+// this renders, so it always gets the same static color regardless of
+// what phase is passed). Unlike the live activity region (which
+// disappears entirely once the turn ends, see tutorModel.activityView),
+// this gets appended to displayLines so the conversation history keeps
+// showing what the model actually did and what it got back, not just
+// its final reply — a real feature request from live use ("leave behind
+// the toolname it used" / "the tool output should be indented"). Empty
+// for a turn that made no tool calls at all, so a normal reasoning-only
+// turn doesn't get a spurious blank entry.
+func toolUsageSummary(calls []activityCall, cols int) string {
 	if len(calls) == 0 {
 		return ""
 	}
-	lines := make([]string, len(calls))
-	for i, c := range calls {
-		lines[i] = "● " + activityCallHeader(c)
+	var lines []string
+	for _, c := range calls {
+		lines = append(lines, pulsedCallLines(c, 0, cols)...)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -317,11 +331,10 @@ var activityPulseInterval = 120 * time.Millisecond
 
 // truncateLineEllipsis is deliberately plain ASCII, not the Unicode
 // ellipsis (…) — a real bug found live: that character (and every other
-// symbol this package originally used: ⟳ → ✓ ✗) rendered as an
-// unrecognizable fallback glyph (tofu, reading like a stray underscore)
-// in a real user's terminal font. Everything this package writes is now
-// plain ASCII plus the one glyph confirmed to render everywhere: ● (see
-// formatActivityLine).
+// symbol this package has tried, see activityDotGlyph's doc comment for
+// the full history) rendered as an unrecognizable fallback glyph (tofu,
+// reading like a stray underscore) in a real user's terminal font.
+// Everything this package writes is plain ASCII, full stop.
 const truncateLineEllipsis = "..."
 
 // truncateLine caps s at max runes, replacing the tail with

@@ -316,7 +316,7 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// failure: a turn can call tools and still fail on the final
 		// reply, and that's still worth showing. Empty (a no-op append)
 		// for a turn that made no tool calls at all.
-		if summary := toolUsageSummary(calls); summary != "" {
+		if summary := toolUsageSummary(calls, m.activityContentWidth()); summary != "" {
 			m.displayLines = append(m.displayLines, summary)
 		}
 		if msg.err != nil {

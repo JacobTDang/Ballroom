@@ -10,15 +10,15 @@ import (
 func TestActivityFeed_StartedAddsARunningLine(t *testing.T) {
 	f := &activityFeed{}
 	lines := f.started("call-1", "read_solution_file", "")
-	if len(lines) != 1 || lines[0] != "● read_solution_file" {
-		t.Errorf("lines = %v, want [\"● read_solution_file\"]", lines)
+	if len(lines) != 1 || lines[0] != "o read_solution_file" {
+		t.Errorf("lines = %v, want [\"o read_solution_file\"]", lines)
 	}
 }
 
 func TestActivityFeed_StartedWithArgsShowsThemInParens(t *testing.T) {
 	f := &activityFeed{}
 	lines := f.started("call-1", "highlight_lines", `{"start_line":10,"end_line":20}`)
-	if len(lines) != 1 || lines[0] != `● highlight_lines({"start_line":10,"end_line":20})` {
+	if len(lines) != 1 || lines[0] != `o highlight_lines({"start_line":10,"end_line":20})` {
 		t.Errorf("lines = %v, want the args shown in parens", lines)
 	}
 }
@@ -26,7 +26,7 @@ func TestActivityFeed_StartedWithArgsShowsThemInParens(t *testing.T) {
 func TestActivityFeed_StartedWithEmptyOrNoArgsOmitsParens(t *testing.T) {
 	f := &activityFeed{}
 	lines := f.started("call-1", "read_solution_file", "{}")
-	if len(lines) != 1 || lines[0] != "● read_solution_file" {
+	if len(lines) != 1 || lines[0] != "o read_solution_file" {
 		t.Errorf("lines = %v, want no parens for empty/no-op args", lines)
 	}
 }
@@ -35,7 +35,7 @@ func TestActivityFeed_FinishedUpdatesTheMatchingCallToDone(t *testing.T) {
 	f := &activityFeed{}
 	f.started("call-1", "read_solution_file", "")
 	lines := f.finished("call-1", "312 bytes")
-	if len(lines) != 1 || lines[0] != "● read_solution_file  312 bytes" {
+	if len(lines) != 1 || lines[0] != "o read_solution_file  312 bytes" {
 		t.Errorf("lines = %v, want the call marked done with its result", lines)
 	}
 }
@@ -44,7 +44,7 @@ func TestActivityFeed_FinishedWithEmptyResultOmitsTrailingSpace(t *testing.T) {
 	f := &activityFeed{}
 	f.started("call-1", "highlight_lines", "")
 	lines := f.finished("call-1", "")
-	if len(lines) != 1 || lines[0] != "● highlight_lines" {
+	if len(lines) != 1 || lines[0] != "o highlight_lines" {
 		t.Errorf("lines = %v, want just the dot and name, no trailing separator", lines)
 	}
 }
@@ -53,7 +53,7 @@ func TestActivityFeed_FailedUpdatesTheMatchingCallToFailed(t *testing.T) {
 	f := &activityFeed{}
 	f.started("call-1", "read_test_output", "")
 	lines := f.failed("call-1", "no test run yet")
-	if len(lines) != 1 || lines[0] != "● read_test_output - failed: no test run yet" {
+	if len(lines) != 1 || lines[0] != "o read_test_output - failed: no test run yet" {
 		t.Errorf("lines = %v, want the call marked failed with the error", lines)
 	}
 }
@@ -66,7 +66,7 @@ func TestActivityFeed_FinishedForUnknownCallIDIsANoOp(t *testing.T) {
 	f := &activityFeed{}
 	f.started("call-1", "read_solution_file", "")
 	lines := f.finished("call-unknown", "some result")
-	if len(lines) != 1 || lines[0] != "● read_solution_file" {
+	if len(lines) != 1 || lines[0] != "o read_solution_file" {
 		t.Errorf("lines = %v, want the existing call untouched and no new entry added", lines)
 	}
 }
@@ -75,7 +75,7 @@ func TestActivityFeed_MultipleCallsPreserveStartOrder(t *testing.T) {
 	f := &activityFeed{}
 	f.started("call-1", "read_solution_file", "")
 	lines := f.started("call-2", "read_problem_statement", "")
-	if len(lines) != 2 || lines[0] != "● read_solution_file" || lines[1] != "● read_problem_statement" {
+	if len(lines) != 2 || lines[0] != "o read_solution_file" || lines[1] != "o read_problem_statement" {
 		t.Errorf("lines = %v, want both calls in start order", lines)
 	}
 }
@@ -89,10 +89,10 @@ func TestActivityFeed_CapsAtFourDroppingTheOldest(t *testing.T) {
 	if len(lines) != activityToolLines {
 		t.Fatalf("len(lines) = %d, want %d (the cap)", len(lines), activityToolLines)
 	}
-	if lines[0] != "● tool_3" {
+	if lines[0] != "o tool_3" {
 		t.Errorf("lines[0] = %q, want the oldest (tool_1, tool_2) dropped, starting at tool_3", lines[0])
 	}
-	if lines[len(lines)-1] != "● tool_6" {
+	if lines[len(lines)-1] != "o tool_6" {
 		t.Errorf("lines[last] = %q, want the newest call last", lines[len(lines)-1])
 	}
 }
@@ -128,7 +128,7 @@ func TestFormatActivityLine_IsADotFollowedByActivityLineBody(t *testing.T) {
 		{name: "read_test_output", status: "failed", detail: "no test run yet"},
 	}
 	for _, c := range cases {
-		want := "● " + activityLineBody(c)
+		want := "o " + activityLineBody(c)
 		if got := formatActivityLine(c); got != want {
 			t.Errorf("formatActivityLine(%+v) = %q, want %q", c, got, want)
 		}
@@ -308,46 +308,69 @@ func TestPulsedCallLines_DoneCallHasHeaderThenIndentedOutput(t *testing.T) {
 func TestPulsedCallLines_HeaderTruncatesNotTheEscapeSequence(t *testing.T) {
 	c := activityCall{name: strings.Repeat("x", 200), status: "running", detail: "{}"}
 	got := pulsedCallLines(c, 0, 20) // narrow width
-	if !strings.Contains(got[0], "\033[38;2;") || !strings.Contains(got[0], "m●\033[0m") {
+	if !strings.Contains(got[0], "\033[38;2;") || !strings.Contains(got[0], "mo\033[0m") {
 		t.Errorf("pulsedCallLines(...)[0] = %q, want the truecolor escape sequence intact", got[0])
 	}
 }
 
 // --- toolUsageSummary -- the permanent, settled record of which tools
-// a completed turn used, appended to tutorModel's displayLines (unlike
-// the live activity region, which vanishes entirely once the turn ends).
+// a completed turn used (plus each one's indented output), appended to
+// tutorModel's displayLines (unlike the live activity region, which
+// vanishes entirely once the turn ends).
 
 func TestToolUsageSummary_EmptyForNoCalls(t *testing.T) {
-	if got := toolUsageSummary(nil); got != "" {
-		t.Errorf("toolUsageSummary(nil) = %q, want empty", got)
+	if got := toolUsageSummary(nil, 80); got != "" {
+		t.Errorf("toolUsageSummary(nil, 80) = %q, want empty", got)
 	}
-	if got := toolUsageSummary([]activityCall{}); got != "" {
-		t.Errorf("toolUsageSummary([]) = %q, want empty", got)
+	if got := toolUsageSummary([]activityCall{}, 80); got != "" {
+		t.Errorf("toolUsageSummary([], 80) = %q, want empty", got)
 	}
 }
 
-func TestToolUsageSummary_OneDoneCallShowsJustTheName(t *testing.T) {
+func TestToolUsageSummary_OneDoneCallShowsNameAndIndentedOutput(t *testing.T) {
 	calls := []activityCall{{name: "read_solution_file", status: "done", detail: "312 bytes"}}
-	if got := toolUsageSummary(calls); got != "● read_solution_file" {
-		t.Errorf("toolUsageSummary(...) = %q, want just the name, no result detail", got)
+	got := toolUsageSummary(calls, 80)
+	if !strings.Contains(got, "read_solution_file") {
+		t.Errorf("toolUsageSummary(...) = %q, want the tool name", got)
+	}
+	if !strings.Contains(got, activityIndent+"312 bytes") {
+		t.Errorf("toolUsageSummary(...) = %q, want the result indented beneath the name", got)
 	}
 }
 
-func TestToolUsageSummary_FailedCallShowsFailedSuffix(t *testing.T) {
+func TestToolUsageSummary_FailedCallShowsFailedSuffixAndIndentedError(t *testing.T) {
 	calls := []activityCall{{name: "read_test_output", status: "failed", detail: "no test run yet"}}
-	if got := toolUsageSummary(calls); got != "● read_test_output - failed" {
+	got := toolUsageSummary(calls, 80)
+	if !strings.Contains(got, "read_test_output - failed") {
 		t.Errorf("toolUsageSummary(...) = %q, want the name flagged failed", got)
 	}
+	if !strings.Contains(got, activityIndent+"no test run yet") {
+		t.Errorf("toolUsageSummary(...) = %q, want the error indented beneath the name", got)
+	}
 }
 
-func TestToolUsageSummary_MultipleCallsOnePerLineInOrder(t *testing.T) {
+func TestToolUsageSummary_MultipleCallsEachGetTheirOwnHeaderAndOutput(t *testing.T) {
 	calls := []activityCall{
-		{name: "read_solution_file", status: "done"},
-		{name: "read_problem_statement", status: "done"},
+		{name: "read_solution_file", status: "done", detail: "312 bytes"},
+		{name: "read_problem_statement", status: "done", detail: "problem text"},
 	}
-	want := "● read_solution_file\n● read_problem_statement"
-	if got := toolUsageSummary(calls); got != want {
-		t.Errorf("toolUsageSummary(...) = %q, want %q", got, want)
+	got := toolUsageSummary(calls, 80)
+	for _, want := range []string{"read_solution_file", activityIndent + "312 bytes", "read_problem_statement", activityIndent + "problem text"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("toolUsageSummary(...) = %q, want it to contain %q", got, want)
+		}
+	}
+	// The first call's header must precede the second call's, matching
+	// call order.
+	if strings.Index(got, "read_solution_file") > strings.Index(got, "read_problem_statement") {
+		t.Errorf("toolUsageSummary(...) = %q, want calls in order", got)
+	}
+}
+
+func TestToolUsageSummary_HeaderIsColored(t *testing.T) {
+	calls := []activityCall{{name: "read_solution_file", status: "done"}}
+	if got := toolUsageSummary(calls, 80); !strings.Contains(got, "\033[38;2;") {
+		t.Errorf("toolUsageSummary(...) = %q, want the header colored, matching the live activity display", got)
 	}
 }
 
@@ -382,7 +405,7 @@ func TestTruncateLine_LongStringTruncatedWithEllipsis(t *testing.T) {
 	// rendered as unrecognizable fallback glyphs (tofu, looking like
 	// stray underscores) in a real user's terminal font. Everything this
 	// package writes must be plain ASCII plus the one glyph confirmed to
-	// render everywhere: ● (see formatActivityLine).
+	// render everywhere: o (see formatActivityLine).
 	got := truncateLine("this is a much longer string than the limit allows", 10)
 	if runes := []rune(got); len(runes) != 10 {
 		t.Errorf("truncateLine(...) = %q (len %d), want exactly 10 runes", got, len(runes))
