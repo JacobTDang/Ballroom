@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/cloudwego/eino/components/model"
+	agentopt "github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 
@@ -141,8 +142,18 @@ func decideHandoff(ctx context.Context, orchestratorCM model.ToolCallingChatMode
 // box.reconfigure() there, rather than reconfiguring from a background
 // goroutine, which could otherwise interleave with this loop's own
 // unsynchronized stdout writes and corrupt output.
+//
+// newInputBoxFn is a var (not a direct call) so tests can substitute a
+// fake terminal size instead of needing a real tty — same indirection
+// pattern this codebase already uses elsewhere (e.g. internal/tui's
+// listModelsFn/checkToolCallingFn) for the identical reason. Every
+// existing Run() test runs with a real (non-tty) stdin, so without this
+// seam box is always nil in tests, and the activity display's real
+// box-drawing path would never actually get exercised.
+var newInputBoxFn = newInputBox
+
 func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Writer) error {
-	box, boxErr := newInputBox(stdout)
+	box, boxErr := newInputBoxFn(stdout)
 	var pendingResize chan os.Signal
 	if boxErr == nil {
 		defer box.close()
@@ -260,7 +271,7 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 			if routingEnabled {
 				checkAgent, checkEndpoint = orchestratorAgent, orchestratorEndpoint
 			}
-			if runComprehensionCheck(ctx, checkAgent, checkEndpoint, cfg.WorkDir, line, &history, stdout, stderr, drainResize) {
+			if runComprehensionCheck(ctx, checkAgent, checkEndpoint, cfg.WorkDir, line, &history, stdout, stderr, drainResize, box) {
 				continue
 			}
 			// Couldn't reach the provider for the check — fall through
@@ -286,7 +297,10 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 
 		helpRequestCount++
 		requestMessages := append(append([]*schema.Message{}, history...), turnMessages(cfg.Mode, helpRequestCount, line)...)
-		reply, err := generateWithLeakRetry(ctx, turnAgent, requestMessages)
+		reply, err := generateWithLeakRetry(ctx, turnAgent, requestMessages, newActivityOption(box))
+		if box != nil {
+			box.clearActivity()
+		}
 		if err != nil {
 			// The real err is included, not just the endpoint -- a real
 			// bug found live: "could not reach" reads as a network
@@ -368,8 +382,15 @@ const turnFailedFallbackReply = "Sorry, I couldn't reach the model just now — 
 // than ever showing the user raw tool-call JSON. The leaked reply is
 // never added to messages/history beyond this one retry attempt, so it
 // can't bias later turns toward repeating the same pattern.
-func generateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*schema.Message) (*schema.Message, error) {
-	reply, err := agent.Generate(ctx, messages)
+//
+// opts is threaded into both Generate calls unchanged — in practice
+// this is newActivityOption's callback wiring (see Run/runComprehensionCheck),
+// so a retry's own tool calls stay visible in the same activity feed as
+// the original attempt's, not a separate one. Variadic and additive: the
+// only direct external caller (cmd/tutor-eval, via GenerateWithLeakRetry)
+// passes none, unaffected.
+func generateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*schema.Message, opts ...agentopt.AgentOption) (*schema.Message, error) {
+	reply, err := agent.Generate(ctx, messages, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -381,7 +402,7 @@ func generateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*
 		schema.AssistantMessage(reply.Content, nil),
 		schema.SystemMessage(leakedToolCallRetryNote),
 	)
-	retryReply, err := agent.Generate(ctx, retryMessages)
+	retryReply, err := agent.Generate(ctx, retryMessages, opts...)
 	if err == nil && !looksLikeLeakedToolCall(retryReply.Content) {
 		return retryReply, nil
 	}
@@ -484,14 +505,22 @@ func TurnMessages(mode string, helpRequestCount int, line string) []*schema.Mess
 // (see its doc comment in Run), and it happens to be the very first
 // Generate call of a session, so it's a likely place for a user to
 // resize their terminal while waiting.
-func runComprehensionCheck(ctx context.Context, agent *react.Agent, endpoint, workDir, userFirstMessage string, history *[]*schema.Message, stdout, stderr io.Writer, drainResize func()) bool {
+//
+// box drives the same live tool-call activity display Run's own per-turn
+// call uses (see newActivityOption) — nil when there's no real terminal
+// (e.g. cmd/tutor-eval), in which case this is a no-op exactly as it was
+// before the activity display existed.
+func runComprehensionCheck(ctx context.Context, agent *react.Agent, endpoint, workDir, userFirstMessage string, history *[]*schema.Message, stdout, stderr io.Writer, drainResize func(), box *inputBox) bool {
 	checkMessages := append([]*schema.Message{}, (*history)...)
 	if problem := readProblemStatement(workDir); problem != "" {
 		checkMessages = append(checkMessages, schema.SystemMessage("The exercise's problem statement:\n\n"+problem))
 	}
 	checkMessages = append(checkMessages, schema.SystemMessage(comprehensionCheckInstruction), schema.UserMessage(userFirstMessage))
 
-	reply, err := generateWithLeakRetry(ctx, agent, checkMessages)
+	reply, err := generateWithLeakRetry(ctx, agent, checkMessages, newActivityOption(box))
+	if box != nil {
+		box.clearActivity()
+	}
 	if err != nil {
 		// See Run's identical fix for why the real err is included, not
 		// just the endpoint.

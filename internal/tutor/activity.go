@@ -8,7 +8,7 @@ import (
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
-	"github.com/cloudwego/eino/flow/agent"
+	agentopt "github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	template "github.com/cloudwego/eino/utils/callbacks"
 )
@@ -118,7 +118,7 @@ func formatActivityLine(c activityCall) string {
 	}
 }
 
-// newActivityOption builds the agent.AgentOption that wires a fresh
+// newActivityOption builds the agentopt.AgentOption that wires a fresh
 // activityFeed into box's activity display via real eino tool-call
 // callbacks (react.BuildAgentCallback / utils/callbacks.ToolCallbackHandler
 // — OnStart/OnEnd/OnError fire live, while Generate is still running, not
@@ -137,9 +137,9 @@ func formatActivityLine(c activityCall) string {
 // OnStart, per eino's own callback contract) is what OnEnd receives, so
 // two concurrent calls to the same tool are tracked as separate entries
 // rather than one clobbering the other's status.
-func newActivityOption(box *inputBox) agent.AgentOption {
+func newActivityOption(box *inputBox) agentopt.AgentOption {
 	if box == nil {
-		return agent.WithComposeOptions()
+		return agentopt.WithComposeOptions()
 	}
 
 	feed := &activityFeed{}
@@ -169,5 +169,5 @@ func newActivityOption(box *inputBox) agent.AgentOption {
 		},
 	}
 	handler := react.BuildAgentCallback(nil, toolHandler)
-	return agent.WithComposeOptions(compose.WithCallbacks(handler))
+	return agentopt.WithComposeOptions(compose.WithCallbacks(handler))
 }

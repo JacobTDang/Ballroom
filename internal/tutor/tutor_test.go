@@ -3,6 +3,7 @@ package tutor
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -134,6 +135,62 @@ func TestRun_CompletesATurnThatMakesARealToolCall(t *testing.T) {
 	got := stripAnsi(stdout.String())
 	if !strings.Contains(got, "pong received") {
 		t.Fatalf("expected the final reply in stdout, got:\n%s", got)
+	}
+}
+
+// fakeInputBoxAt substitutes newInputBoxFn so Run() gets a real,
+// deterministically-sized inputBox instead of failing to find one (every
+// test's stdin is not a real tty, so newInputBox would otherwise always
+// return box == nil, and the activity display's real box-drawing path
+// would never be exercised). Returns a restore func to defer.
+func fakeInputBoxAt(rows, cols int) func() {
+	orig := newInputBoxFn
+	newInputBoxFn = func(w io.Writer) (*inputBox, error) {
+		return newInputBoxAt(w, rows, cols)
+	}
+	return func() { newInputBoxFn = orig }
+}
+
+func TestRun_ShowsLiveToolCallActivityAndClearsItBeforeThePrints(t *testing.T) {
+	defer fakeInputBoxAt(24, 80)()
+
+	// newToolCallOllama (toolcheck_test.go) simulates a real tool_calls
+	// response for its first request, then a plain-text reply for its
+	// second -- driving Run() through an actual read_solution_file call
+	// via the agent (and this test's real inputBox/newActivityOption
+	// wiring), not a synthetic call.
+	mock := newToolCallOllama(t, "read_solution_file")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly // skip the comprehension check for a single-turn test
+	cfg.WorkDir = t.TempDir()
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("what does my code look like?\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	out := stdout.String()
+	toolLineIdx := strings.Index(out, "→ read_solution_file")
+	if toolLineIdx == -1 {
+		t.Fatalf("expected the live activity display to show the real tool being called, got:\n%s", out)
+	}
+
+	// The exact byte sequence clearActivity's single buffered write
+	// produces for a 24x80 box (regionBottom=16): all 5 activity rows
+	// positioned and cleared back to back, with nothing else interleaved.
+	clearSeq := "\033[17;1H\033[2K\033[18;1H\033[2K\033[19;1H\033[2K\033[20;1H\033[2K\033[21;1H\033[2K"
+	clearIdx := strings.Index(out, clearSeq)
+	if clearIdx == -1 {
+		t.Fatalf("expected the activity region to be cleared once the turn finished, got:\n%s", out)
+	}
+
+	replyIdx := strings.Index(out, "pong received")
+	if replyIdx == -1 {
+		t.Fatalf("expected the final reply in stdout, got:\n%s", out)
+	}
+
+	if !(toolLineIdx < clearIdx && clearIdx < replyIdx) {
+		t.Errorf("expected order tool-call shown (%d) -> activity cleared (%d) -> reply printed (%d), got:\n%s", toolLineIdx, clearIdx, replyIdx, out)
 	}
 }
 
