@@ -215,13 +215,14 @@ func TestAppModel_StatsAnyKeyGoesBackToMain(t *testing.T) {
 // --- stageMain -> stageModelPicker ---
 
 func TestAppModel_EnterOnSettings_GoesToStageSettingsNoAsyncLoadYet(t *testing.T) {
-	// Settings leads with the Local/API provider choice, not straight
-	// into the Ollama picker — no async load should happen until Local
-	// is actually chosen (see TestAppModel_Settings_SelectingLocal...).
+	// Settings leads with the Worker/Orchestrator role choice, not
+	// straight into a provider choice or the Ollama picker — no async
+	// load should happen until Local is chosen several levels in (see
+	// TestAppModel_ProviderChoice_SelectingLocal...).
 	m := appModel{cursor: 3}
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil {
-		t.Error("expected no command yet — the provider choice itself needs no data")
+		t.Error("expected no command yet — the role choice itself needs no data")
 	}
 	got := newM.(appModel)
 	if got.stage != stageSettings {
@@ -229,10 +230,40 @@ func TestAppModel_EnterOnSettings_GoesToStageSettingsNoAsyncLoadYet(t *testing.T
 	}
 }
 
-func TestAppModel_Settings_SelectingLocalKicksOffAsyncModelLoad(t *testing.T) {
+func TestAppModel_Settings_SelectingWorkerGoesToProviderChoiceTargetingWorker(t *testing.T) {
+	m := appModel{stage: stageSettings, settingsCursor: 0} // 0 = Worker model
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command — entering the provider choice is an internal stage change")
+	}
+	got := newM.(appModel)
+	if got.stage != stageProviderChoice {
+		t.Fatalf("stage = %v, want stageProviderChoice", got.stage)
+	}
+	if got.settingsEditing != settingsTargetWorker {
+		t.Errorf("settingsEditing = %v, want settingsTargetWorker", got.settingsEditing)
+	}
+}
+
+func TestAppModel_Settings_SelectingOrchestratorGoesToProviderChoiceTargetingOrchestrator(t *testing.T) {
+	m := appModel{stage: stageSettings, settingsCursor: 1} // 1 = Orchestrator model
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	got := newM.(appModel)
+	if got.stage != stageProviderChoice {
+		t.Fatalf("stage = %v, want stageProviderChoice", got.stage)
+	}
+	if got.settingsEditing != settingsTargetOrchestrator {
+		t.Errorf("settingsEditing = %v, want settingsTargetOrchestrator", got.settingsEditing)
+	}
+}
+
+func TestAppModel_ProviderChoice_SelectingLocalKicksOffAsyncModelLoad(t *testing.T) {
 	defer fakeListModels([]string{"a", "b"}, nil)()
 
-	m := appModel{stage: stageSettings, settingsCursor: 0} // 0 = Local
+	m := appModel{stage: stageProviderChoice, settingsCursor: 0, settingsEditing: settingsTargetWorker} // 0 = Local
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected enter on Local to kick off an async models-loading command")
@@ -263,8 +294,8 @@ func TestAppModel_Settings_SelectingLocalKicksOffAsyncModelLoad(t *testing.T) {
 	}
 }
 
-func TestAppModel_Settings_SelectingAPIGoesToAPIModelEntry(t *testing.T) {
-	m := appModel{stage: stageSettings, settingsCursor: 1} // 1 = API
+func TestAppModel_ProviderChoice_SelectingAPIGoesToAPIModelEntry(t *testing.T) {
+	m := appModel{stage: stageProviderChoice, settingsCursor: 1, settingsEditing: settingsTargetWorker} // 1 = API
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil {
 		t.Error("expected no external command — entering the slug-entry stage is an internal stage change")
@@ -272,6 +303,63 @@ func TestAppModel_Settings_SelectingAPIGoesToAPIModelEntry(t *testing.T) {
 	got := newM.(appModel)
 	if got.stage != stageAPIModelEntry {
 		t.Fatalf("stage = %v, want stageAPIModelEntry", got.stage)
+	}
+}
+
+func TestAppModel_ProviderChoice_OrchestratorGetsAThirdNoneOption(t *testing.T) {
+	m := appModel{
+		cfg:             config.Config{DataDir: t.TempDir(), TutorModel: "worker-model", OrchestratorModel: "orchestrator-model"},
+		stage:           stageProviderChoice,
+		settingsCursor:  2, // None (disable routing) -- only present for the orchestrator target
+		settingsEditing: settingsTargetOrchestrator,
+	}
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	got := newM.(appModel)
+	if got.stage != stageSettings {
+		t.Fatalf("stage = %v, want stageSettings (back out after clearing)", got.stage)
+	}
+	if got.cfg.OrchestratorModel != "" {
+		t.Errorf("cfg.OrchestratorModel = %q, want empty after selecting None", got.cfg.OrchestratorModel)
+	}
+	if got.cfg.TutorModel != "worker-model" {
+		t.Errorf("cfg.TutorModel = %q, want it preserved", got.cfg.TutorModel)
+	}
+
+	saved, err := config.LoadSettings(m.cfg.SettingsPath())
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if saved.OrchestratorModel != "" {
+		t.Errorf("persisted OrchestratorModel = %q, want empty", saved.OrchestratorModel)
+	}
+	if saved.TutorModel != "worker-model" {
+		t.Errorf("persisted TutorModel = %q, want it preserved", saved.TutorModel)
+	}
+}
+
+func TestAppModel_ProviderChoice_WorkerTargetHasNoNoneOption(t *testing.T) {
+	// The worker model is never optional -- there must always be one --
+	// so its provider choice list stays at 2 items (Local/API), unlike
+	// the orchestrator's 3.
+	m := appModel{stage: stageProviderChoice, settingsCursor: 1, settingsEditing: settingsTargetWorker}
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := newM.(appModel)
+	if got.settingsCursor != 1 {
+		t.Errorf("settingsCursor = %d, want to stay at 1 (only 2 items: Local, API)", got.settingsCursor)
+	}
+}
+
+func TestAppModel_ProviderChoice_EscGoesBackToSettings(t *testing.T) {
+	m := appModel{stage: stageProviderChoice}
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	if newM.(appModel).stage != stageSettings {
+		t.Errorf("stage = %v, want stageSettings", newM.(appModel).stage)
 	}
 }
 
@@ -329,14 +417,14 @@ func TestAppModel_APIModelEntry_EnterWithNoKeyGoesToKeyEntry(t *testing.T) {
 	}
 }
 
-func TestAppModel_APIModelEntry_EscGoesBackToSettings(t *testing.T) {
+func TestAppModel_APIModelEntry_EscGoesBackToProviderChoice(t *testing.T) {
 	m := appModel{stage: stageAPIModelEntry, apiModelInput: "partial"}
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if cmd != nil {
 		t.Error("expected no external command")
 	}
-	if newM.(appModel).stage != stageSettings {
-		t.Errorf("stage = %v, want stageSettings", newM.(appModel).stage)
+	if newM.(appModel).stage != stageProviderChoice {
+		t.Errorf("stage = %v, want stageProviderChoice", newM.(appModel).stage)
 	}
 }
 
@@ -572,17 +660,17 @@ func TestAppModel_ModelPicker_TypingFilters(t *testing.T) {
 	}
 }
 
-func TestAppModel_ModelPicker_QWithNoFilterGoesBackToSettings(t *testing.T) {
-	// The model picker is now only reachable via Settings -> Local, so
-	// backing out lands on the provider choice, not all the way back to
-	// the main menu.
+func TestAppModel_ModelPicker_QWithNoFilterGoesBackToProviderChoice(t *testing.T) {
+	// The model picker is now only reachable via Settings -> (Worker or
+	// Orchestrator) -> Local, so backing out lands on the provider
+	// choice, not all the way back to the main menu.
 	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b"})
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if cmd != nil {
-		t.Error("expected no external command — back to settings is an internal stage change")
+		t.Error("expected no external command — back to the provider choice is an internal stage change")
 	}
-	if newM.(appModel).stage != stageSettings {
-		t.Error("expected q with no filter to return to stageSettings")
+	if newM.(appModel).stage != stageProviderChoice {
+		t.Error("expected q with no filter to return to stageProviderChoice")
 	}
 }
 
@@ -1005,7 +1093,7 @@ func TestAppModel_OpenRouterKeyEntry_EnterWithEmptyKeyDoesNothing(t *testing.T) 
 	}
 }
 
-func TestAppModel_OpenRouterKeyEntry_EscCancelsBackToSettingsWithoutSelecting(t *testing.T) {
+func TestAppModel_OpenRouterKeyEntry_EscCancelsBackToProviderChoiceWithoutSelecting(t *testing.T) {
 	// A single consistent "cancel returns to the provider choice"
 	// behavior, regardless of whether this stage was reached by typing
 	// openrouter: directly in the local picker or via the newer
@@ -1017,8 +1105,8 @@ func TestAppModel_OpenRouterKeyEntry_EscCancelsBackToSettingsWithoutSelecting(t 
 		t.Error("expected no external command on cancel")
 	}
 	got := newM.(appModel)
-	if got.stage != stageSettings {
-		t.Errorf("stage = %v, want stageSettings", got.stage)
+	if got.stage != stageProviderChoice {
+		t.Errorf("stage = %v, want stageProviderChoice", got.stage)
 	}
 	if got.cfg.TutorModel != "old-model" {
 		t.Errorf("cfg.TutorModel = %q, want unchanged %q", got.cfg.TutorModel, "old-model")
@@ -1057,6 +1145,34 @@ func TestAppModel_SelectModel_PreservesOpenRouterAPIKeyAcrossAnOllamaPick(t *tes
 	}
 	if saved.OpenRouterAPIKey != "sk-preserve-me" {
 		t.Errorf("persisted OpenRouterAPIKey = %q, want it preserved, not wiped by picking an unrelated Ollama model", saved.OpenRouterAPIKey)
+	}
+}
+
+func TestAppModel_SelectModel_WritesOrchestratorModelWhenTargetingOrchestrator(t *testing.T) {
+	defer fakeCheckToolCalling(true, nil)()
+
+	dir := t.TempDir()
+	cfg := config.Config{DataDir: dir, TutorModel: "worker-model"}
+	m := appModel{cfg: cfg, settingsEditing: settingsTargetOrchestrator}
+
+	newM, _ := m.selectModel("orchestrator-model")
+	got := newM.(appModel)
+	if got.cfg.OrchestratorModel != "orchestrator-model" {
+		t.Errorf("cfg.OrchestratorModel = %q, want %q", got.cfg.OrchestratorModel, "orchestrator-model")
+	}
+	if got.cfg.TutorModel != "worker-model" {
+		t.Errorf("cfg.TutorModel = %q, want it preserved (unaffected by an orchestrator pick)", got.cfg.TutorModel)
+	}
+
+	saved, err := config.LoadSettings(cfg.SettingsPath())
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if saved.OrchestratorModel != "orchestrator-model" {
+		t.Errorf("persisted OrchestratorModel = %q, want %q", saved.OrchestratorModel, "orchestrator-model")
+	}
+	if saved.TutorModel != "worker-model" {
+		t.Errorf("persisted TutorModel = %q, want it preserved", saved.TutorModel)
 	}
 }
 

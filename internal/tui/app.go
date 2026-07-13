@@ -119,23 +119,44 @@ const (
 	stageProblems
 	stageLanguage
 	stageStats
-	// stageSettings is the Local (Ollama) / API (OpenRouter) provider
-	// choice — the Settings menu entry's landing screen. Routes to
-	// stageModelPicker (Local) or stageAPIModelEntry (API).
+	// stageSettings is the Settings menu entry's landing screen: a
+	// Worker model / Orchestrator model role choice (see settingsTarget)
+	// — which one is being edited then decides where stageProviderChoice
+	// and everything past it write their result (selectModel).
 	stageSettings
+	// stageProviderChoice is the Local (Ollama) / API (OpenRouter)
+	// choice for whichever role stageSettings just picked. Routes to
+	// stageModelPicker (Local) or stageAPIModelEntry (API) -- plus a
+	// third "None (disable routing)" option, only when the role being
+	// edited is the orchestrator (there must always be a worker model,
+	// so that option never appears for it).
+	stageProviderChoice
 	stageModelPicker
 	// stageAPIModelEntry asks for a bare OpenRouter model slug (no
 	// OpenRouterModelPrefix needed — provider is already established by
-	// the point this shows) when Settings -> API is chosen. Enter
-	// delegates to the same selectModelOrPromptForKey handleModelEnter
-	// already uses for a directly-typed openrouter: tag in the local
-	// picker.
+	// the point this shows) when stageProviderChoice -> API is chosen.
+	// Enter delegates to the same selectModelOrPromptForKey
+	// handleModelEnter already uses for a directly-typed openrouter: tag
+	// in the local picker.
 	stageAPIModelEntry
 	// stageOpenRouterKeyEntry asks for an OpenRouter API key the first
 	// time an OpenRouterModelPrefix-prefixed model is picked with none
 	// available yet (settings.json nor OPENROUTER_API_KEY) — see
 	// handleModelEnter/selectModelOrPromptForKey.
 	stageOpenRouterKeyEntry
+)
+
+// settingsTarget tracks which Config field stageProviderChoice and
+// everything past it (stageModelPicker, stageAPIModelEntry,
+// stageOpenRouterKeyEntry) are editing — set by updateSettings when the
+// user picks Worker or Orchestrator from stageSettings' top-level list,
+// read by selectModel to decide whether to write cfg.TutorModel or
+// cfg.OrchestratorModel.
+type settingsTarget int
+
+const (
+	settingsTargetWorker settingsTarget = iota
+	settingsTargetOrchestrator
 )
 
 // appOutcome is what Run's caller should do once the program exits.
@@ -176,7 +197,7 @@ var menuDescriptions = []string{
 	"Pick a category and work through exercises",
 	"Free practice, no grading, persists across sessions",
 	"See your progress across categories",
-	"Choose your tutor's model — local (Ollama) or API (OpenRouter)",
+	"Choose your worker and orchestrator models — local (Ollama) or API (OpenRouter)",
 }
 
 // menuRightColWidth is the fixed content width of the right column —
@@ -248,8 +269,13 @@ type appModel struct {
 	statsStatuses []catalog.ExerciseStatus
 	statsRecent   []tracker.Attempt
 
-	// stageSettings
-	settingsCursor int // 0 = Local (Ollama), 1 = API (OpenRouter)
+	// stageSettings: settingsCursor is 0 = Worker model, 1 = Orchestrator
+	// model there; reused by stageProviderChoice as 0 = Local (Ollama),
+	// 1 = API (OpenRouter), 2 = None (disable routing, orchestrator only)
+	// — the two stages are never on screen at once, so one cursor field
+	// covers both without ambiguity.
+	settingsCursor  int
+	settingsEditing settingsTarget // which Config field stageProviderChoice onward writes to (see selectModel)
 
 	// stageAPIModelEntry
 	apiModelInput string
@@ -384,6 +410,8 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateStats(msg)
 		case stageSettings:
 			return m.updateSettings(msg)
+		case stageProviderChoice:
+			return m.updateProviderChoice(msg)
 		case stageModelPicker:
 			return m.updateModelPicker(msg)
 		case stageAPIModelEntry:
@@ -471,9 +499,9 @@ func (m appModel) loadStats() appModel {
 	return m
 }
 
-// loadSettings enters stageSettings, the Local/API provider choice —
-// unlike loadModelPicker/loadStats, this needs no data fetch, so it's
-// synchronous (no tea.Cmd).
+// loadSettings enters stageSettings, the Worker/Orchestrator role
+// choice — unlike loadModelPicker/loadStats, this needs no data fetch,
+// so it's synchronous (no tea.Cmd).
 func (m appModel) loadSettings() (tea.Model, tea.Cmd) {
 	m.stage = stageSettings
 	m.settingsCursor = 0
@@ -708,9 +736,11 @@ func (m appModel) updateStats(tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // --- stageSettings ---
 
-// updateSettings handles the Local (Ollama) / API (OpenRouter) provider
-// choice — a plain 2-item list, same up/down/enter shape as every other
-// short list in this program.
+// updateSettings handles the top-level Worker model / Orchestrator model
+// role choice — a plain 2-item list, same up/down/enter shape as every
+// other short list in this program. Enter records which Config field is
+// being edited (settingsEditing) and moves to stageProviderChoice, which
+// asks Local vs API for that role.
 func (m appModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyUp:
@@ -728,12 +758,73 @@ func (m appModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyEnter:
 		if m.settingsCursor == 0 {
-			return m.loadModelPicker()
+			m.settingsEditing = settingsTargetWorker
+		} else {
+			m.settingsEditing = settingsTargetOrchestrator
 		}
-		m.stage = stageAPIModelEntry
-		m.apiModelInput = ""
+		m.stage = stageProviderChoice
+		m.settingsCursor = 0
 		return m, nil
 	}
+	return m, nil
+}
+
+// --- stageProviderChoice ---
+
+// updateProviderChoice handles the Local (Ollama) / API (OpenRouter)
+// provider choice for whichever role updateSettings just picked
+// (m.settingsEditing) — a plain list, 2 items normally, or 3 when editing
+// the orchestrator (a trailing "None (disable routing)" entry, since the
+// worker model can never be unset).
+func (m appModel) updateProviderChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	maxCursor := 1
+	if m.settingsEditing == settingsTargetOrchestrator {
+		maxCursor = 2
+	}
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.settingsCursor > 0 {
+			m.settingsCursor--
+		}
+		return m, nil
+	case tea.KeyDown:
+		if m.settingsCursor < maxCursor {
+			m.settingsCursor++
+		}
+		return m, nil
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.stage = stageSettings
+		return m, nil
+	case tea.KeyEnter:
+		switch m.settingsCursor {
+		case 0:
+			return m.loadModelPicker()
+		case 1:
+			m.stage = stageAPIModelEntry
+			m.apiModelInput = ""
+			return m, nil
+		case 2:
+			return m.clearOrchestratorModel()
+		}
+	}
+	return m, nil
+}
+
+// clearOrchestratorModel disables routing by clearing cfg.OrchestratorModel
+// — the "None (disable routing)" entry in stageProviderChoice, only
+// reachable when editing the orchestrator role.
+func (m appModel) clearOrchestratorModel() (tea.Model, tea.Cmd) {
+	m.cfg.OrchestratorModel = ""
+	if err := config.SaveSettings(m.cfg.SettingsPath(), config.Settings{
+		TutorModel:        m.cfg.TutorModel,
+		OpenRouterAPIKey:  m.cfg.OpenRouterAPIKey,
+		OrchestratorModel: "",
+	}); err != nil {
+		m.err = err
+		return m, nil
+	}
+	m.err = nil
+	m.stage = stageSettings
 	return m, nil
 }
 
@@ -749,7 +840,7 @@ func (m appModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m appModel) updateAPIModelEntry(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlC:
-		m.stage = stageSettings
+		m.stage = stageProviderChoice
 		m.apiModelInput = ""
 		return m, nil
 	case tea.KeyBackspace:
@@ -803,8 +894,8 @@ func (m appModel) updateModelPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyEsc, tea.KeyCtrlC:
 		// Back to the provider choice, not stageMain — stageModelPicker
-		// is only reachable via Settings -> Local now.
-		m.stage = stageSettings
+		// is only reachable via stageProviderChoice -> Local now.
+		m.stage = stageProviderChoice
 		return m, nil
 	case tea.KeyEnter:
 		return m.handleModelEnter()
@@ -814,7 +905,7 @@ func (m appModel) updateModelPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// every rune (including "q") feeds the filter/custom tag
 		// instead, since it might be part of a real model name.
 		if m.modelFilter == "" && string(msg.Runes) == "q" {
-			m.stage = stageSettings
+			m.stage = stageProviderChoice
 			return m, nil
 		}
 		m.modelFilter += string(msg.Runes)
@@ -939,12 +1030,25 @@ func (m appModel) handleModelDownloadPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 // calling — checkToolCallingCmd runs that check in the background and
 // only surfaces a warning (toolCallingCheckMsg in Update) if it fails,
 // so a slow/unreachable check can't stall the picker.
+//
+// Which Config field gets written depends on m.settingsEditing (set by
+// updateSettings when the role choice was made) — either branch must
+// carry forward every other field, or the one this call isn't touching
+// would silently get wiped from settings.json on save.
 func (m appModel) selectModel(name string) (tea.Model, tea.Cmd) {
-	m.cfg.TutorModel = name
-	// OpenRouterAPIKey must round-trip here too, or picking any plain
-	// Ollama model after having set one via stageOpenRouterKeyEntry
-	// would silently wipe it from settings.json on the next save.
-	if err := config.SaveSettings(m.cfg.SettingsPath(), config.Settings{TutorModel: name, OpenRouterAPIKey: m.cfg.OpenRouterAPIKey}); err != nil {
+	settings := config.Settings{
+		TutorModel:        m.cfg.TutorModel,
+		OpenRouterAPIKey:  m.cfg.OpenRouterAPIKey,
+		OrchestratorModel: m.cfg.OrchestratorModel,
+	}
+	if m.settingsEditing == settingsTargetOrchestrator {
+		m.cfg.OrchestratorModel = name
+		settings.OrchestratorModel = name
+	} else {
+		m.cfg.TutorModel = name
+		settings.TutorModel = name
+	}
+	if err := config.SaveSettings(m.cfg.SettingsPath(), settings); err != nil {
 		m.err = err
 		return m, nil
 	}
@@ -964,10 +1068,11 @@ func (m appModel) updateOpenRouterKeyEntry(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlC:
 		// Back to the provider choice, not stageModelPicker — a single
-		// consistent "cancel returns to Settings" behavior regardless of
-		// whether this stage was reached via typing openrouter: directly
-		// in the local picker or via the newer Settings -> API path.
-		m.stage = stageSettings
+		// consistent "cancel returns to the provider choice" behavior
+		// regardless of whether this stage was reached via typing
+		// openrouter: directly in the local picker or via the Settings ->
+		// API path.
+		m.stage = stageProviderChoice
 		m.openRouterPendingModel = ""
 		m.openRouterKeyInput = ""
 		return m, nil
@@ -1018,6 +1123,8 @@ func (m appModel) renderRight() string {
 		return m.renderStats()
 	case stageSettings:
 		return m.renderSettings()
+	case stageProviderChoice:
+		return m.renderProviderChoice()
 	case stageModelPicker:
 		return m.renderModelPicker()
 	case stageAPIModelEntry:
@@ -1215,9 +1322,10 @@ func (m appModel) renderStats() string {
 	return b.String()
 }
 
-// settingsOptionLabels/settingsOptionDescriptions back updateSettings'
-// 2-item list and renderSettings' rendering of it — kept together so
-// the list and its descriptions can't drift out of sync.
+// settingsOptionLabels/settingsOptionDescriptions back updateProviderChoice's
+// base 2-item list and renderProviderChoice's rendering of it (a 3rd,
+// orchestrator-only "None" entry is appended there, not here) — kept
+// together so the list and its descriptions can't drift out of sync.
 var (
 	settingsOptionLabels = []string{"Local (Ollama)", "API (OpenRouter)"}
 	settingsOptionDescs  = []string{
@@ -1226,17 +1334,68 @@ var (
 	}
 )
 
+// settingsRoleLabels/settingsRoleDescs back updateSettings' top-level
+// Worker/Orchestrator role list and renderSettings' rendering of it.
+var (
+	settingsRoleLabels = []string{"Worker model", "Orchestrator model"}
+	settingsRoleDescs  = []string{
+		"Answers coding questions — always required",
+		"Routes turns to the worker, or answers directly — optional",
+	}
+)
+
 func (m appModel) renderSettings() string {
 	var b strings.Builder
 	b.WriteString(hintStyle.Render("Settings"))
 	b.WriteString("\n")
-	b.WriteString(checkDimStyle.Render(fmt.Sprintf("currently: %s", m.cfg.TutorModel)))
+	b.WriteString(checkDimStyle.Render(fmt.Sprintf("Worker model: %s", m.cfg.TutorModel)))
+	b.WriteString("\n")
+	orchestratorStatus := m.cfg.OrchestratorModel
+	if orchestratorStatus == "" {
+		orchestratorStatus = "none (routing off)"
+	}
+	b.WriteString(checkDimStyle.Render(fmt.Sprintf("Orchestrator model: %s", orchestratorStatus)))
 	b.WriteString("\n\n")
 
-	for i, label := range settingsOptionLabels {
+	for i, label := range settingsRoleLabels {
 		if i == m.settingsCursor {
 			b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s", label)))
-			b.WriteString("\n  " + menuSubtitleStyle.Render(settingsOptionDescs[i]))
+			b.WriteString("\n  " + menuSubtitleStyle.Render(settingsRoleDescs[i]))
+		} else {
+			b.WriteString(fmt.Sprintf("  %s", label))
+		}
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString(checkDimStyle.Render("↑/↓ move · enter select · esc back"))
+	return b.String()
+}
+
+// renderProviderChoice renders the Local (Ollama) / API (OpenRouter)
+// choice for whichever role updateSettings picked (m.settingsEditing) —
+// a 3rd "None (disable routing)" entry is appended only when editing the
+// orchestrator. Copies the shared label/desc slices before appending so
+// the orchestrator-only 3rd item never leaks into the worker's list.
+func (m appModel) renderProviderChoice() string {
+	labels := append([]string{}, settingsOptionLabels...)
+	descs := append([]string{}, settingsOptionDescs...)
+	if m.settingsEditing == settingsTargetOrchestrator {
+		labels = append(labels, "None (disable routing)")
+		descs = append(descs, "Answer every turn with the worker model only")
+	}
+
+	var b strings.Builder
+	title := "Worker model"
+	if m.settingsEditing == settingsTargetOrchestrator {
+		title = "Orchestrator model"
+	}
+	b.WriteString(hintStyle.Render(title))
+	b.WriteString("\n\n")
+
+	for i, label := range labels {
+		if i == m.settingsCursor {
+			b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s", label)))
+			b.WriteString("\n  " + menuSubtitleStyle.Render(descs[i]))
 		} else {
 			b.WriteString(fmt.Sprintf("  %s", label))
 		}
