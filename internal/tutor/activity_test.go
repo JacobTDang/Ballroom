@@ -183,20 +183,133 @@ func TestPulsedStatusLine_ContainsThePlainStatusText(t *testing.T) {
 	}
 }
 
-func TestPulsedCallLine_ContainsTheLineBodyUntruncatedEscapes(t *testing.T) {
-	c := activityCall{name: "read_solution_file", status: "done", detail: "312 bytes"}
-	got := pulsedCallLine(c, 0, 80)
-	if !strings.Contains(got, "read_solution_file  312 bytes") {
-		t.Errorf("pulsedCallLine(...) = %q, want it to contain the formatted body", got)
+// --- activityCallHeader / activityOutputLines / pulsedCallLines --
+// replaced the old single-line pulsedCallLine, which crammed a
+// completed call's raw result onto the same line as its name (a real
+// UX complaint: it truncated to almost nothing in a normal-width pane).
+// A completed/failed call's output now renders on its own indented
+// lines beneath the header, like Claude Code's own tool-result display.
+
+func TestActivityCallHeader_RunningWithArgsShowsThemInline(t *testing.T) {
+	c := activityCall{name: "highlight_lines", status: "running", detail: `{"start_line":1}`}
+	if got := activityCallHeader(c); got != `highlight_lines({"start_line":1})` {
+		t.Errorf("activityCallHeader(%+v) = %q, want args shown in parens", c, got)
 	}
 }
 
-func TestPulsedCallLine_TruncatesBodyNotTheEscapeSequence(t *testing.T) {
-	c := activityCall{name: "read_solution_file", status: "done", detail: strings.Repeat("x", 200)}
-	got := pulsedCallLine(c, 0, 20) // narrow width
-	// The color escape itself must survive intact (never sliced mid-sequence).
-	if !strings.Contains(got, "\033[38;2;") || !strings.Contains(got, "m●\033[0m") {
-		t.Errorf("pulsedCallLine(...) = %q, want the truecolor escape sequence intact", got)
+func TestActivityCallHeader_RunningWithNoArgsOmitsParens(t *testing.T) {
+	c := activityCall{name: "read_solution_file", status: "running", detail: "{}"}
+	if got := activityCallHeader(c); got != "read_solution_file" {
+		t.Errorf("activityCallHeader(%+v) = %q, want no parens for empty args", c, got)
+	}
+}
+
+func TestActivityCallHeader_DoneOmitsResultInline(t *testing.T) {
+	// The result now belongs to activityOutputLines, indented beneath
+	// this header -- a real bug found live: it used to be crammed onto
+	// this same line, truncating to almost nothing in a normal-width
+	// pane.
+	c := activityCall{name: "read_solution_file", status: "done", detail: "312 bytes of real file content"}
+	if got := activityCallHeader(c); got != "read_solution_file" {
+		t.Errorf("activityCallHeader(%+v) = %q, want just the name, no inline result", c, got)
+	}
+}
+
+func TestActivityCallHeader_FailedOmitsErrorInlineButFlagsFailure(t *testing.T) {
+	c := activityCall{name: "read_test_output", status: "failed", detail: "no test run yet"}
+	if got := activityCallHeader(c); got != "read_test_output - failed" {
+		t.Errorf("activityCallHeader(%+v) = %q, want the name flagged failed, no inline error detail", c, got)
+	}
+}
+
+func TestActivityOutputLines_RunningCallHasNoOutputYet(t *testing.T) {
+	c := activityCall{name: "read_solution_file", status: "running", detail: "{}"}
+	if got := activityOutputLines(c, 80); got != nil {
+		t.Errorf("activityOutputLines(running) = %v, want nil -- a running call has no result yet", got)
+	}
+}
+
+func TestActivityOutputLines_EmptyDetailReturnsNil(t *testing.T) {
+	c := activityCall{name: "read_solution_file", status: "done", detail: ""}
+	if got := activityOutputLines(c, 80); got != nil {
+		t.Errorf("activityOutputLines(empty detail) = %v, want nil", got)
+	}
+}
+
+func TestActivityOutputLines_ShortResultIsOneIndentedLine(t *testing.T) {
+	c := activityCall{name: "read_solution_file", status: "done", detail: "312 bytes"}
+	got := activityOutputLines(c, 80)
+	if len(got) != 1 {
+		t.Fatalf("activityOutputLines(...) = %v, want exactly 1 line", got)
+	}
+	if !strings.HasPrefix(got[0], activityIndent) || !strings.Contains(got[0], "312 bytes") {
+		t.Errorf("activityOutputLines(...)[0] = %q, want it indented and containing the result", got[0])
+	}
+}
+
+func TestActivityOutputLines_FailedDetailIsIndentedToo(t *testing.T) {
+	c := activityCall{name: "read_test_output", status: "failed", detail: "no test run yet"}
+	got := activityOutputLines(c, 80)
+	if len(got) != 1 || !strings.HasPrefix(got[0], activityIndent) || !strings.Contains(got[0], "no test run yet") {
+		t.Errorf("activityOutputLines(failed) = %v, want the error indented and shown", got)
+	}
+}
+
+func TestActivityOutputLines_LongResultWrapsAcrossMultipleIndentedLines(t *testing.T) {
+	c := activityCall{name: "read_solution_file", status: "done", detail: strings.Repeat("word ", 40)}
+	got := activityOutputLines(c, 30)
+	if len(got) <= 1 {
+		t.Fatalf("activityOutputLines(...) = %v, want more than 1 wrapped line for a long result", got)
+	}
+	for _, line := range got {
+		if !strings.HasPrefix(line, activityIndent) {
+			t.Errorf("line %q missing the indent prefix", line)
+		}
+	}
+}
+
+func TestActivityOutputLines_CapsAtThreeLinesWithEllipsisMarkerOnLast(t *testing.T) {
+	c := activityCall{name: "read_solution_file", status: "done", detail: strings.Repeat("word ", 200)}
+	got := activityOutputLines(c, 20)
+	if len(got) != activityOutputPreviewLines {
+		t.Fatalf("activityOutputLines(...) = %d lines, want capped at %d", len(got), activityOutputPreviewLines)
+	}
+	last := got[len(got)-1]
+	if !strings.HasSuffix(last, truncateLineEllipsis) {
+		t.Errorf("last line %q, want it to end with %q to signal the result was cut off", last, truncateLineEllipsis)
+	}
+}
+
+func TestPulsedCallLines_RunningCallIsJustTheHeaderLine(t *testing.T) {
+	c := activityCall{name: "read_solution_file", status: "running", detail: "{}"}
+	got := pulsedCallLines(c, 0, 80)
+	if len(got) != 1 {
+		t.Fatalf("pulsedCallLines(running) = %v, want exactly 1 line (no output yet)", got)
+	}
+	if !strings.Contains(got[0], "read_solution_file") || !strings.Contains(got[0], "\033[38;2;") {
+		t.Errorf("pulsedCallLines(running)[0] = %q, want the colored header", got[0])
+	}
+}
+
+func TestPulsedCallLines_DoneCallHasHeaderThenIndentedOutput(t *testing.T) {
+	c := activityCall{name: "read_solution_file", status: "done", detail: "312 bytes"}
+	got := pulsedCallLines(c, 0, 80)
+	if len(got) != 2 {
+		t.Fatalf("pulsedCallLines(done) = %v, want header + 1 output line", got)
+	}
+	if !strings.Contains(got[0], "read_solution_file") || strings.Contains(got[0], "312 bytes") {
+		t.Errorf("pulsedCallLines(done)[0] = %q, want just the colored header, no inline result", got[0])
+	}
+	if !strings.HasPrefix(got[1], activityIndent) || !strings.Contains(got[1], "312 bytes") {
+		t.Errorf("pulsedCallLines(done)[1] = %q, want the indented result", got[1])
+	}
+}
+
+func TestPulsedCallLines_HeaderTruncatesNotTheEscapeSequence(t *testing.T) {
+	c := activityCall{name: strings.Repeat("x", 200), status: "running", detail: "{}"}
+	got := pulsedCallLines(c, 0, 20) // narrow width
+	if !strings.Contains(got[0], "\033[38;2;") || !strings.Contains(got[0], "m●\033[0m") {
+		t.Errorf("pulsedCallLines(...)[0] = %q, want the truecolor escape sequence intact", got[0])
 	}
 }
 

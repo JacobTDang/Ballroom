@@ -3,8 +3,11 @@ package tutor
 import (
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // activityToolLines caps how many concurrent tool-call lines the
@@ -15,13 +18,19 @@ import (
 // the region to fit exactly len(activeCalls)+1 rows, capped by this).
 const activityToolLines = 4
 
-// activityArgsPreviewMax/activityResultPreviewMax cap how much of a raw
-// tool-call argument/result string appears on one activity line — keeps
-// the preview a readable "at a glance" length even in a wide terminal,
-// rather than filling the whole line with e.g. a long file's raw
-// content.
+// activityArgsPreviewMax caps how much of a raw tool-call argument
+// string appears inline in a running call's header line (see
+// activityCallHeader) — keeps it a readable "at a glance" length even
+// in a wide terminal.
 const activityArgsPreviewMax = 40
-const activityResultPreviewMax = 60
+
+// activityResultPreviewMax caps how much of a raw tool-call result/error
+// string is kept at all (see buildActivityChannelOption in model.go),
+// before activityOutputLines wraps and further caps it down to
+// activityOutputPreviewLines indented lines — generous enough to
+// actually fill that 3-line window with real content instead of cutting
+// off after what used to fit on one inline line.
+const activityResultPreviewMax = 240
 
 // activityCall is one tool invocation's current display state.
 type activityCall struct {
@@ -155,8 +164,13 @@ const (
 // activityPulseMinBrightness floors how dim a pulsing dot ever gets — a
 // full fade to black would read as the dot disappearing/flickering
 // rather than "breathing"; capping the low end keeps it always at least
-// faintly visible while still giving a clear fade.
-const activityPulseMinBrightness = 0.35
+// faintly visible while still giving a clear fade. Raised from an
+// earlier, more extreme 0.35: at that floor the dot dimmed to a barely
+// perceptible smudge against a black background — a real complaint from
+// live use ("I would like a glowing dot not just line") — closer to
+// looking flat/off than a glow. 0.6 keeps the dot clearly, consistently
+// lit while still leaving real breathing motion (0.6 -> 1.0 -> 0.6).
+const activityPulseMinBrightness = 0.6
 
 // activityPulsePeriodTicks is how many activityPulseInterval ticks make
 // up one full fade cycle (dim -> bright -> dim). At the production
@@ -202,11 +216,77 @@ func pulsedStatusLine(phase, cols int) string {
 	return coloredDot(r, g, b) + " " + truncateLine(plain, max(cols-2, 0))
 }
 
-// pulsedCallLine is pulsedStatusLine's counterpart for one tool-call
-// line, color-wrapping activityLineBody's dot per activityDotColor(c.status, phase).
-func pulsedCallLine(c activityCall, phase, cols int) string {
+// activityCallHeader renders one call's header line body (everything
+// after the dot) — the tool name, plus its args in parens while still
+// running. Unlike activityLineBody, it never includes the result/error
+// detail inline — that's shown indented beneath the header instead (see
+// activityOutputLines) — a real UX fix: a completed call's raw
+// result/JSON used to be crammed onto this same line, truncating to
+// almost nothing in a normal-width pane.
+func activityCallHeader(c activityCall) string {
+	switch c.status {
+	case "done":
+		return c.name
+	case "failed":
+		return c.name + " - failed"
+	default: // "running"
+		if c.detail == "" || c.detail == "{}" {
+			return c.name
+		}
+		return fmt.Sprintf("%s(%s)", c.name, c.detail)
+	}
+}
+
+// activityIndent nests a completed/failed call's output preview
+// visually beneath the header line that produced it — like Claude
+// Code's own tool-result display.
+const activityIndent = "  "
+
+// activityOutputPreviewLines caps how many indented output lines a
+// completed/failed call's result/error preview shows — a fixed,
+// bounded window so one verbose tool call can't push every other active
+// call (and the input box below the whole region) off-screen.
+const activityOutputPreviewLines = 3
+
+// activityOutputLines returns c's result (done) or error (failed)
+// detail, word-wrapped to fit within cols and indented, capped at
+// activityOutputPreviewLines lines — nil for a running call (no output
+// yet) or an empty detail. When wrapping produces more lines than the
+// cap, the last shown line is re-cut with a trailing ellipsis so a long
+// result signals "there's more" rather than silently stopping.
+func activityOutputLines(c activityCall, cols int) []string {
+	if c.detail == "" || (c.status != "done" && c.status != "failed") {
+		return nil
+	}
+	w := cols - len(activityIndent)
+	if w <= 0 {
+		return nil
+	}
+	wrapped := strings.Split(lipgloss.NewStyle().Width(w).Render(c.detail), "\n")
+	if len(wrapped) > activityOutputPreviewLines {
+		wrapped = wrapped[:activityOutputPreviewLines]
+		last := activityOutputPreviewLines - 1
+		runes := []rune(wrapped[last])
+		if cut := w - len(truncateLineEllipsis); cut > 0 && len(runes) > cut {
+			runes = runes[:cut]
+		}
+		wrapped[last] = string(runes) + truncateLineEllipsis
+	}
+	out := make([]string, len(wrapped))
+	for i, line := range wrapped {
+		out[i] = activityIndent + line
+	}
+	return out
+}
+
+// pulsedCallLines is pulsedStatusLine's counterpart for one tool call: a
+// color-wrapped header line (dot + activityCallHeader) followed by the
+// call's indented output preview, once it has one (activityOutputLines
+// — nil for a still-running call, so it's just the header line).
+func pulsedCallLines(c activityCall, phase, cols int) []string {
 	r, g, b := activityDotColor(c.status, phase)
-	return coloredDot(r, g, b) + " " + truncateLine(activityLineBody(c), max(cols-2, 0))
+	header := coloredDot(r, g, b) + " " + truncateLine(activityCallHeader(c), max(cols-2, 0))
+	return append([]string{header}, activityOutputLines(c, cols)...)
 }
 
 // activityPulseInterval is a var (not const) so tests can substitute a

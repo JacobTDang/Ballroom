@@ -27,17 +27,25 @@ import (
 // keeps at least a few rows of conversation visible even when the
 // textarea has grown to its cap (see recomputeLayout).
 const (
-	minTextareaRows    = 1
-	minViewportRows    = 3
-	textareaBorderRows = 2 // top + bottom border, added by textareaBoxStyle
-	textareaBorderCols = 2 // left + right border, same style
+	minTextareaRows = 1
+	minViewportRows = 3
 )
 
-// textareaBoxStyle replaces the old hand-rolled box borders
-// (internal/tutor/scrollbox.go, deleted alongside this rewrite) with a
-// lipgloss border — same teal accent used elsewhere in this project's
-// palette (docker/tmux.conf, internal/tui/styles.go).
-var textareaBoxStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#2FA6A6"))
+// textareaBoxStyle separates the input from the scrolling conversation
+// above it with a single top rule, styled closer to Claude Code's own
+// CLI input — replacing an earlier full rounded box on all four sides.
+// The full box's colored left edge read visually as a persistent
+// vertical "sidebar" running down the pane, a real complaint from live
+// use ("remove the side bar ... it will look a lot nicer"); a lone top
+// border keeps the same visual separation from the conversation above
+// without that vertical bar. PaddingLeft(1) keeps the "> " prompt
+// roughly aligned with the conversation's own left inset
+// (viewportContentStyle's PaddingLeft(2)) instead of sitting flush
+// against the pane's bare left edge.
+var textareaBoxStyle = lipgloss.NewStyle().
+	Border(lipgloss.NormalBorder(), true, false, false, false).
+	BorderForeground(lipgloss.Color("#2FA6A6")).
+	PaddingLeft(1)
 
 // viewportContentStyle left-pads the scrolling conversation area — a
 // real readability complaint found live: text printed flush against the
@@ -230,6 +238,12 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.recomputeLayout()
+		// Re-wrap the already-displayed conversation to the new width --
+		// refreshViewport bakes wrapping into the content at SetContent
+		// time (see its doc comment), so a resize after a long message
+		// is already showing needs this to re-flow it, not just resize
+		// the viewport's own frame.
+		m.refreshViewport()
 		return m, tea.ClearScreen
 
 	case tea.KeyMsg:
@@ -300,7 +314,7 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // rows as it's told to, so there is no way for overflow to land outside
 // the box and corrupt anything else, unlike raw cooked-mode wrapping.
 func (m *tutorModel) recomputeLayout() {
-	m.textarea.SetWidth(max(m.width-textareaBorderCols, 1))
+	m.textarea.SetWidth(max(m.width-textareaBoxStyle.GetHorizontalFrameSize(), 1))
 
 	maxTaRows := max(m.height/2, minTextareaRows)
 	taRows := estimatedTextareaRows(m.textarea.Value(), m.textarea.Width())
@@ -312,14 +326,35 @@ func (m *tutorModel) recomputeLayout() {
 	// costs nothing when idle, unlike the old design's permanently
 	// reserved 5 rows. Recomputed here (not just on resize) because this
 	// also runs from the activityEventMsg/turnCompleteMsg cases, where
-	// len(m.activeCalls) or turnInFlight itself just changed.
+	// len(m.activeCalls) or turnInFlight itself just changed. Each call
+	// costs its own header row plus however many indented output rows
+	// activityOutputLines actually produces for it (0 while still
+	// running, up to activityOutputPreviewLines once it has a result) --
+	// not a flat 1-per-call, now that a completed call's output renders
+	// on its own indented lines instead of squeezed onto the header.
 	activityRows := 0
 	if m.turnInFlight {
-		activityRows = 1 + len(m.activeCalls) // 1 status line + one per call
+		activityRows = 1 // status line
+		w := m.activityContentWidth()
+		for _, c := range m.activeCalls {
+			activityRows += 1 + len(activityOutputLines(c, w))
+		}
 	}
 
 	m.viewport.Width = m.width
-	m.viewport.Height = max(m.height-taRows-textareaBorderRows-activityRows, minViewportRows)
+	m.viewport.Height = max(m.height-taRows-textareaBoxStyle.GetVerticalFrameSize()-activityRows, minViewportRows)
+}
+
+// activityContentWidth is the actual text width available inside the
+// activity region once viewportContentStyle's left padding is
+// subtracted — shared by recomputeLayout's row-count accounting and
+// activityView's rendering so they can never disagree about how much
+// room a call's header/output preview has, which used to let the
+// activity region's content overflow the pane by viewportContentStyle's
+// own padding width (the same class of bug refreshViewport's word-wrap
+// fixes for the main conversation).
+func (m tutorModel) activityContentWidth() int {
+	return max(m.width-viewportContentStyle.GetHorizontalFrameSize(), 0)
 }
 
 // estimatedTextareaRows estimates how many visual rows value will wrap
@@ -348,9 +383,25 @@ func estimatedTextareaRows(value string, width int) int {
 // refreshViewport re-renders displayLines into the viewport and scrolls
 // to the bottom — called any time displayLines changes (a submit-echo,
 // a reply, a failure fallback) so the newest content is always what's
-// visible.
+// visible, and also on every resize (see Update's WindowSizeMsg case) to
+// re-flow already-displayed content to the new width.
+//
+// The content is word-wrapped here, before SetContent, rather than left
+// to the viewport itself — a real bug found live: bubbles/viewport does
+// NOT wrap long lines. It only ever splits on explicit "\n", and any
+// line wider than the viewport gets hard-cut at the frame edge
+// (visibleLines' ansi.Cut) with the rest silently discarded, not shown
+// on a wrapped row below — exactly what a long assistant reply (one
+// long unbroken line, no embedded newlines) hit. lipgloss.Style.Render
+// wraps to its Width via cellbuf.Wrap, which is reused here for the
+// same reason recomputeLayout uses estimatedTextareaRows: real word
+// wrapping, not truncation.
 func (m *tutorModel) refreshViewport() {
-	m.viewport.SetContent(strings.Join(m.displayLines, "\n\n"))
+	content := strings.Join(m.displayLines, "\n\n")
+	if w := m.viewport.Width - m.viewport.Style.GetHorizontalFrameSize(); w > 0 {
+		content = lipgloss.NewStyle().Width(w).Render(content)
+	}
+	m.viewport.SetContent(content)
 	m.viewport.GotoBottom()
 }
 
@@ -583,21 +634,22 @@ func comprehensionCheckMessages(history []*schema.Message, workDir, userFirstMes
 }
 
 // activityView renders the live tool-call activity region: a pulsing
-// status dot plus one line per active call, via activity.go's existing
-// pulsedStatusLine/pulsedCallLine (unchanged from the old box-based
-// design — they already truncate to a given width and color-wrap only
-// the leading dot, so they're equally correct called from here). Empty
-// whenever no turn is in flight, so the region costs zero rows when
-// idle — an improvement over the old design's permanently reserved 5
-// rows (see recomputeLayout's activityRows).
+// status dot, then one header line per active call plus (once it has a
+// result) its own indented output preview beneath it, via activity.go's
+// pulsedStatusLine/pulsedCallLines. Empty whenever no turn is in flight,
+// so the region costs zero rows when idle — an improvement over the old
+// design's permanently reserved 5 rows (see recomputeLayout's
+// activityRows, which must stay in sync with how many lines this
+// actually produces).
 func (m tutorModel) activityView() string {
 	if !m.turnInFlight {
 		return ""
 	}
-	lines := make([]string, 0, activityToolLines+1)
-	lines = append(lines, pulsedStatusLine(m.pulsePhase, m.width))
+	w := m.activityContentWidth()
+	lines := make([]string, 0, activityToolLines*(activityOutputPreviewLines+1)+1)
+	lines = append(lines, pulsedStatusLine(m.pulsePhase, w))
 	for _, c := range m.activeCalls {
-		lines = append(lines, pulsedCallLine(c, m.pulsePhase, m.width))
+		lines = append(lines, pulsedCallLines(c, m.pulsePhase, w)...)
 	}
 	return viewportContentStyle.Render(strings.Join(lines, "\n"))
 }

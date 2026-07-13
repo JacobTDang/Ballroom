@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/JacobTDang/Ballroom/internal/exercise"
@@ -88,9 +89,10 @@ func TestTutorModel_WindowSizeMsg_ViewportAndTextareaHeightsSumWithinTerminal(t 
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	got := newM.(tutorModel)
 
-	total := got.viewport.Height + got.textarea.Height() + textareaBorderRows
+	border := textareaBoxStyle.GetVerticalFrameSize()
+	total := got.viewport.Height + got.textarea.Height() + border
 	if total > 30 {
-		t.Errorf("viewport(%d) + textarea(%d) + border(%d) = %d, want <= terminal height 30", got.viewport.Height, got.textarea.Height(), textareaBorderRows, total)
+		t.Errorf("viewport(%d) + textarea(%d) + border(%d) = %d, want <= terminal height 30", got.viewport.Height, got.textarea.Height(), border, total)
 	}
 }
 
@@ -183,6 +185,70 @@ func TestTutorModel_View_RendersBothViewportAndTextarea(t *testing.T) {
 	out := m.View()
 	if out == "" {
 		t.Fatal("View() returned empty output")
+	}
+}
+
+// TestTutorModel_TextareaHasTopRuleOnlyNoSideBorder is a regression test
+// for a real UI complaint: the input box's full rounded border used to
+// have a colored left edge running the full height of the box, which
+// read visually as a persistent vertical "sidebar" down the pane. Only
+// a top rule should separate the input from the conversation above it
+// now, with no left/right/bottom border characters.
+func TestTutorModel_TextareaHasTopRuleOnlyNoSideBorder(t *testing.T) {
+	m := newTutorLayoutOnly()
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	out := m.View()
+	if !strings.Contains(out, "─") {
+		t.Error("View() missing the top rule separating input from the conversation")
+	}
+	for _, sideChar := range []string{"│", "╭", "╮", "╰", "╯"} {
+		if strings.Contains(out, sideChar) {
+			t.Errorf("View() contains %q, want no left/right/bottom border characters (the box should be a top rule only)", sideChar)
+		}
+	}
+}
+
+// TestTutorModel_LongReplyWrapsInsteadOfBeingCutOff is a regression test
+// for a real bug found live: bubbles/viewport does not wrap long lines
+// -- it only splits on explicit "\n", and a line wider than the
+// viewport gets hard-truncated at the frame edge with the rest silently
+// discarded, not shown on a wrapped row below. A real assistant reply is
+// normally one long unbroken line (no embedded newlines), so every
+// reply longer than the pane was getting cut off mid-sentence instead of
+// wrapping. refreshViewport now pre-wraps content before SetContent
+// (see its doc comment) specifically to fix this.
+func TestTutorModel_LongReplyWrapsInsteadOfBeingCutOff(t *testing.T) {
+	long := strings.Repeat("supercalifragilistic ", 20) // one long unbroken line, no "\n"
+	mock := newSequencedOllama(t, long)
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "give me a long reply")
+
+	view := got.viewport.View()
+	if !strings.Contains(view, "supercalifragilistic") {
+		t.Fatalf("viewport view %q, want it to contain the reply", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if w := lipgloss.Width(line); w > 40 {
+			t.Errorf("view line %q is %d cells wide, want it wrapped within the 40-wide viewport, not overflowing", line, w)
+		}
+	}
+	// Every repetition of the word must still be visible somewhere in
+	// the view (each on its own wrapped row, since one repetition plus a
+	// trailing space already exceeds the 38-wide content area), not
+	// silently dropped by a hard cut after the first screen-width.
+	if n := strings.Count(view, "supercalifragilistic"); n != 20 {
+		t.Errorf("view contains %d occurrences of the repeated word, want all 20 -- the tail of a long reply must not be truncated", n)
 	}
 }
 
