@@ -31,8 +31,8 @@ func TestReadSolutionFileTool_ReturnsFileContents(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatalf("unmarshal tool output %q: %v", out, err)
 	}
-	if result.Content != "def solve(): pass" {
-		t.Errorf("Content = %q, want %q", result.Content, "def solve(): pass")
+	if result.Content != "1\tdef solve(): pass" {
+		t.Errorf("Content = %q, want %q", result.Content, "1\tdef solve(): pass")
 	}
 }
 

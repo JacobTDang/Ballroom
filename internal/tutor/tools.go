@@ -123,8 +123,8 @@ func (fi *flexibleInt) UnmarshalJSON(data []byte) error {
 
 type highlightLinesInput struct {
 	File  string      `json:"file" jsonschema:"description=filename to highlight (e.g. solution.go) -- basename is enough, matches what read_solution_file/read_cursor_position return"`
-	Start flexibleInt `json:"start" jsonschema:"description=1-indexed start line (inclusive)"`
-	End   flexibleInt `json:"end" jsonschema:"description=1-indexed end line (inclusive) -- same as start to highlight a single line"`
+	Start flexibleInt `json:"start" jsonschema:"description=1-indexed start line (inclusive) -- use the exact line numbers shown by read_solution_file, do not count lines yourself"`
+	End   flexibleInt `json:"end" jsonschema:"description=1-indexed end line (inclusive) -- same as start to highlight a single line; use the exact line numbers shown by read_solution_file, do not count lines yourself"`
 	Note  string      `json:"note" jsonschema:"description=a short note to attach to the highlighted lines, shown in the user's editor"`
 }
 

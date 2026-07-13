@@ -9,14 +9,39 @@ import (
 	"time"
 )
 
-func TestBuildFileContext_ReturnsExactContents(t *testing.T) {
+// TestBuildFileContext_NumbersEachLine locks in the fix for highlight_lines
+// landing on the wrong line: without ground-truth line numbers in what the
+// model reads back, it has to count lines itself from raw prose-formatted
+// code (blank lines, comments, wrapped display width, ...), which is
+// exactly the kind of thing a model gets wrong. Numbering matches
+// highlight_lines' own 1-indexed start/end contract directly, so the
+// model can copy a number instead of counting one.
+func TestBuildFileContext_NumbersEachLine(t *testing.T) {
 	dir := t.TempDir()
-	want := "package main\n\nfunc solve() {}\n"
-	if err := os.WriteFile(filepath.Join(dir, "solution.go"), []byte(want), 0o644); err != nil {
+	content := "package main\n\nfunc solve() {}\n"
+	if err := os.WriteFile(filepath.Join(dir, "solution.go"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write solution file: %v", err)
 	}
 
 	got := buildFileContext(dir, 8000)
+	want := "1\tpackage main\n2\t\n3\tfunc solve() {}"
+	if got != want {
+		t.Errorf("buildFileContext = %q, want %q", got, want)
+	}
+}
+
+// TestBuildFileContext_NumbersLastLineWithNoTrailingNewline covers a file
+// that doesn't end in a newline (e.g. mid-edit) -- the last line must
+// still get a number, not get silently dropped or merged into the
+// previous one.
+func TestBuildFileContext_NumbersLastLineWithNoTrailingNewline(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "solution.go"), []byte("a\nb\nc"), 0o644); err != nil {
+		t.Fatalf("write solution file: %v", err)
+	}
+
+	got := buildFileContext(dir, 8000)
+	want := "1\ta\n2\tb\n3\tc"
 	if got != want {
 		t.Errorf("buildFileContext = %q, want %q", got, want)
 	}
@@ -39,8 +64,9 @@ func TestBuildFileContext_TruncatesOversizedFile(t *testing.T) {
 	}
 
 	got := buildFileContext(dir, 10)
-	if !strings.HasPrefix(got, strings.Repeat("x", 10)) {
-		t.Errorf("buildFileContext = %q, want it to start with the first 10 bytes", got)
+	wantPrefix := "1\t" + strings.Repeat("x", 10)
+	if !strings.HasPrefix(got, wantPrefix) {
+		t.Errorf("buildFileContext = %q, want it to start with %q", got, wantPrefix)
 	}
 	if !strings.Contains(got, "truncated") {
 		t.Errorf("buildFileContext = %q, want a truncation marker", got)
@@ -48,11 +74,12 @@ func TestBuildFileContext_TruncatesOversizedFile(t *testing.T) {
 	if !strings.Contains(got, "100 bytes") {
 		t.Errorf("buildFileContext = %q, want the marker to mention the real file size (100 bytes)", got)
 	}
-	// The raw content prefix must never exceed maxBytes, even though the
-	// marker text appended after it does.
+	// The numbered content before the marker must be exactly the
+	// (numbered) first 10 raw bytes, even though the marker text appended
+	// after it isn't itself bounded by maxBytes.
 	rawPrefix := strings.SplitN(got, "\n...[truncated", 2)[0]
-	if len(rawPrefix) > 10 {
-		t.Errorf("raw content prefix is %d bytes, want <= 10", len(rawPrefix))
+	if rawPrefix != wantPrefix {
+		t.Errorf("numbered content before the truncation marker = %q, want exactly %q", rawPrefix, wantPrefix)
 	}
 }
 
@@ -64,8 +91,8 @@ func TestBuildFileContext_RereadsFreshEachCall(t *testing.T) {
 	}
 
 	first := buildFileContext(dir, 8000)
-	if first != "first version" {
-		t.Fatalf("first read = %q, want %q", first, "first version")
+	if first != "1\tfirst version" {
+		t.Fatalf("first read = %q, want %q", first, "1\tfirst version")
 	}
 
 	if err := os.WriteFile(path, []byte("second version"), 0o644); err != nil {
@@ -73,8 +100,8 @@ func TestBuildFileContext_RereadsFreshEachCall(t *testing.T) {
 	}
 
 	second := buildFileContext(dir, 8000)
-	if second != "second version" {
-		t.Errorf("second read = %q, want %q (should re-read, not cache)", second, "second version")
+	if second != "1\tsecond version" {
+		t.Errorf("second read = %q, want %q (should re-read, not cache)", second, "1\tsecond version")
 	}
 }
 
