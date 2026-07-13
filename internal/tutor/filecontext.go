@@ -1,11 +1,13 @@
 package tutor
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -46,12 +48,37 @@ func readLastTestResult(workDir string) (lastTestResult, bool, error) {
 	return result, true, nil
 }
 
-// buildFileContext returns the active solution.* file's contents
-// (truncated to maxBytes, with a trailing marker if the file is larger),
-// or "" if there's no solution file yet (sandbox mode's fresh start) or
-// it can't be read — a missing/unreadable file is an expected state, not
-// a bug, so this never returns an error. Port of tutor/chat.sh's
-// build_file_context, which has the same always-succeeds contract.
+// numberLines prefixes each line of content with its 1-indexed line
+// number, tab-separated — the same numbering highlight_lines' start/end
+// arguments expect. Without this, the only way the model can figure out
+// which line is which is by counting through raw, unnumbered prose-
+// formatted code — a well-known LLM weak spot, and the direct cause of
+// highlight_lines calls landing on the wrong line. Uses bufio.Scanner
+// (not strings.Split on "\n") specifically so a trailing newline doesn't
+// produce a spurious extra numbered empty line at the end, matching how
+// `cat -n` counts lines.
+func numberLines(content string) string {
+	if content == "" {
+		return ""
+	}
+	var b strings.Builder
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	n := 0
+	for scanner.Scan() {
+		n++
+		if n > 1 {
+			b.WriteByte('\n')
+		}
+		fmt.Fprintf(&b, "%d\t%s", n, scanner.Text())
+	}
+	return b.String()
+}
+
+// buildFileContext returns the active solution.* file's contents, each
+// line numbered (see numberLines), truncated to maxBytes with a trailing
+// marker if the file is larger, or "" if there's no solution file yet
+// (sandbox mode's fresh start) or it can't be read — a missing/unreadable
+// file is an expected state, not a bug, so this never returns an error.
 func buildFileContext(workDir string, maxBytes int) string {
 	matches, err := filepath.Glob(filepath.Join(workDir, "solution.*"))
 	if err != nil || len(matches) == 0 {
@@ -69,15 +96,16 @@ func buildFileContext(workDir string, maxBytes int) string {
 	if err != nil {
 		return ""
 	}
+	numbered := numberLines(string(content))
 
 	info, err := os.Stat(file)
 	if err != nil {
-		return string(content)
+		return numbered
 	}
 	if info.Size() > int64(maxBytes) {
-		return fmt.Sprintf("%s\n...[truncated, file is %d bytes; showing first %d]", content, info.Size(), maxBytes)
+		return fmt.Sprintf("%s\n...[truncated, file is %d bytes; showing first %d]", numbered, info.Size(), maxBytes)
 	}
-	return string(content)
+	return numbered
 }
 
 // readProblemStatement returns problem.md's contents from workDir, or ""
