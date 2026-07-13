@@ -150,6 +150,29 @@ func TestConfigCmd_SetKeyRequiresAKey(t *testing.T) {
 	}
 }
 
+func TestConfigCmd_SetOrchestratorModelRequiresATag(t *testing.T) {
+	err := configCmd([]string{"set-orchestrator-model"})
+	if err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Errorf("configCmd([\"set-orchestrator-model\"]) error = %v, want a usage error", err)
+	}
+}
+
+func TestConfigCmd_DispatchesSetOrchestratorModel(t *testing.T) {
+	t.Setenv("PRACTICE_ROOT", t.TempDir())
+
+	if err := configCmd([]string{"set-orchestrator-model", "nemotron"}); err != nil {
+		t.Fatalf("configCmd: %v", err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if cfg.OrchestratorModel != "nemotron" {
+		t.Errorf("OrchestratorModel = %q, want %q", cfg.OrchestratorModel, "nemotron")
+	}
+}
+
 func TestSetModelCmd_PersistsToSettings(t *testing.T) {
 	defer fakeCheckToolCallingCLI(true, nil)()
 	t.Setenv("PRACTICE_ROOT", t.TempDir())
@@ -244,6 +267,46 @@ func TestSetKeyCmd_PersistsToSettings(t *testing.T) {
 	}
 }
 
+func TestSetModelCmd_PreservesExistingOrchestratorModel(t *testing.T) {
+	defer fakeCheckToolCallingCLI(true, nil)()
+	t.Setenv("PRACTICE_ROOT", t.TempDir())
+
+	if err := setOrchestratorModelCmd("nemotron"); err != nil {
+		t.Fatalf("setOrchestratorModelCmd: %v", err)
+	}
+	if err := setModelCmd("llama3.1:8b"); err != nil {
+		t.Fatalf("setModelCmd: %v", err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if cfg.OrchestratorModel != "nemotron" {
+		t.Errorf("OrchestratorModel = %q, want it preserved across a set-model call", cfg.OrchestratorModel)
+	}
+}
+
+func TestSetKeyCmd_PreservesExistingOrchestratorModel(t *testing.T) {
+	t.Setenv("PRACTICE_ROOT", t.TempDir())
+	t.Setenv("OPENROUTER_API_KEY", "")
+
+	if err := setOrchestratorModelCmd("nemotron"); err != nil {
+		t.Fatalf("setOrchestratorModelCmd: %v", err)
+	}
+	if err := setKeyCmd("sk-abc123"); err != nil {
+		t.Fatalf("setKeyCmd: %v", err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if cfg.OrchestratorModel != "nemotron" {
+		t.Errorf("OrchestratorModel = %q, want it preserved across a set-key call", cfg.OrchestratorModel)
+	}
+}
+
 func TestSetKeyCmd_PreservesExistingTutorModel(t *testing.T) {
 	defer fakeCheckToolCallingCLI(true, nil)()
 	t.Setenv("PRACTICE_ROOT", t.TempDir())
@@ -261,6 +324,74 @@ func TestSetKeyCmd_PreservesExistingTutorModel(t *testing.T) {
 	}
 	if cfg.TutorModel != "llama3.1:8b" {
 		t.Errorf("TutorModel = %q, want it preserved across a set-key call", cfg.TutorModel)
+	}
+}
+
+func TestSetOrchestratorModelCmd_PersistsToSettings(t *testing.T) {
+	t.Setenv("PRACTICE_ROOT", t.TempDir())
+
+	if err := setOrchestratorModelCmd("nemotron"); err != nil {
+		t.Fatalf("setOrchestratorModelCmd: %v", err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if cfg.OrchestratorModel != "nemotron" {
+		t.Errorf("OrchestratorModel = %q, want %q", cfg.OrchestratorModel, "nemotron")
+	}
+}
+
+func TestSetOrchestratorModelCmd_NonePreservedFieldsButClearsOrchestratorModel(t *testing.T) {
+	defer fakeCheckToolCallingCLI(true, nil)()
+	t.Setenv("PRACTICE_ROOT", t.TempDir())
+
+	if err := setModelCmd("llama3.1:8b"); err != nil {
+		t.Fatalf("setModelCmd: %v", err)
+	}
+	if err := setOrchestratorModelCmd("nemotron"); err != nil {
+		t.Fatalf("setOrchestratorModelCmd: %v", err)
+	}
+	if err := setOrchestratorModelCmd("none"); err != nil {
+		t.Fatalf("setOrchestratorModelCmd(none): %v", err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if cfg.OrchestratorModel != "" {
+		t.Errorf("OrchestratorModel = %q, want empty after set-orchestrator-model none", cfg.OrchestratorModel)
+	}
+	if cfg.TutorModel != "llama3.1:8b" {
+		t.Errorf("TutorModel = %q, want it preserved across set-orchestrator-model none", cfg.TutorModel)
+	}
+}
+
+func TestSetOrchestratorModelCmd_PreservesExistingTutorModelAndKey(t *testing.T) {
+	defer fakeCheckToolCallingCLI(true, nil)()
+	t.Setenv("PRACTICE_ROOT", t.TempDir())
+
+	if err := setModelCmd("llama3.1:8b"); err != nil {
+		t.Fatalf("setModelCmd: %v", err)
+	}
+	if err := setKeyCmd("sk-preserve-me"); err != nil {
+		t.Fatalf("setKeyCmd: %v", err)
+	}
+	if err := setOrchestratorModelCmd("nemotron"); err != nil {
+		t.Fatalf("setOrchestratorModelCmd: %v", err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if cfg.TutorModel != "llama3.1:8b" {
+		t.Errorf("TutorModel = %q, want it preserved across a set-orchestrator-model call", cfg.TutorModel)
+	}
+	if cfg.OpenRouterAPIKey != "sk-preserve-me" {
+		t.Errorf("OpenRouterAPIKey = %q, want it preserved across a set-orchestrator-model call", cfg.OpenRouterAPIKey)
 	}
 }
 

@@ -67,8 +67,11 @@ Usage:
   ballroom submit              Submit your solution (run this inside an active session)
   ballroom tutor               Start the tutor chat (run this inside an active session)
   ballroom return              Return to the host homepage (run this inside an active session)
-  ballroom config set-model <tag>   Set the tutor model (a local Ollama tag, or an
-                                     openrouter:<slug> API model) without opening the TUI
+  ballroom config set-model <tag>   Set the tutor (worker) model (a local Ollama tag, or
+                                     an openrouter:<slug> API model) without opening the TUI
+  ballroom config set-orchestrator-model <tag|none>
+                                     Set the orchestrator model that routes turns to the
+                                     worker model, or "none" to disable routing
   ballroom config set-key <key>     Set the OpenRouter API key used by openrouter: models
   ballroom help | -h | --help  Show this help
 
@@ -77,6 +80,7 @@ Examples:
   ballroom practice two-pointers-01-go
   ballroom sandbox
   ballroom config set-model openrouter:anthropic/claude-3.5-sonnet
+  ballroom config set-orchestrator-model openrouter:nvidia/nemotron-3-ultra-550b-a55b:free
   ballroom config set-key sk-...
 
 Reset the sandbox volume:
@@ -244,7 +248,12 @@ func tutorCmd() error {
 	cfg := tutor.Config{
 		OllamaHost: ollamaHost,
 		Model:      model,
-		// APIKey is only meaningful when Model is
+		// OrchestratorModel is optional -- an empty value (the default
+		// when TUTOR_ORCHESTRATOR_MODEL isn't set) means no routing at
+		// all, matching this project's single-model behavior before
+		// routing existed (see tutor.Run).
+		OrchestratorModel: os.Getenv("TUTOR_ORCHESTRATOR_MODEL"),
+		// APIKey is only meaningful when Model or OrchestratorModel is
 		// tutor.OpenRouterModelPrefix-prefixed (see agent.go's
 		// newChatModel); harmless to always set from the env var
 		// regardless, same as OllamaHost being set but unused on that
@@ -278,7 +287,7 @@ const hostOllamaAddr = "http://localhost:11434"
 // you want to set.
 func configCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: ballroom config set-model <tag> | ballroom config set-key <key>")
+		return fmt.Errorf("usage: ballroom config set-model <tag> | ballroom config set-orchestrator-model <tag|none> | ballroom config set-key <key>")
 	}
 	switch args[0] {
 	case "set-model":
@@ -286,6 +295,11 @@ func configCmd(args []string) error {
 			return fmt.Errorf("usage: ballroom config set-model <tag>")
 		}
 		return setModelCmd(args[1])
+	case "set-orchestrator-model":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: ballroom config set-orchestrator-model <tag|none>")
+		}
+		return setOrchestratorModelCmd(args[1])
 	case "set-key":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: ballroom config set-key <key>")
@@ -311,8 +325,9 @@ func setModelCmd(tag string) error {
 		return err
 	}
 	if err := config.SaveSettings(cfg.SettingsPath(), config.Settings{
-		TutorModel:       tag,
-		OpenRouterAPIKey: cfg.OpenRouterAPIKey,
+		TutorModel:        tag,
+		OpenRouterAPIKey:  cfg.OpenRouterAPIKey,
+		OrchestratorModel: cfg.OrchestratorModel,
 	}); err != nil {
 		return err
 	}
@@ -343,11 +358,41 @@ func setKeyCmd(key string) error {
 		return err
 	}
 	if err := config.SaveSettings(cfg.SettingsPath(), config.Settings{
-		TutorModel:       cfg.TutorModel,
-		OpenRouterAPIKey: key,
+		TutorModel:        cfg.TutorModel,
+		OpenRouterAPIKey:  key,
+		OrchestratorModel: cfg.OrchestratorModel,
 	}); err != nil {
 		return err
 	}
 	fmt.Println("OpenRouter API key saved")
+	return nil
+}
+
+// setOrchestratorModelCmd persists tag as the orchestrator model,
+// preserving the existing TutorModel and OpenRouterAPIKey (same
+// round-trip concern as setModelCmd/setKeyCmd). "none" clears it,
+// disabling routing -- internal/tutor.Run treats an empty
+// OrchestratorModel as today's single-model behavior.
+func setOrchestratorModelCmd(tag string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	orchestratorModel := tag
+	if tag == "none" {
+		orchestratorModel = ""
+	}
+	if err := config.SaveSettings(cfg.SettingsPath(), config.Settings{
+		TutorModel:        cfg.TutorModel,
+		OpenRouterAPIKey:  cfg.OpenRouterAPIKey,
+		OrchestratorModel: orchestratorModel,
+	}); err != nil {
+		return err
+	}
+	if orchestratorModel == "" {
+		fmt.Println("orchestrator model cleared -- routing disabled")
+	} else {
+		fmt.Printf("orchestrator model set to %s\n", orchestratorModel)
+	}
 	return nil
 }

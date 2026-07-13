@@ -89,3 +89,35 @@ func TestSandboxRunArgs_ForwardsOpenRouterAPIKeyFromConfig(t *testing.T) {
 		t.Errorf("expected OPENROUTER_API_KEY=sk-test-key to be passed as an -e flag, got %v", args)
 	}
 }
+
+func TestExerciseRunArgs_ForwardsOrchestratorModelFromConfig(t *testing.T) {
+	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "llama3:8b", OrchestratorModel: "nemotron"}
+	ex := exercise.Exercise{ID: "two-pointers-01-go", Category: "pattern", Language: "go", TutorMode: "hint", TestCommand: "go test ./..."}
+
+	args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now())
+
+	if !containsFlag(args, "TUTOR_ORCHESTRATOR_MODEL=nemotron") {
+		t.Errorf("expected TUTOR_ORCHESTRATOR_MODEL=nemotron to be passed as an -e flag, got %v", args)
+	}
+}
+
+func TestExerciseRunArgs_ForwardsEmptyOrchestratorModelWhenRoutingIsOff(t *testing.T) {
+	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
+	ex := exercise.Exercise{ID: "two-pointers-01-go", Category: "pattern", Language: "go", TutorMode: "hint", TestCommand: "go test ./..."}
+
+	args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now())
+
+	if !containsFlag(args, "TUTOR_ORCHESTRATOR_MODEL=") {
+		t.Errorf("expected TUTOR_ORCHESTRATOR_MODEL= (empty, routing off) to still be passed as an -e flag, got %v", args)
+	}
+}
+
+func TestSandboxRunArgs_ForwardsOrchestratorModelFromConfig(t *testing.T) {
+	cfg := config.Config{DockerImage: "ballroom-practice", TutorModel: "llama3:8b", OrchestratorModel: "nemotron"}
+
+	args := sandboxRunArgs(cfg)
+
+	if !containsFlag(args, "TUTOR_ORCHESTRATOR_MODEL=nemotron") {
+		t.Errorf("expected TUTOR_ORCHESTRATOR_MODEL=nemotron to be passed as an -e flag, got %v", args)
+	}
+}

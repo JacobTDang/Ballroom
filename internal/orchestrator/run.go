@@ -125,6 +125,11 @@ func exerciseRunArgs(cfg config.Config, ex exercise.Exercise, controlDir, worksp
 		// (see cmd/ballroom/main.go's tutorCmd), same as TUTOR_MODEL
 		// being forwarded even when it's just the default.
 		"-e", "OPENROUTER_API_KEY=" + cfg.OpenRouterAPIKey,
+		// Always forwarded, empty or not -- an empty value means routing
+		// is off (see cmd/ballroom/main.go's tutorCmd and
+		// internal/tutor.Config.OrchestratorModel), same rationale as
+		// OPENROUTER_API_KEY above.
+		"-e", "TUTOR_ORCHESTRATOR_MODEL=" + cfg.OrchestratorModel,
 		cfg.DockerImage,
 	}
 }
@@ -138,6 +143,7 @@ func sandboxRunArgs(cfg config.Config) []string {
 		"-v", sandboxVolume + ":/workspace",
 		"-e", "TUTOR_MODEL=" + cfg.TutorModel,
 		"-e", "OPENROUTER_API_KEY=" + cfg.OpenRouterAPIKey,
+		"-e", "TUTOR_ORCHESTRATOR_MODEL=" + cfg.OrchestratorModel,
 		cfg.DockerImage,
 	}
 }
