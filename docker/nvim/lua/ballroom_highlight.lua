@@ -56,7 +56,43 @@ local function resolve_buf(file)
   return vim.api.nvim_get_current_buf()
 end
 
--- Actually paints one stored note's sign/virtual text into its buffer --
+-- Greedily word-wraps text into lines no wider than width (falls back to
+-- a hard break mid-word if a single word alone exceeds width, so one
+-- long token can't defeat wrapping entirely). Used because a single-line
+-- eol virtual text extmark never wraps in nvim -- it just gets clipped
+-- at the window's right edge, which is exactly what made long tutor
+-- notes unreadable before this.
+local function wrap_text(text, width)
+  width = math.max(width, 10)
+  local lines = {}
+  local line = ""
+  for word in text:gmatch("%S+") do
+    while #word > width do
+      local remaining = width - #line - (#line > 0 and 1 or 0)
+      if remaining < 1 then
+        table.insert(lines, line)
+        line = ""
+        remaining = width
+      end
+      local chunk = word:sub(1, remaining)
+      line = line == "" and chunk or (line .. " " .. chunk)
+      word = word:sub(remaining + 1)
+    end
+    local candidate = line == "" and word or (line .. " " .. word)
+    if #candidate > width and line ~= "" then
+      table.insert(lines, line)
+      line = word
+    else
+      line = candidate
+    end
+  end
+  if line ~= "" or #lines == 0 then
+    table.insert(lines, line)
+  end
+  return lines
+end
+
+-- Actually paints one stored note's sign/virtual lines into its buffer --
 -- no background highlight over the code lines themselves (see the file
 -- header). The only place that touches the namespace's extmarks/signs, so
 -- both add_highlight (new note) and toggle() (replaying stored notes back
@@ -65,9 +101,21 @@ local function render(rec)
   vim.fn.sign_place(0, SIGN_GROUP, "BallroomTutorSign", rec.buf, { lnum = rec.line_start, priority = 20 })
 
   if rec.note and rec.note ~= "" then
+    -- Rendered as virt_lines (their own row below the highlighted line),
+    -- not eol virt_text sharing the code line -- word-wrapped to the
+    -- window's actual width so a long note is fully visible instead of
+    -- cut off mid-sentence. winwidth(0)/nvim_win_get_width includes the
+    -- number/sign/fold gutter columns, which virtual text doesn't get to
+    -- use, hence the fixed margin rather than the exact gutter width.
+    local win = vim.fn.bufwinid(rec.buf)
+    local width = (win ~= -1 and vim.api.nvim_win_get_width(win) or vim.o.columns) - 8
+    local wrapped = wrap_text("tutor: " .. rec.note, width)
+    local virt_lines = {}
+    for _, line in ipairs(wrapped) do
+      table.insert(virt_lines, { { "  " .. line, "BallroomTutorNote" } })
+    end
     vim.api.nvim_buf_set_extmark(rec.buf, NS, rec.line_start - 1, 0, {
-      virt_text = { { "  <- tutor: " .. rec.note, "BallroomTutorNote" } },
-      virt_text_pos = "eol",
+      virt_lines = virt_lines,
     })
   end
 end

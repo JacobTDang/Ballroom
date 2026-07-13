@@ -3,11 +3,13 @@ package tutor
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -289,6 +291,100 @@ func TestFocusLost_LeavesNotesInPlace(t *testing.T) {
 	}
 	if out != "1" {
 		t.Errorf("note_count() = %s after FocusLost, want 1 -- a note left while away must survive until the user actually returns", out)
+	}
+}
+
+// noteVirtLines fetches the single note extmark's virt_lines -- each
+// entry is one on-screen row, itself a list of [text, hl_group] chunks
+// -- via a raw nvim_buf_get_extmarks call, mirroring how noteCountExpr
+// reaches into real nvim state that the ballroom_highlight.lua module
+// doesn't expose a dedicated getter for (unlike note_count()): wrapping
+// is a rendering detail worth locking in directly against nvim's own
+// extmark storage, not worth adding module surface just to test.
+func noteVirtLines(t *testing.T, ctx context.Context, socket string) [][]string {
+	t.Helper()
+	extmarksExpr := `json_encode(nvim_buf_get_extmarks(bufnr('%'), nvim_create_namespace('ballroom_tutor'), 0, -1, {'details': v:true}))`
+	out, err := remoteExpr(ctx, socket, extmarksExpr)
+	if err != nil {
+		t.Fatalf("remoteExpr: %v", err)
+	}
+
+	var marks []json.RawMessage
+	if err := json.Unmarshal([]byte(out), &marks); err != nil {
+		t.Fatalf("unmarshal extmarks %q: %v", out, err)
+	}
+	if len(marks) != 1 {
+		t.Fatalf("got %d extmarks, want exactly 1", len(marks))
+	}
+
+	var tuple []json.RawMessage
+	if err := json.Unmarshal(marks[0], &tuple); err != nil {
+		t.Fatalf("unmarshal extmark tuple: %v", err)
+	}
+	if len(tuple) != 4 {
+		t.Fatalf("extmark tuple has %d elements, want 4 (id, row, col, details)", len(tuple))
+	}
+
+	var details struct {
+		VirtLines [][][2]string `json:"virt_lines"`
+	}
+	if err := json.Unmarshal(tuple[3], &details); err != nil {
+		t.Fatalf("unmarshal extmark details %s: %v", tuple[3], err)
+	}
+
+	rows := make([][]string, len(details.VirtLines))
+	for i, row := range details.VirtLines {
+		for _, chunk := range row {
+			rows[i] = append(rows[i], chunk[0])
+		}
+	}
+	return rows
+}
+
+// TestApplyHighlight_WrapsLongNoteAcrossMultipleLinesInsteadOfCuttingItOff
+// covers the "it cuts off and it's hard to see" report: a single-line
+// eol virtual text extmark never wraps in nvim -- it just gets clipped
+// at the window's right edge -- so any note longer than the editor
+// pane's width was silently unreadable. Notes now render as their own
+// virtual lines below the highlighted line, word-wrapped to the window
+// width, so a long note is fully visible instead of cut off mid-sentence.
+func TestApplyHighlight_WrapsLongNoteAcrossMultipleLinesInsteadOfCuttingItOff(t *testing.T) {
+	socket := startTestNvim(t)
+	ctx := context.Background()
+
+	longNote := "This line has a typo: 'Falsee' should be 'True', and the function logic is inverted: when you find a duplicate you should return True, not False"
+	expr := highlightExpr("test.txt", 1, 1, longNote)
+	if _, err := remoteExpr(ctx, socket, expr); err != nil {
+		t.Fatalf("remoteExpr: %v", err)
+	}
+
+	rows := noteVirtLines(t, ctx, socket)
+	if len(rows) < 2 {
+		t.Fatalf("got %d virtual-text rows, want >= 2 -- a long note should wrap across multiple lines", len(rows))
+	}
+
+	winWidth, err := remoteExpr(ctx, socket, "winwidth(0)")
+	if err != nil {
+		t.Fatalf("remoteExpr: %v", err)
+	}
+	maxWidth, err := strconv.Atoi(winWidth)
+	if err != nil {
+		t.Fatalf("parse winwidth %q: %v", winWidth, err)
+	}
+
+	var rebuilt strings.Builder
+	for i, row := range rows {
+		text := strings.Join(row, "")
+		if len(text) > maxWidth {
+			t.Errorf("row %d is %d chars, want <= window width %d: %q", i, len(text), maxWidth, text)
+		}
+		if i > 0 {
+			rebuilt.WriteByte(' ')
+		}
+		rebuilt.WriteString(strings.TrimSpace(text))
+	}
+	if !strings.Contains(rebuilt.String(), "inverted") {
+		t.Errorf("rebuilt wrapped text = %q, want it to still contain the full note (nothing dropped, just wrapped)", rebuilt.String())
 	}
 }
 
