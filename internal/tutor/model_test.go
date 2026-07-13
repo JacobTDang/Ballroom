@@ -1,10 +1,15 @@
 package tutor
 
 import (
+	"context"
+	"io"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/cloudwego/eino/schema"
+
+	"github.com/JacobTDang/Ballroom/internal/exercise"
 )
 
 func TestEstimatedTextareaRows_ShortLineIsOneRow(t *testing.T) {
@@ -49,7 +54,7 @@ func TestEstimatedTextareaRows_ZeroOrNegativeWidthTreatedAsOne(t *testing.T) {
 }
 
 func TestNewTutorModel_TextareaIsFocusedAndEnterDoesNotInsertANewline(t *testing.T) {
-	m := newTutorModel()
+	m := newTutorLayoutOnly()
 	if !m.textarea.Focused() {
 		t.Error("expected the textarea to start focused")
 	}
@@ -59,7 +64,7 @@ func TestNewTutorModel_TextareaIsFocusedAndEnterDoesNotInsertANewline(t *testing
 }
 
 func TestTutorModel_WindowSizeMsg_SetsViewportAndTextareaWidth(t *testing.T) {
-	m := newTutorModel()
+	m := newTutorLayoutOnly()
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	got := newM.(tutorModel)
 
@@ -75,7 +80,7 @@ func TestTutorModel_WindowSizeMsg_SetsViewportAndTextareaWidth(t *testing.T) {
 }
 
 func TestTutorModel_WindowSizeMsg_ViewportAndTextareaHeightsSumWithinTerminal(t *testing.T) {
-	m := newTutorModel()
+	m := newTutorLayoutOnly()
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	got := newM.(tutorModel)
 
@@ -86,7 +91,7 @@ func TestTutorModel_WindowSizeMsg_ViewportAndTextareaHeightsSumWithinTerminal(t 
 }
 
 func TestTutorModel_TypingALongLineGrowsTextareaHeight(t *testing.T) {
-	m := newTutorModel()
+	m := newTutorLayoutOnly()
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 30})
 	m = newM.(tutorModel)
 	before := m.textarea.Height()
@@ -103,7 +108,7 @@ func TestTutorModel_TypingALongLineGrowsTextareaHeight(t *testing.T) {
 }
 
 func TestTutorModel_TextareaHeightNeverExceedsHalfTheTerminal(t *testing.T) {
-	m := newTutorModel()
+	m := newTutorLayoutOnly()
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
 	m = newM.(tutorModel)
 
@@ -125,7 +130,7 @@ func TestTutorModel_TextareaHeightNeverExceedsHalfTheTerminal(t *testing.T) {
 }
 
 func TestTutorModel_EnterOnEmptyTextareaDoesNothing(t *testing.T) {
-	m := newTutorModel()
+	m := newTutorLayoutOnly()
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := newM.(tutorModel)
 	if got.textarea.Value() != "" {
@@ -137,7 +142,7 @@ func TestTutorModel_EnterOnEmptyTextareaDoesNothing(t *testing.T) {
 }
 
 func TestTutorModel_EnterOnNonEmptyTextareaResetsItAndEchoesIntoViewport(t *testing.T) {
-	m := newTutorModel()
+	m := newTutorLayoutOnly()
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = newM.(tutorModel)
 	m.textarea.SetValue("hello there")
@@ -154,12 +159,288 @@ func TestTutorModel_EnterOnNonEmptyTextareaResetsItAndEchoesIntoViewport(t *test
 }
 
 func TestTutorModel_View_RendersBothViewportAndTextarea(t *testing.T) {
-	m := newTutorModel()
+	m := newTutorLayoutOnly()
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = newM.(tutorModel)
 
 	out := m.View()
 	if out == "" {
 		t.Fatal("View() returned empty output")
+	}
+}
+
+// --- Stage 2: real turn-loop logic, re-homed from the old Run()-level
+// tests in tutor_test.go to test tutorModel.Update() directly -- same
+// proven pattern internal/tui/app_test.go already uses for appModel.
+// submitAndRun types line into m's textarea, presses Enter, and
+// synchronously executes the returned tea.Cmd (a plain func() tea.Msg --
+// no real tea.Program needed) feeding its result back into Update(),
+// mirroring internal/tui's own async-message test pattern.
+
+func submitAndRun(t *testing.T, m tutorModel, line string) tutorModel {
+	t.Helper()
+	m.textarea.SetValue(line)
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(tutorModel)
+	if cmd == nil {
+		t.Fatal("submit produced no command -- expected a turn to start")
+	}
+	msg := cmd()
+	newM, _ = m.Update(msg)
+	return newM.(tutorModel)
+}
+
+func TestNewTutorModel_NoRoutingBannerAndHistorySeededWithSystemPrompt(t *testing.T) {
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	if len(m.history) != 1 || m.history[0].Role != schema.System {
+		t.Fatalf("history = %+v, want exactly one System message seeded", m.history)
+	}
+	if !strings.Contains(m.banner, cfg.Model) || strings.Contains(m.banner, "orchestrator=") {
+		t.Errorf("banner = %q, want it to name the model and not mention routing", m.banner)
+	}
+}
+
+func TestNewTutorModel_RoutingEnabledBannerNamesBothModels(t *testing.T) {
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+	cfg.Model = "worker-model"
+	cfg.OrchestratorModel = "orchestrator-model"
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	if !strings.Contains(m.banner, "worker-model") || !strings.Contains(m.banner, "orchestrator-model") {
+		t.Errorf("banner = %q, want it to name both models", m.banner)
+	}
+}
+
+func TestNewTutorModel_ComprehensionCheckPendingMatchesMode(t *testing.T) {
+	mock := newSequencedOllama(t, "reply")
+
+	syntaxCfg := testConfig(mock.URL)
+	syntaxCfg.Mode = exercise.TutorModeSyntaxOnly
+	m, err := newTutorModel(context.Background(), syntaxCfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	if m.comprehensionCheckPending {
+		t.Error("syntax-only mode must never want the comprehension check")
+	}
+
+	fullCfg := testConfig(mock.URL)
+	fullCfg.Mode = exercise.TutorModeFullAssist
+	m, err = newTutorModel(context.Background(), fullCfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	if !m.comprehensionCheckPending {
+		t.Error("full-assist mode must want the comprehension check on the first message")
+	}
+}
+
+func TestTutorModel_SubmitAppendsUserMessageImmediatelyAndReplyAfterCompletion(t *testing.T) {
+	mock := newSequencedOllama(t, "the answer is 42")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "what does my code look like?")
+
+	if !strings.Contains(got.viewport.View(), "the answer is 42") {
+		t.Errorf("viewport view %q, want the assistant's reply", got.viewport.View())
+	}
+	if got.turnInFlight {
+		t.Error("turnInFlight = true after the result arrived, want false")
+	}
+	if len(got.history) != 3 { // system + user + assistant
+		t.Errorf("history has %d messages, want 3 (system, user, assistant)", len(got.history))
+	}
+}
+
+func TestTutorModel_TurnFailureShowsFallbackAndDoesNotPersistToHistory(t *testing.T) {
+	cfg := testConfig("http://127.0.0.1:1") // refuses immediately
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "hello")
+
+	if !strings.Contains(got.viewport.View(), turnFailedFallbackReply) {
+		t.Errorf("viewport view %q, want the honest fallback message", got.viewport.View())
+	}
+	if len(got.history) != 1 {
+		t.Errorf("history has %d messages, want just the seeded system prompt (a failed turn is never persisted)", len(got.history))
+	}
+}
+
+func TestTutorModel_NoRoutingWhenOrchestratorModelEmpty(t *testing.T) {
+	mock := newSequencedOllama(t, "the only reply")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	submitAndRun(t, m, "hi")
+
+	reqs := mock.allRequests()
+	if len(reqs) != 1 {
+		t.Fatalf("expected exactly 1 request (no routing decision), got %d: %+v", len(reqs), reqs)
+	}
+	if reqs[0].Model != "test-model" {
+		t.Errorf("request model = %q, want %q", reqs[0].Model, "test-model")
+	}
+}
+
+func TestTutorModel_RoutesToOrchestratorWhenDecisionIsNo(t *testing.T) {
+	mock := newSequencedOllama(t, "NO", "orchestrator answered")
+	cfg := testConfig(mock.URL)
+	cfg.Model = "worker-model"
+	cfg.OrchestratorModel = "orchestrator-model"
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "hi")
+
+	if !strings.Contains(got.viewport.View(), "orchestrator answered") {
+		t.Errorf("viewport view %q, want the orchestrator's reply", got.viewport.View())
+	}
+	reqs := mock.allRequests()
+	if len(reqs) != 2 {
+		t.Fatalf("expected exactly 2 requests (routing decision + orchestrator answer), got %d: %+v", len(reqs), reqs)
+	}
+	for i, req := range reqs {
+		if req.Model != "orchestrator-model" {
+			t.Errorf("request[%d].Model = %q, want %q -- worker must never be touched when the decision is No", i, req.Model, "orchestrator-model")
+		}
+	}
+}
+
+func TestTutorModel_RoutesToWorkerWhenDecisionIsYes(t *testing.T) {
+	mock := newSequencedOllama(t, "YES", "worker answered")
+	cfg := testConfig(mock.URL)
+	cfg.Model = "worker-model"
+	cfg.OrchestratorModel = "orchestrator-model"
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "hi")
+
+	if !strings.Contains(got.viewport.View(), "worker answered") {
+		t.Errorf("viewport view %q, want the worker's reply", got.viewport.View())
+	}
+	reqs := mock.allRequests()
+	if len(reqs) != 2 {
+		t.Fatalf("expected exactly 2 requests (routing decision + worker answer), got %d: %+v", len(reqs), reqs)
+	}
+}
+
+func TestTutorModel_ComprehensionCheckAlwaysUsesOrchestratorWhenRoutingEnabled(t *testing.T) {
+	mock := newSequencedOllama(t, "restated problem + questions")
+	cfg := testConfig(mock.URL)
+	cfg.Model = "worker-model"
+	cfg.OrchestratorModel = "orchestrator-model"
+	cfg.Mode = exercise.TutorModeFullAssist
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	submitAndRun(t, m, "hi")
+
+	reqs := mock.allRequests()
+	if len(reqs) != 1 {
+		t.Fatalf("expected exactly 1 request (the comprehension check, no routing decision), got %d: %+v", len(reqs), reqs)
+	}
+	if reqs[0].Model != "orchestrator-model" {
+		t.Errorf("request[0].Model = %q, want %q -- the comprehension check always uses the orchestrator", reqs[0].Model, "orchestrator-model")
+	}
+}
+
+func TestTutorModel_ComprehensionCheckClearsPendingRegardlessOfOutcome(t *testing.T) {
+	mock := newSequencedOllama(t, "restated + questions", "second reply")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeFullAssist
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "hi")
+	if got.comprehensionCheckPending {
+		t.Error("comprehensionCheckPending must be false after the first message, win or lose")
+	}
+
+	got2 := submitAndRun(t, got, "a second message")
+	reqs := mock.allRequests()
+	if len(reqs) != 2 {
+		t.Fatalf("expected exactly 2 requests total (one check, one normal turn), got %d: %+v", len(reqs), reqs)
+	}
+	if !strings.Contains(got2.viewport.View(), "second reply") {
+		t.Errorf("viewport view %q, want the second turn's real reply", got2.viewport.View())
+	}
+}
+
+func TestTutorModel_RetriesWhenReplyLeaksFakeToolCallJSON(t *testing.T) {
+	mock := newSequencedOllama(t, `{"name": "read_solution_file", "parameters": {}}`, "your code looks fine")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "what does my code look like?")
+
+	view := got.viewport.View()
+	if strings.Contains(view, `{"name"`) {
+		t.Errorf("viewport view still contains leaked tool-call JSON: %q", view)
+	}
+	if !strings.Contains(view, "your code looks fine") {
+		t.Errorf("viewport view %q, want the retry's clean reply", view)
 	}
 }

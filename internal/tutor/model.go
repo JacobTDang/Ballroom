@@ -1,6 +1,9 @@
 package tutor
 
 import (
+	"context"
+	"fmt"
+	"io"
 	"strings"
 	"unicode/utf8"
 
@@ -8,6 +11,9 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/flow/agent/react"
+	"github.com/cloudwego/eino/schema"
 )
 
 // minTextareaRows/minViewportRows are floors, not targets — the textarea
@@ -45,20 +51,51 @@ type tutorModel struct {
 	width    int
 	height   int
 
-	// history accumulates submitted lines for display. Stage 1 only:
-	// echoes what was typed, no real model/tool wiring yet — that lands
-	// in a later stage of this same rewrite (see the plan for this
-	// feature).
-	history []string
+	// displayLines is what the viewport actually shows: the banner, each
+	// submitted message echoed immediately (before its reply arrives),
+	// and each reply -- including a failed turn's honest fallback
+	// message, which is shown but deliberately never added to history
+	// (see submit/Update's turnCompleteMsg case). Decoupled from history
+	// on purpose: history is model context only, this is display only.
+	displayLines []string
+	banner       string
+
+	// ctx is stored on the model (unusual for Go, normally a function
+	// parameter) because bubbletea's Update(msg) signature has nowhere
+	// else to thread it through for the lifetime of the program -- same
+	// ctx Run(ctx, cfg, ...) already received from its own caller.
+	ctx context.Context
+	cfg Config
+
+	// stderr is the same real process stream Run's caller passed in --
+	// routing-decision-failed logging (see startTurnCmd) still goes here
+	// directly, on the turn's own goroutine, entirely independent of
+	// bubbletea's own stdout-only rendering.
+	stderr io.Writer
+
+	workerAgent          *react.Agent
+	orchestratorAgent    *react.Agent
+	orchestratorCM       model.ToolCallingChatModel
+	workerEndpoint       string
+	orchestratorEndpoint string
+	routingEnabled       bool
+
+	// history holds only the system prompt plus clean (user, assistant)
+	// pairs -- never a failed turn's fallback message, never
+	// tool-call scaffolding -- exactly matching the pre-rewrite Run()
+	// loop's own history semantics.
+	history                   []*schema.Message
+	comprehensionCheckPending bool
+	helpRequestCount          int
+	turnInFlight              bool
 }
 
-// newTutorModel builds the initial model: an empty, focused textarea
-// with Enter reserved for submit (not newline-insert — see
-// estimatedTextareaRows's doc comment for why "Enter submits" needs a
-// width-aware growth estimate to work correctly for a single long
-// wrapped line, not just explicit paragraph breaks), and an empty
-// viewport for the scrolling conversation.
-func newTutorModel() tutorModel {
+// newTutorLayoutOnly builds a model with just the textarea/viewport
+// wiring — no agents, no config, no network. Used by this file's own
+// pure-layout tests (resize, dynamic growth, Enter-submits-not-newline)
+// that have no need to exercise real turn logic. newTutorModel (below)
+// is what Run() and every turn-logic test actually uses.
+func newTutorLayoutOnly() tutorModel {
 	ta := textarea.New()
 	ta.Placeholder = "Ask a question..."
 	ta.Prompt = "> "
@@ -70,6 +107,59 @@ func newTutorModel() tutorModel {
 	vp.Style = viewportContentStyle
 
 	return tutorModel{viewport: vp, textarea: ta}
+}
+
+// newTutorModel builds the real tutor model: the layout from
+// newTutorLayoutOnly, plus every piece of setup Run()'s old for-loop
+// used to do once at the top — building tools, the worker chat
+// model/agent, and (when cfg.OrchestratorModel is set) the orchestrator
+// chat model/agent, seeding history with the mode's system prompt, and
+// deciding whether the first message wants a comprehension check. Same
+// construction logic as before, just returned as a Model instead of
+// consumed inline by a for-loop.
+func newTutorModel(ctx context.Context, cfg Config, stderr io.Writer) (tutorModel, error) {
+	m := newTutorLayoutOnly()
+	m.ctx = ctx
+	m.cfg = cfg
+	m.stderr = stderr
+
+	tools, err := buildTools(cfg)
+	if err != nil {
+		return tutorModel{}, err
+	}
+
+	workerCM, err := newChatModel(ctx, cfg.Model, cfg.OllamaHost, cfg.APIKey)
+	if err != nil {
+		return tutorModel{}, err
+	}
+	m.workerAgent, err = newAgent(ctx, workerCM, tools)
+	if err != nil {
+		return tutorModel{}, err
+	}
+	m.workerEndpoint = providerEndpoint(cfg.Model, cfg.OllamaHost)
+
+	m.routingEnabled = cfg.OrchestratorModel != ""
+	if m.routingEnabled {
+		m.orchestratorEndpoint = providerEndpoint(cfg.OrchestratorModel, cfg.OllamaHost)
+		m.orchestratorCM, err = newChatModel(ctx, cfg.OrchestratorModel, cfg.OllamaHost, cfg.APIKey)
+		if err != nil {
+			return tutorModel{}, err
+		}
+		m.orchestratorAgent, err = newAgent(ctx, m.orchestratorCM, tools)
+		if err != nil {
+			return tutorModel{}, err
+		}
+		m.banner = fmt.Sprintf("tutor (worker=%s, orchestrator=%s, mode=%s) — connected to %s / %s. Ctrl-D to exit.", cfg.Model, cfg.OrchestratorModel, cfg.Mode, m.workerEndpoint, m.orchestratorEndpoint)
+	} else {
+		m.banner = fmt.Sprintf("tutor (%s, mode=%s) — connected to %s. Ctrl-D to exit.", cfg.Model, cfg.Mode, m.workerEndpoint)
+	}
+
+	m.history = []*schema.Message{schema.SystemMessage(systemPromptForMode(cfg.Mode))}
+	m.comprehensionCheckPending = wantsComprehensionCheck(cfg.Mode)
+	m.displayLines = []string{m.banner}
+	m.refreshViewport()
+
+	return m, nil
 }
 
 func (m tutorModel) Init() tea.Cmd {
@@ -91,6 +181,19 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textarea, cmd = m.textarea.Update(msg)
 		m.recomputeLayout()
 		return m, cmd
+
+	case turnCompleteMsg:
+		m.turnInFlight = false
+		if msg.err != nil {
+			fmt.Fprintf(m.stderr, "tutor: could not reach %s: %v\n", msg.endpoint, msg.err)
+			m.displayLines = append(m.displayLines, turnFailedFallbackReply)
+			m.refreshViewport()
+			return m, nil
+		}
+		m.history = append(m.history, schema.UserMessage(msg.userMessage), schema.AssistantMessage(msg.reply.Content, nil))
+		m.displayLines = append(m.displayLines, msg.reply.Content)
+		m.refreshViewport()
+		return m, nil
 	}
 	return m, nil
 }
@@ -146,23 +249,122 @@ func estimatedTextareaRows(value string, width int) int {
 	return max(rows, 1)
 }
 
-// submit handles Enter: empty input is a no-op (nothing to send), a real
+// refreshViewport re-renders displayLines into the viewport and scrolls
+// to the bottom — called any time displayLines changes (a submit-echo,
+// a reply, a failure fallback) so the newest content is always what's
+// visible.
+func (m *tutorModel) refreshViewport() {
+	m.viewport.SetContent(strings.Join(m.displayLines, "\n\n"))
+	m.viewport.GotoBottom()
+}
+
+// submit handles Enter: empty input is a no-op (nothing to send). A real
 // message resets the textarea (growth immediately collapses back down —
-// recomputeLayout runs again right after) and echoes into the viewport.
-// Stage 1 only echoes; real turn-loop wiring (comprehension check,
-// routing, the actual model call) lands in a later stage of this
-// rewrite.
+// recomputeLayout runs again right after), echoes into the viewport
+// immediately (the reply can take many seconds), and starts the turn as
+// a tea.Cmd — mirroring internal/tui/boot.go's own "kick off background
+// work, delivered back via a tea.Msg" pattern, not a blocking call
+// inside Update itself.
+//
+// checkComprehension is snapshotted here, before comprehensionCheckPending
+// is cleared on m below — matching the old Run() loop's own behavior
+// exactly: the flag clears unconditionally on the very first message,
+// whether the check succeeds or fails (see startTurnCmd's comment on
+// what happens on failure).
 func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 	line := strings.TrimSpace(m.textarea.Value())
 	if line == "" {
 		return m, nil
 	}
+	checkComprehension := m.comprehensionCheckPending
+	m.comprehensionCheckPending = false
+
 	m.textarea.Reset()
-	m.history = append(m.history, "> "+line)
-	m.viewport.SetContent(strings.Join(m.history, "\n"))
-	m.viewport.GotoBottom()
 	m.recomputeLayout()
-	return m, nil
+	m.turnInFlight = true
+	m.helpRequestCount++
+	m.displayLines = append(m.displayLines, "> "+line)
+	m.refreshViewport()
+
+	return m, startTurnCmd(m, line, checkComprehension)
+}
+
+// turnCompleteMsg carries one turn's final outcome — whether it went
+// through the comprehension-check path or a normal turn (see
+// startTurnCmd), the result-handling shape is identical either way: on
+// success, persist (userMessage, reply) to history and show the reply;
+// on failure, show turnFailedFallbackReply and persist nothing (see
+// Update's case for this message).
+type turnCompleteMsg struct {
+	reply       *schema.Message
+	err         error
+	endpoint    string
+	userMessage string
+}
+
+// startTurnCmd runs one submitted line's whole turn — comprehension
+// check (if checkComprehension), routing decision (if
+// m.routingEnabled), and the actual model call — on its own goroutine,
+// exactly mirroring the old Run() loop's own sequencing, just wrapped as
+// a tea.Cmd instead of inline for-loop code. m is a snapshot (bubbletea
+// Cmds capture their closure's values at creation, not a live
+// reference), which is why helpRequestCount/comprehensionCheckPending
+// are already resolved by submit before this is built.
+func startTurnCmd(m tutorModel, line string, checkComprehension bool) tea.Cmd {
+	return func() tea.Msg {
+		if checkComprehension {
+			checkAgent := m.workerAgent
+			if m.routingEnabled {
+				checkAgent = m.orchestratorAgent
+			}
+			checkMessages := comprehensionCheckMessages(m.history, m.cfg.WorkDir, line)
+			reply, err := generateWithLeakRetry(m.ctx, checkAgent, checkMessages)
+			if err == nil {
+				return turnCompleteMsg{reply: reply, userMessage: line}
+			}
+			// Couldn't reach the provider for the check -- fall through
+			// and handle this same message as a normal turn instead of
+			// silently dropping it, exactly like the old Run() loop.
+		}
+
+		turnAgent, turnEndpoint := m.workerAgent, m.workerEndpoint
+		if m.routingEnabled {
+			handoff, err := decideHandoff(m.ctx, m.orchestratorCM, line)
+			if err != nil {
+				// Doesn't abort the turn -- decideHandoff already
+				// defaulted to handoff (true) on this same error, so the
+				// turn still gets answered by the specialist; this is
+				// just visibility into why.
+				fmt.Fprintf(m.stderr, "tutor: routing decision failed, defaulting to handoff: %v\n", err)
+			}
+			if !handoff {
+				turnAgent, turnEndpoint = m.orchestratorAgent, m.orchestratorEndpoint
+			}
+		}
+
+		requestMessages := append(append([]*schema.Message{}, m.history...), turnMessages(m.cfg.Mode, m.helpRequestCount, line)...)
+		reply, err := generateWithLeakRetry(m.ctx, turnAgent, requestMessages)
+		if err != nil {
+			return turnCompleteMsg{err: err, endpoint: turnEndpoint, userMessage: line}
+		}
+		return turnCompleteMsg{reply: reply, userMessage: line}
+	}
+}
+
+// comprehensionCheckMessages builds one comprehension check's request —
+// extracted as a pure function from the old runComprehensionCheck (now
+// dead code, removed alongside the rest of the pre-rewrite Run() loop)
+// so it stays testable without needing a real agent. The problem
+// statement is injected directly as ephemeral context rather than
+// calling read_problem_statement (see comprehensionCheckInstruction's
+// own doc comment in prompts.go for why).
+func comprehensionCheckMessages(history []*schema.Message, workDir, userFirstMessage string) []*schema.Message {
+	checkMessages := append([]*schema.Message{}, history...)
+	if problem := readProblemStatement(workDir); problem != "" {
+		checkMessages = append(checkMessages, schema.SystemMessage("The exercise's problem statement:\n\n"+problem))
+	}
+	checkMessages = append(checkMessages, schema.SystemMessage(comprehensionCheckInstruction), schema.UserMessage(userFirstMessage))
+	return checkMessages
 }
 
 func (m tutorModel) View() string {
