@@ -275,8 +275,19 @@ func TestActivityOutputLines_CapsAtThreeLinesWithEllipsisMarkerOnLast(t *testing
 		t.Fatalf("activityOutputLines(...) = %d lines, want capped at %d", len(got), activityOutputPreviewLines)
 	}
 	last := got[len(got)-1]
-	if !strings.HasSuffix(last, truncateLineEllipsis) {
-		t.Errorf("last line %q, want it to end with %q to signal the result was cut off", last, truncateLineEllipsis)
+	// Not HasSuffix -- the line's true suffix is now the color reset
+	// escape (activityOutputLines highlights the content in yellow), so
+	// the ellipsis marker itself is Contains'd instead.
+	if !strings.Contains(last, truncateLineEllipsis) {
+		t.Errorf("last line %q, want it to contain %q to signal the result was cut off", last, truncateLineEllipsis)
+	}
+}
+
+func TestActivityOutputLines_ContentIsColoredYellow(t *testing.T) {
+	c := activityCall{name: "read_solution_file", status: "done", detail: "312 bytes"}
+	got := activityOutputLines(c, 80)
+	if len(got) != 1 || !strings.Contains(got[0], "\033[38;2;") {
+		t.Errorf("activityOutputLines(...) = %v, want the output highlighted in color (per explicit request: \"highlight the tool output with yellow\")", got)
 	}
 }
 
@@ -333,7 +344,10 @@ func TestToolUsageSummary_OneDoneCallShowsNameAndIndentedOutput(t *testing.T) {
 	if !strings.Contains(got, "read_solution_file") {
 		t.Errorf("toolUsageSummary(...) = %q, want the tool name", got)
 	}
-	if !strings.Contains(got, activityIndent+"312 bytes") {
+	// Not activityIndent+"312 bytes" as one literal substring -- the
+	// output is now color-highlighted, so an escape sequence sits
+	// between the indent and the content itself.
+	if !strings.Contains(got, activityIndent) || !strings.Contains(got, "312 bytes") {
 		t.Errorf("toolUsageSummary(...) = %q, want the result indented beneath the name", got)
 	}
 }
@@ -344,7 +358,7 @@ func TestToolUsageSummary_FailedCallShowsFailedSuffixAndIndentedError(t *testing
 	if !strings.Contains(got, "read_test_output - failed") {
 		t.Errorf("toolUsageSummary(...) = %q, want the name flagged failed", got)
 	}
-	if !strings.Contains(got, activityIndent+"no test run yet") {
+	if !strings.Contains(got, activityIndent) || !strings.Contains(got, "no test run yet") {
 		t.Errorf("toolUsageSummary(...) = %q, want the error indented beneath the name", got)
 	}
 }
@@ -355,7 +369,7 @@ func TestToolUsageSummary_MultipleCallsEachGetTheirOwnHeaderAndOutput(t *testing
 		{name: "read_problem_statement", status: "done", detail: "problem text"},
 	}
 	got := toolUsageSummary(calls, 80)
-	for _, want := range []string{"read_solution_file", activityIndent + "312 bytes", "read_problem_statement", activityIndent + "problem text"} {
+	for _, want := range []string{"read_solution_file", "312 bytes", "read_problem_statement", "problem text"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("toolUsageSummary(...) = %q, want it to contain %q", got, want)
 		}
@@ -364,6 +378,14 @@ func TestToolUsageSummary_MultipleCallsEachGetTheirOwnHeaderAndOutput(t *testing
 	// call order.
 	if strings.Index(got, "read_solution_file") > strings.Index(got, "read_problem_statement") {
 		t.Errorf("toolUsageSummary(...) = %q, want calls in order", got)
+	}
+}
+
+func TestToolUsageSummary_OutputContentIsColoredYellow(t *testing.T) {
+	calls := []activityCall{{name: "read_solution_file", status: "done", detail: "312 bytes"}}
+	got := toolUsageSummary(calls, 80)
+	if !strings.Contains(got, "\033[38;2;") {
+		t.Errorf("toolUsageSummary(...) = %q, want the output highlighted in color", got)
 	}
 }
 

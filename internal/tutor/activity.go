@@ -257,12 +257,34 @@ const activityIndent = "  "
 // call (and the input box below the whole region) off-screen.
 const activityOutputPreviewLines = 3
 
+// activityOutputHighlightR/G/B is the tool output preview's highlight
+// color — a deliberately loud yellow, per an explicit request from live
+// use ("could we like highlight the tool output with yellow for now")
+// to make a completed/failed call's result visually unmistakable as
+// belonging to the header above it, independent of the indentation
+// alone. "for now" in the request itself flags this as provisional.
+const (
+	activityOutputHighlightR = 0xE6
+	activityOutputHighlightG = 0xC3
+	activityOutputHighlightB = 0x00
+)
+
+// activityOutputHighlight wraps s in the yellow foreground escape,
+// same truecolor mechanism as coloredDot.
+func activityOutputHighlight(s string) string {
+	return fmt.Sprintf("\033[38;2;%d;%d;%dm%s\033[0m", activityOutputHighlightR, activityOutputHighlightG, activityOutputHighlightB, s)
+}
+
 // activityOutputLines returns c's result (done) or error (failed)
-// detail, word-wrapped to fit within cols and indented, capped at
-// activityOutputPreviewLines lines — nil for a running call (no output
-// yet) or an empty detail. When wrapping produces more lines than the
-// cap, the last shown line is re-cut with a trailing ellipsis so a long
-// result signals "there's more" rather than silently stopping.
+// detail, word-wrapped to fit within cols, highlighted in yellow, and
+// indented, capped at activityOutputPreviewLines lines — nil for a
+// running call (no output yet) or an empty detail. When wrapping
+// produces more lines than the cap, the last shown line is re-cut with
+// a trailing ellipsis so a long result signals "there's more" rather
+// than silently stopping. The indent itself stays outside the color
+// escape (activityIndent + activityOutputHighlight(line), not the
+// reverse) so callers can still reliably strings.HasPrefix a returned
+// line on activityIndent.
 func activityOutputLines(c activityCall, cols int) []string {
 	if c.detail == "" || (c.status != "done" && c.status != "failed") {
 		return nil
@@ -283,7 +305,7 @@ func activityOutputLines(c activityCall, cols int) []string {
 	}
 	out := make([]string, len(wrapped))
 	for i, line := range wrapped {
-		out[i] = activityIndent + line
+		out[i] = activityIndent + activityOutputHighlight(line)
 	}
 	return out
 }
