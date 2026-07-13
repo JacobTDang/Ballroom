@@ -260,9 +260,33 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Type == tea.KeyEnter {
 			return m.submit()
 		}
+		if msg.Type == tea.KeyPgUp || msg.Type == tea.KeyPgDown {
+			// Dedicated to scrolling the conversation history -- a real
+			// bug found live: the textarea swallowed every key
+			// unconditionally, so there was no way to scroll up and see
+			// earlier messages at all once they'd scrolled past the top
+			// of the viewport (refreshViewport's GotoBottom always pins
+			// to the latest content). PgUp/PgDn specifically (not arrow
+			// keys, and not bubbles/viewport's own default single-letter
+			// vim bindings like "j"/"k") because they're never used for
+			// normal text editing, so routing them to the viewport
+			// instead of the textarea can never eat real typing.
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
 		var cmd tea.Cmd
 		m.textarea, cmd = m.textarea.Update(msg)
 		m.recomputeLayout()
+		return m, cmd
+
+	case tea.MouseMsg:
+		// Mouse wheel scrolling -- never conflicts with typing, so every
+		// mouse event goes straight to the viewport. Requires
+		// tea.WithMouseCellMotion() in Run() for the terminal to
+		// actually report these.
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
 
 	case activityEventMsg:

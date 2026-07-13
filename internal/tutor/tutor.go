@@ -124,12 +124,25 @@ func decideHandoff(ctx context.Context, orchestratorCM model.ToolCallingChatMode
 // io.Writer, not just a real terminal — cmd/tutor-eval's grounding
 // check and this package's own tests rely on that to drive a real
 // session against a fake stdin.
+//
+// tea.WithMouseCellMotion() claims mouse input for the program — a real
+// bug found live: without it, a mouse wheel scroll over the pane wasn't
+// reported to bubbletea at all, so (when running inside tmux, as this
+// always does in a real practice session) tmux fell back to its own
+// native copy-mode scrollback for the pane instead. That's a dead end
+// for an alt-screen program like this one, which doesn't populate
+// tmux's normal scroll history the way regular shell output does — the
+// user was left unable to scroll up through conversation history at
+// all, seeing only tmux's own copy-mode position indicator over a
+// frozen, uneditable snapshot of the pane. Claiming mouse input here
+// means the wheel now reaches tutorModel.Update's tea.MouseMsg case
+// (forwarded straight to the viewport) instead of ever reaching tmux.
 func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Writer) error {
 	m, err := newTutorModel(ctx, cfg, stderr)
 	if err != nil {
 		return err
 	}
-	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithInput(stdin), tea.WithOutput(stdout)).Run()
+	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(stdin), tea.WithOutput(stdout)).Run()
 	return err
 }
 

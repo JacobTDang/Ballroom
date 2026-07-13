@@ -2,6 +2,7 @@ package tutor
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -207,6 +208,108 @@ func TestTutorModel_TextareaHasTopRuleOnlyNoSideBorder(t *testing.T) {
 		if strings.Contains(out, sideChar) {
 			t.Errorf("View() contains %q, want no left/right/bottom border characters (the box should be a top rule only)", sideChar)
 		}
+	}
+}
+
+// TestTutorModel_PageUpScrollsViewportNotTextarea is a regression test
+// for a real bug found live: the user had no way to scroll up and see
+// earlier conversation history at all -- Update() forwarded every key
+// to the textarea unconditionally, and refreshViewport's GotoBottom
+// meant the viewport was always pinned to the latest content with no
+// way to move it. PageUp/PageDown are dedicated to viewport scrolling
+// specifically because they're never used for normal text editing
+// (unlike arrow keys, which move the cursor within a multi-line draft,
+// or bubbles/viewport's own default single-letter bindings like "j"/"k",
+// which would otherwise swallow normal typing).
+func TestTutorModel_PageUpScrollsViewportNotTextarea(t *testing.T) {
+	m := newTutorLayoutOnly()
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	m = newM.(tutorModel)
+
+	lines := make([]string, 0, 40)
+	for i := 0; i < 40; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	m.displayLines = lines
+	m.refreshViewport()
+	if !m.viewport.AtBottom() {
+		t.Fatal("setup: expected viewport to start at the bottom (refreshViewport's GotoBottom)")
+	}
+
+	m.textarea.SetValue("draft")
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	got := newM.(tutorModel)
+
+	if got.viewport.AtBottom() {
+		t.Error("expected PageUp to scroll the viewport up, but it's still at the bottom")
+	}
+	if got.textarea.Value() != "draft" {
+		t.Errorf("textarea.Value() = %q, want the draft untouched by PageUp", got.textarea.Value())
+	}
+}
+
+func TestTutorModel_PageDownScrollsViewportBackToBottom(t *testing.T) {
+	m := newTutorLayoutOnly()
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	m = newM.(tutorModel)
+
+	lines := make([]string, 0, 40)
+	for i := 0; i < 40; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	m.displayLines = lines
+	m.refreshViewport()
+
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m = newM.(tutorModel)
+	if m.viewport.AtBottom() {
+		t.Fatal("setup: expected PageUp to have scrolled away from the bottom")
+	}
+
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	got := newM.(tutorModel)
+	if !got.viewport.AtBottom() {
+		t.Error("expected PageDown to scroll back down to the bottom")
+	}
+}
+
+func TestTutorModel_MouseWheelScrollsTheViewport(t *testing.T) {
+	m := newTutorLayoutOnly()
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	m = newM.(tutorModel)
+
+	lines := make([]string, 0, 40)
+	for i := 0; i < 40; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	m.displayLines = lines
+	m.refreshViewport()
+
+	newM, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	got := newM.(tutorModel)
+
+	if got.viewport.AtBottom() {
+		t.Error("expected a mouse wheel-up event to scroll the viewport up")
+	}
+}
+
+// TestTutorModel_NormalLetterKeysStillGoToTheTextarea guards against a
+// too-broad fix for the PageUp/PageDown scrolling above: bubbles/viewport's
+// own default key bindings include plain letters ("j"/"k"/"h"/"l"/"f"/"b"/
+// "d"/"u") for vim-style scrolling -- forwarding all keys to the viewport
+// instead of being selective about it would silently eat normal typing.
+func TestTutorModel_NormalLetterKeysStillGoToTheTextarea(t *testing.T) {
+	m := newTutorLayoutOnly()
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	m = newM.(tutorModel)
+
+	for _, r := range "hello jkl" {
+		newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = newM.(tutorModel)
+	}
+
+	if m.textarea.Value() != "hello jkl" {
+		t.Errorf("textarea.Value() = %q, want %q -- letters that double as viewport scroll bindings must still type normally", m.textarea.Value(), "hello jkl")
 	}
 }
 
