@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strings"
 
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
@@ -54,6 +55,21 @@ type Config struct {
 	// MaxContextBytes caps how much of the solution file gets sent to the
 	// model per read_solution_file call.
 	MaxContextBytes int
+}
+
+// providerEndpoint returns a human-readable description of where a
+// request for model actually goes, for display in the startup banner
+// and "could not reach" error messages — ollamaHost (cfg.OllamaHost) is
+// meaningless (empty, in practice) once model is
+// OpenRouterModelPrefix-prefixed, since that path never touches it (see
+// newChatModel, agent.go). A real bug found live: an OpenRouter session
+// showed "connected to ." and "could not reach :" verbatim before this
+// existed.
+func providerEndpoint(model, ollamaHost string) string {
+	if strings.HasPrefix(model, OpenRouterModelPrefix) {
+		return "OpenRouter"
+	}
+	return ollamaHost
 }
 
 // Run drives one tutor session: read a line from stdin, get the agent's
@@ -102,7 +118,8 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 		defer stopWatch()
 	}
 
-	fmt.Fprintf(stdout, "tutor (%s, mode=%s) — connected to %s. Ctrl-D to exit.\n", cfg.Model, cfg.Mode, cfg.OllamaHost)
+	endpoint := providerEndpoint(cfg.Model, cfg.OllamaHost)
+	fmt.Fprintf(stdout, "tutor (%s, mode=%s) — connected to %s. Ctrl-D to exit.\n", cfg.Model, cfg.Mode, endpoint)
 
 	cm, err := newChatModel(ctx, cfg)
 	if err != nil {
@@ -174,29 +191,29 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Wri
 
 		if comprehensionCheckPending {
 			comprehensionCheckPending = false
-			if runComprehensionCheck(ctx, agent, cfg.OllamaHost, cfg.WorkDir, line, &history, stdout, stderr, drainResize) {
+			if runComprehensionCheck(ctx, agent, endpoint, cfg.WorkDir, line, &history, stdout, stderr, drainResize) {
 				continue
 			}
-			// Couldn't reach Ollama for the check — fall through and
-			// handle this message normally below rather than silently
-			// dropping it.
+			// Couldn't reach the provider for the check — fall through
+			// and handle this message normally below rather than
+			// silently dropping it.
 		}
 
 		helpRequestCount++
 		requestMessages := append(append([]*schema.Message{}, history...), turnMessages(cfg.Mode, helpRequestCount, line)...)
 		reply, err := generateWithLeakRetry(ctx, agent, requestMessages)
 		if err != nil {
-			// The real err is included, not just cfg.OllamaHost -- a
-			// real bug found live: "could not reach" reads as a network
+			// The real err is included, not just the endpoint -- a real
+			// bug found live: "could not reach" reads as a network
 			// problem, but the actual cause is just as often a real API
 			// rejection (e.g. Ollama returning 400 "does not support
 			// tools" for a model that was picked without real
-			// tool-calling support) that has nothing to do with
-			// reachability at all. Showing only the generic message
-			// sent a live debugging session chasing a nonexistent
-			// Docker-networking problem instead of straight to the
-			// actual cause.
-			fmt.Fprintf(stderr, "tutor: could not reach %s: %v\n", cfg.OllamaHost, err)
+			// tool-calling support, or OpenRouter returning 429 rate
+			// limited) that has nothing to do with reachability at all.
+			// Showing only the generic message sent a live debugging
+			// session chasing a nonexistent Docker-networking problem
+			// instead of straight to the actual cause.
+			fmt.Fprintf(stderr, "tutor: could not reach %s: %v\n", endpoint, err)
 			continue
 		}
 
@@ -360,9 +377,9 @@ func TurnMessages(mode string, helpRequestCount int, line string) []*schema.Mess
 // nothing actually protected it before).
 //
 // On success, appends (userFirstMessage, reply) to *history and returns
-// true. Returns false if Ollama couldn't be reached, so the caller
-// falls through to handling userFirstMessage normally instead of
-// dropping it.
+// true. Returns false if the provider couldn't be reached, so the
+// caller falls through to handling userFirstMessage normally instead
+// of dropping it.
 //
 // drainResize is called right before the reply prints, same as Run's
 // own main-loop call — this check's own agent.Generate call is exactly
@@ -370,7 +387,7 @@ func TurnMessages(mode string, helpRequestCount int, line string) []*schema.Mess
 // (see its doc comment in Run), and it happens to be the very first
 // Generate call of a session, so it's a likely place for a user to
 // resize their terminal while waiting.
-func runComprehensionCheck(ctx context.Context, agent *react.Agent, ollamaHost, workDir, userFirstMessage string, history *[]*schema.Message, stdout, stderr io.Writer, drainResize func()) bool {
+func runComprehensionCheck(ctx context.Context, agent *react.Agent, endpoint, workDir, userFirstMessage string, history *[]*schema.Message, stdout, stderr io.Writer, drainResize func()) bool {
 	checkMessages := append([]*schema.Message{}, (*history)...)
 	if problem := readProblemStatement(workDir); problem != "" {
 		checkMessages = append(checkMessages, schema.SystemMessage("The exercise's problem statement:\n\n"+problem))
@@ -380,8 +397,8 @@ func runComprehensionCheck(ctx context.Context, agent *react.Agent, ollamaHost, 
 	reply, err := generateWithLeakRetry(ctx, agent, checkMessages)
 	if err != nil {
 		// See Run's identical fix for why the real err is included, not
-		// just ollamaHost.
-		fmt.Fprintf(stderr, "tutor: could not reach %s: %v\n", ollamaHost, err)
+		// just the endpoint.
+		fmt.Fprintf(stderr, "tutor: could not reach %s: %v\n", endpoint, err)
 		return false
 	}
 

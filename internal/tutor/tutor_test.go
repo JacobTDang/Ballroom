@@ -349,6 +349,46 @@ func TestRun_ComprehensionCheckErrorMessageIncludesRealUnderlyingDetail(t *testi
 	}
 }
 
+// TestRun_OpenRouterModelShowsOpenRouterNotEmptyHostInBannerAndErrors is a
+// real bug found live (via a real OpenRouter session): the startup banner
+// and both "could not reach" error sites print cfg.OllamaHost directly,
+// which is meaningless -- empty, in practice -- for an
+// OpenRouterModelPrefix-prefixed model, showing "connected to ." and
+// "could not reach :" instead of naming the actual provider.
+func TestRun_OpenRouterModelShowsOpenRouterNotEmptyHostInBannerAndErrors(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+	}))
+	defer mock.Close()
+
+	origBaseURL := openRouterBaseURL
+	openRouterBaseURL = mock.URL
+	defer func() { openRouterBaseURL = origBaseURL }()
+
+	cfg := testConfig("") // OllamaHost deliberately empty/unused for this path
+	cfg.Model = OpenRouterModelPrefix + "some/model"
+	cfg.Mode = exercise.TutorModeSyntaxOnly // skip the comprehension check
+
+	var stdout, stderr strings.Builder
+	if err := Run(context.Background(), cfg, strings.NewReader("hello\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("Run should exit cleanly even on a request error, got error: %v", err)
+	}
+
+	banner := stdout.String()
+	if !strings.Contains(banner, "connected to OpenRouter") {
+		t.Errorf("stdout banner = %q, want it to say \"connected to OpenRouter\"", banner)
+	}
+
+	errOut := stderr.String()
+	if !strings.Contains(errOut, "could not reach OpenRouter:") {
+		t.Errorf("stderr = %q, want \"could not reach OpenRouter:\", not the empty/meaningless OllamaHost", errOut)
+	}
+	if !strings.Contains(errOut, "rate limited") {
+		t.Errorf("stderr = %q, want the real underlying error detail included too", errOut)
+	}
+}
+
 func TestRun_ComprehensionCheckIncludesUsersRealFirstMessage(t *testing.T) {
 	// A real bug found live: an earlier version of runComprehensionCheck
 	// deliberately excluded the user's actual first message from the
