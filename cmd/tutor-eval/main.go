@@ -873,10 +873,9 @@ func runComprehensionCheckGroundingCheckCase(ctx context.Context, label, firstMe
 		// its doc comment for why driving Run() with a scripted
 		// Ctrl-D-terminated input stream would race the turn's own async
 		// completion.
-		var stderr strings.Builder
-		out, err := tutor.RunOneTurn(ctx, cfg, firstMessage, &stderr)
+		out, err := tutor.RunOneTurn(ctx, cfg, firstMessage)
 		if err != nil {
-			lastDetail = fmt.Sprintf("RunOneTurn error: %v (stderr: %s)", err, stderr.String())
+			lastDetail = fmt.Sprintf("RunOneTurn error: %v", err)
 			continue
 		}
 		if !strings.Contains(strings.ToLower(out), "duplicate") {

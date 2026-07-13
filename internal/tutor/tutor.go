@@ -137,8 +137,20 @@ func decideHandoff(ctx context.Context, orchestratorCM model.ToolCallingChatMode
 // frozen, uneditable snapshot of the pane. Claiming mouse input here
 // means the wheel now reaches tutorModel.Update's tea.MouseMsg case
 // (forwarded straight to the viewport) instead of ever reaching tmux.
-func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout, stderr io.Writer) error {
-	m, err := newTutorModel(ctx, cfg, stderr)
+//
+// Takes no stderr stream (an earlier version did): a real interactive
+// session has stderr and stdout on the very same tty, so anything this
+// package wrote there while the program was running bypassed
+// bubbletea's renderer entirely and visibly corrupted the alt-screen
+// frame — see activityErrorNote's doc comment in activity.go for the
+// live bug that surfaced this. Every failure/warning this package
+// itself needs to show now goes through tutorModel's own displayLines
+// instead; a genuine top-level failure (bad config, a real terminal I/O
+// error) is still returned as this function's own error, for the
+// caller to handle however it likes once this has returned and control
+// of the terminal is back in cooked mode.
+func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout io.Writer) error {
+	m, err := newTutorModel(ctx, cfg)
 	if err != nil {
 		return err
 	}
