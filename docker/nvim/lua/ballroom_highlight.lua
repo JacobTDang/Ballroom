@@ -1,12 +1,25 @@
--- Tutor-driven code highlighting/notes (issue #24), wired over nvim's RPC
--- server socket (see docker/entrypoint.sh --listen and tutor/chat.sh, which
--- calls in via `nvim --server <sock> --remote-expr`).
+-- Tutor-driven code notes (issue #24), wired over nvim's RPC server socket
+-- (see docker/entrypoint.sh --listen and tutor/chat.sh, which calls in via
+-- `nvim --server <sock> --remote-expr`).
 --
--- Everything here is purely buffer-side: nvim_buf_add_highlight (ephemeral
--- highlight, namespaced) and a sign-column marker + nvim_buf_set_extmark
--- virtual text for the note. None of this ever calls nvim_buf_set_lines or
--- otherwise edits buffer content, so the highlighted/annotated file is byte
--- -for-byte identical to what gets saved/submitted.
+-- Everything here is purely buffer-side: a sign-column marker +
+-- nvim_buf_set_extmark virtual text for the note -- deliberately no
+-- background highlight block over the code itself (see render() below);
+-- this is meant to read as a note left in the margin, not a highlighted
+-- region. None of this ever calls nvim_buf_set_lines or otherwise edits
+-- buffer content, so the annotated file is byte-for-byte identical to
+-- what gets saved/submitted.
+--
+-- Notes persist untouched while the user is away from the editor (a
+-- FocusLost autocmd fires, but nothing hooks it), and auto-clear the
+-- moment they're back (a FocusGained autocmd -- see below -- calls
+-- clear_all()) rather than staying up until manually dismissed: the
+-- note only needs to catch your attention once you return, not linger
+-- afterward. tmux forwards real terminal-focus AND its own pane-switch
+-- focus through this same event when "focus-events on" is set (see
+-- docker/tmux.conf), so switching to the tutor/terminal pane and back
+-- also triggers it, not just alt-tabbing away from the terminal
+-- application entirely.
 
 local M = {}
 
@@ -21,7 +34,6 @@ local SIGN_GROUP = "BallroomTutor"
 M.notes = {}
 M.visible = true
 
-vim.api.nvim_set_hl(0, "BallroomTutorHighlight", { bg = "#3C7DC4", fg = "#F2EBDD" })
 vim.api.nvim_set_hl(0, "BallroomTutorNote", { fg = "#E0468C", italic = true })
 vim.api.nvim_set_hl(0, "BallroomTutorSign", { fg = "#E0468C", bold = true })
 
@@ -44,14 +56,12 @@ local function resolve_buf(file)
   return vim.api.nvim_get_current_buf()
 end
 
--- Actually paints one stored note's highlight/sign/virtual text into its
--- buffer. The only place that touches the namespace's extmarks/signs, so
+-- Actually paints one stored note's sign/virtual text into its buffer --
+-- no background highlight over the code lines themselves (see the file
+-- header). The only place that touches the namespace's extmarks/signs, so
 -- both add_highlight (new note) and toggle() (replaying stored notes back
 -- on) go through here and can't drift apart.
 local function render(rec)
-  for lnum = rec.line_start, rec.line_end do
-    vim.api.nvim_buf_add_highlight(rec.buf, NS, "BallroomTutorHighlight", lnum - 1, 0, -1)
-  end
   vim.fn.sign_place(0, SIGN_GROUP, "BallroomTutorSign", rec.buf, { lnum = rec.line_start, priority = 20 })
 
   if rec.note and rec.note ~= "" then
@@ -133,5 +143,22 @@ function M.clear_all()
   M.notes = {}
   return "ok"
 end
+
+--- How many tutor notes currently exist (visible or hidden). Used by the
+--- FocusGained auto-clear below, and directly by nvimrpc_test.go to
+--- verify notes actually disappear/persist at the right times.
+function M.note_count()
+  return #M.notes
+end
+
+-- Auto-clear every note the moment the user is back looking at the editor
+-- (see the file header for why FocusLost intentionally has no handler).
+vim.api.nvim_create_autocmd("FocusGained", {
+  group = vim.api.nvim_create_augroup("BallroomTutorFocus", { clear = true }),
+  desc = "Clear tutor notes once the user has returned to the editor",
+  callback = function()
+    M.clear_all()
+  end,
+})
 
 return M
