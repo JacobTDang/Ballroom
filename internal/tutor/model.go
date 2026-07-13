@@ -5,15 +5,21 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/compose"
+	agentopt "github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
+	template "github.com/cloudwego/eino/utils/callbacks"
 )
 
 // minTextareaRows/minViewportRows are floors, not targets — the textarea
@@ -88,6 +94,15 @@ type tutorModel struct {
 	comprehensionCheckPending bool
 	helpRequestCount          int
 	turnInFlight              bool
+
+	// activeCalls/pulsePhase drive the live tool-call activity region
+	// (see activityView, buildActivityChannelOption) -- activeCalls is
+	// only ever non-nil while turnInFlight; pulsePhase free-runs for the
+	// program's whole lifetime (see pulseTickMsg) rather than being
+	// started/stopped per turn, which is only visually relevant while
+	// turnInFlight anyway and avoids any start/stop bookkeeping.
+	activeCalls []activityCall
+	pulsePhase  int
 }
 
 // newTutorLayoutOnly builds a model with just the textarea/viewport
@@ -163,7 +178,7 @@ func newTutorModel(ctx context.Context, cfg Config, stderr io.Writer) (tutorMode
 }
 
 func (m tutorModel) Init() tea.Cmd {
-	return textarea.Blink
+	return tea.Batch(textarea.Blink, pulseTickCmd())
 }
 
 func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -182,8 +197,23 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recomputeLayout()
 		return m, cmd
 
+	case activityEventMsg:
+		m.activeCalls = msg.calls
+		m.recomputeLayout()
+		return m, waitForActivityEvent(msg.activityCh, msg.doneCh)
+
+	case pulseTickMsg:
+		// Free-running for the program's whole lifetime (see the doc
+		// comment on tutorModel.pulsePhase) -- always re-arms, never
+		// stops, cheap when idle since it's only rendered while
+		// turnInFlight.
+		m.pulsePhase++
+		return m, pulseTickCmd()
+
 	case turnCompleteMsg:
 		m.turnInFlight = false
+		m.activeCalls = nil
+		m.recomputeLayout()
 		if msg.err != nil {
 			fmt.Fprintf(m.stderr, "tutor: could not reach %s: %v\n", msg.endpoint, msg.err)
 			m.displayLines = append(m.displayLines, turnFailedFallbackReply)
@@ -222,8 +252,19 @@ func (m *tutorModel) recomputeLayout() {
 	taRows = min(max(taRows, minTextareaRows), maxTaRows)
 	m.textarea.SetHeight(taRows)
 
+	// activityRows makes room for activityView's output -- zero whenever
+	// no turn is in flight (see activityView), so the activity region
+	// costs nothing when idle, unlike the old design's permanently
+	// reserved 5 rows. Recomputed here (not just on resize) because this
+	// also runs from the activityEventMsg/turnCompleteMsg cases, where
+	// len(m.activeCalls) or turnInFlight itself just changed.
+	activityRows := 0
+	if m.turnInFlight {
+		activityRows = 1 + len(m.activeCalls) // 1 status line + one per call
+	}
+
 	m.viewport.Width = m.width
-	m.viewport.Height = max(m.height-taRows-textareaBorderRows, minViewportRows)
+	m.viewport.Height = max(m.height-taRows-textareaBorderRows-activityRows, minViewportRows)
 }
 
 // estimatedTextareaRows estimates how many visual rows value will wrap
@@ -261,16 +302,17 @@ func (m *tutorModel) refreshViewport() {
 // submit handles Enter: empty input is a no-op (nothing to send). A real
 // message resets the textarea (growth immediately collapses back down —
 // recomputeLayout runs again right after), echoes into the viewport
-// immediately (the reply can take many seconds), and starts the turn as
-// a tea.Cmd — mirroring internal/tui/boot.go's own "kick off background
-// work, delivered back via a tea.Msg" pattern, not a blocking call
-// inside Update itself.
+// immediately (the reply can take many seconds), and starts the turn on
+// its own goroutine — mirroring internal/tui/boot.go's own
+// buildImageFn/pullModelFn pattern: the goroutine-starting call happens
+// directly here (not itself wrapped in a tea.Cmd), returning channels
+// that waitForActivityEvent's tea.Cmd drains.
 //
 // checkComprehension is snapshotted here, before comprehensionCheckPending
 // is cleared on m below — matching the old Run() loop's own behavior
 // exactly: the flag clears unconditionally on the very first message,
-// whether the check succeeds or fails (see startTurnCmd's comment on
-// what happens on failure).
+// whether the check succeeds or fails (see startTurn's comment on what
+// happens on failure).
 func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 	line := strings.TrimSpace(m.textarea.Value())
 	if line == "" {
@@ -280,21 +322,22 @@ func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 	m.comprehensionCheckPending = false
 
 	m.textarea.Reset()
-	m.recomputeLayout()
 	m.turnInFlight = true
 	m.helpRequestCount++
+	m.recomputeLayout()
 	m.displayLines = append(m.displayLines, "> "+line)
 	m.refreshViewport()
 
-	return m, startTurnCmd(m, line, checkComprehension)
+	activityCh, doneCh := startTurn(m, line, checkComprehension)
+	return m, waitForActivityEvent(activityCh, doneCh)
 }
 
 // turnCompleteMsg carries one turn's final outcome — whether it went
-// through the comprehension-check path or a normal turn (see
-// startTurnCmd), the result-handling shape is identical either way: on
-// success, persist (userMessage, reply) to history and show the reply;
-// on failure, show turnFailedFallbackReply and persist nothing (see
-// Update's case for this message).
+// through the comprehension-check path or a normal turn (see startTurn),
+// the result-handling shape is identical either way: on success, persist
+// (userMessage, reply) to history and show the reply; on failure, show
+// turnFailedFallbackReply and persist nothing (see Update's case for
+// this message).
 type turnCompleteMsg struct {
 	reply       *schema.Message
 	err         error
@@ -302,25 +345,69 @@ type turnCompleteMsg struct {
 	userMessage string
 }
 
-// startTurnCmd runs one submitted line's whole turn — comprehension
-// check (if checkComprehension), routing decision (if
-// m.routingEnabled), and the actual model call — on its own goroutine,
-// exactly mirroring the old Run() loop's own sequencing, just wrapped as
-// a tea.Cmd instead of inline for-loop code. m is a snapshot (bubbletea
-// Cmds capture their closure's values at creation, not a live
-// reference), which is why helpRequestCount/comprehensionCheckPending
-// are already resolved by submit before this is built.
-func startTurnCmd(m tutorModel, line string, checkComprehension bool) tea.Cmd {
+// activityEventMsg carries one live snapshot of the turn's tool calls so
+// far (see activityFeed.currentCalls) — pushed by buildActivityChannelOption's
+// eino callbacks as they fire, delivered here by waitForActivityEvent.
+// Carries its own source channels so Update can re-arm the wait without
+// needing to store them as model fields (they're per-turn, ephemeral).
+type activityEventMsg struct {
+	calls      []activityCall
+	activityCh <-chan []activityCall
+	doneCh     <-chan turnCompleteMsg
+}
+
+// pulseTickMsg drives the fading-dot animation (see activityDotColor) —
+// free-running for the program's whole lifetime rather than
+// started/stopped per turn (see tutorModel.pulsePhase's doc comment).
+type pulseTickMsg struct{}
+
+func pulseTickCmd() tea.Cmd {
+	return tea.Tick(activityPulseInterval, func(time.Time) tea.Msg { return pulseTickMsg{} })
+}
+
+// waitForActivityEvent mirrors internal/tui/boot.go's waitForBuildLine
+// exactly: blocks on activityCh, forwarding each snapshot as it arrives;
+// once that channel closes (the turn's goroutine has finished — see
+// startTurn's deferred close) it reads the buffered final result from
+// doneCh instead.
+func waitForActivityEvent(activityCh <-chan []activityCall, doneCh <-chan turnCompleteMsg) tea.Cmd {
 	return func() tea.Msg {
+		calls, ok := <-activityCh
+		if ok {
+			return activityEventMsg{calls: calls, activityCh: activityCh, doneCh: doneCh}
+		}
+		return <-doneCh
+	}
+}
+
+// startTurn runs one submitted line's whole turn — comprehension check
+// (if checkComprehension), routing decision (if m.routingEnabled), and
+// the actual model call — on its own goroutine, exactly mirroring the
+// old Run() loop's own sequencing. Returns the two channels
+// waitForActivityEvent drains; m is a snapshot (Go closures capture by
+// value here since m is passed as a parameter, not a live reference),
+// which is why helpRequestCount/comprehensionCheckPending are already
+// resolved by submit before this is called.
+func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []activityCall, <-chan turnCompleteMsg) {
+	activityCh := make(chan []activityCall, 32)
+	doneCh := make(chan turnCompleteMsg, 1)
+
+	go func() {
+		defer close(activityCh)
+
+		feed := &activityFeed{}
+		activityOpt := buildActivityChannelOption(feed, activityCh)
+
 		if checkComprehension {
 			checkAgent := m.workerAgent
 			if m.routingEnabled {
 				checkAgent = m.orchestratorAgent
 			}
 			checkMessages := comprehensionCheckMessages(m.history, m.cfg.WorkDir, line)
-			reply, err := generateWithLeakRetry(m.ctx, checkAgent, checkMessages)
+			reply, err := generateWithLeakRetry(m.ctx, checkAgent, checkMessages, activityOpt)
 			if err == nil {
-				return turnCompleteMsg{reply: reply, userMessage: line}
+				doneCh <- turnCompleteMsg{reply: reply, userMessage: line}
+				return
 			}
 			// Couldn't reach the provider for the check -- fall through
 			// and handle this same message as a normal turn instead of
@@ -343,12 +430,65 @@ func startTurnCmd(m tutorModel, line string, checkComprehension bool) tea.Cmd {
 		}
 
 		requestMessages := append(append([]*schema.Message{}, m.history...), turnMessages(m.cfg.Mode, m.helpRequestCount, line)...)
-		reply, err := generateWithLeakRetry(m.ctx, turnAgent, requestMessages)
+		reply, err := generateWithLeakRetry(m.ctx, turnAgent, requestMessages, activityOpt)
 		if err != nil {
-			return turnCompleteMsg{err: err, endpoint: turnEndpoint, userMessage: line}
+			doneCh <- turnCompleteMsg{err: err, endpoint: turnEndpoint, userMessage: line}
+			return
 		}
-		return turnCompleteMsg{reply: reply, userMessage: line}
+		doneCh <- turnCompleteMsg{reply: reply, userMessage: line}
+	}()
+
+	return activityCh, doneCh
+}
+
+// buildActivityChannelOption mirrors the eino callback wiring
+// react.BuildAgentCallback/utils/callbacks.ToolCallbackHandler give real
+// OnStart/OnEnd/OnError events for (see activity.go's now-dead
+// buildActivityCallbackOption, which did the same thing for the old
+// box-based rendering) but pushes activityFeed snapshots onto a channel
+// for the bubbletea Update loop to pick up, instead of writing directly
+// to a terminal. feed's started/finished/failed/currentCalls are reused
+// completely unchanged from that earlier design.
+func buildActivityChannelOption(feed *activityFeed, activityCh chan<- []activityCall) agentopt.AgentOption {
+	push := func() {
+		select {
+		case activityCh <- feed.currentCalls():
+		default:
+			// Buffer's full (a pathological number of rapid-fire events,
+			// never seen in practice given activityToolLines caps the
+			// feed at 4 calls) -- drop rather than block eino's own
+			// callback goroutine. currentCalls() is always the FULL
+			// current state, not a delta, so the next successful push
+			// still catches the UI up correctly.
+		}
 	}
+	toolHandler := &template.ToolCallbackHandler{
+		OnStart: func(ctx context.Context, info *callbacks.RunInfo, input *tool.CallbackInput) context.Context {
+			argsPreview := ""
+			if input != nil {
+				argsPreview = truncateLine(input.ArgumentsInJSON, activityArgsPreviewMax)
+			}
+			feed.started(compose.GetToolCallID(ctx), info.Name, argsPreview)
+			push()
+			return ctx
+		},
+		OnEnd: func(ctx context.Context, info *callbacks.RunInfo, output *tool.CallbackOutput) context.Context {
+			resultPreview := ""
+			if output != nil {
+				resultPreview = truncateLine(output.Response, activityResultPreviewMax)
+			}
+			feed.finished(compose.GetToolCallID(ctx), resultPreview)
+			push()
+			return ctx
+		},
+		OnError: func(ctx context.Context, info *callbacks.RunInfo, err error) context.Context {
+			feed.failed(compose.GetToolCallID(ctx), truncateLine(err.Error(), activityResultPreviewMax))
+			push()
+			return ctx
+		},
+	}
+	handler := react.BuildAgentCallback(nil, toolHandler)
+	return agentopt.WithComposeOptions(compose.WithCallbacks(handler))
 }
 
 // comprehensionCheckMessages builds one comprehension check's request —
@@ -367,6 +507,31 @@ func comprehensionCheckMessages(history []*schema.Message, workDir, userFirstMes
 	return checkMessages
 }
 
+// activityView renders the live tool-call activity region: a pulsing
+// status dot plus one line per active call, via activity.go's existing
+// pulsedStatusLine/pulsedCallLine (unchanged from the old box-based
+// design — they already truncate to a given width and color-wrap only
+// the leading dot, so they're equally correct called from here). Empty
+// whenever no turn is in flight, so the region costs zero rows when
+// idle — an improvement over the old design's permanently reserved 5
+// rows (see recomputeLayout's activityRows).
+func (m tutorModel) activityView() string {
+	if !m.turnInFlight {
+		return ""
+	}
+	lines := make([]string, 0, activityToolLines+1)
+	lines = append(lines, pulsedStatusLine(m.pulsePhase, m.width))
+	for _, c := range m.activeCalls {
+		lines = append(lines, pulsedCallLine(c, m.pulsePhase, m.width))
+	}
+	return viewportContentStyle.Render(strings.Join(lines, "\n"))
+}
+
 func (m tutorModel) View() string {
-	return lipgloss.JoinVertical(lipgloss.Left, m.viewport.View(), textareaBoxStyle.Render(m.textarea.View()))
+	parts := []string{m.viewport.View()}
+	if av := m.activityView(); av != "" {
+		parts = append(parts, av)
+	}
+	parts = append(parts, textareaBoxStyle.Render(m.textarea.View()))
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }

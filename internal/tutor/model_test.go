@@ -142,7 +142,20 @@ func TestTutorModel_EnterOnEmptyTextareaDoesNothing(t *testing.T) {
 }
 
 func TestTutorModel_EnterOnNonEmptyTextareaResetsItAndEchoesIntoViewport(t *testing.T) {
-	m := newTutorLayoutOnly()
+	// Checks submit()'s SYNCHRONOUS behavior specifically -- the textarea
+	// reset and the immediate echo, both of which happen before the
+	// turn's tea.Cmd is ever run -- decoupled from whether the async
+	// turn itself succeeds (see the Stage 2/3 tests below for that).
+	// Needs a real newTutorModel (not newTutorLayoutOnly): submit() now
+	// unconditionally starts a real turn, which would nil-pointer-panic
+	// against newTutorLayoutOnly's unset agents.
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = newM.(tutorModel)
 	m.textarea.SetValue("hello there")
@@ -185,9 +198,25 @@ func submitAndRun(t *testing.T, m tutorModel, line string) tutorModel {
 	if cmd == nil {
 		t.Fatal("submit produced no command -- expected a turn to start")
 	}
-	msg := cmd()
-	newM, _ = m.Update(msg)
-	return newM.(tutorModel)
+	// Drains however many activityEventMsgs precede the final
+	// turnCompleteMsg (zero for a turn with no tool calls -- the
+	// activity channel closes immediately and the first cmd() call
+	// already yields the result; one or more for a real tool-calling
+	// turn), each re-arming the wait the same way the real bubbletea
+	// runtime would.
+	for i := 0; i < 100; i++ {
+		msg := cmd()
+		newM, cmd = m.Update(msg)
+		m = newM.(tutorModel)
+		if _, ok := msg.(turnCompleteMsg); ok {
+			return m
+		}
+		if cmd == nil {
+			t.Fatal("submitAndRun: turn ended without a turnCompleteMsg")
+		}
+	}
+	t.Fatal("submitAndRun: too many iterations, possible infinite activity-event loop")
+	return m
 }
 
 func TestNewTutorModel_NoRoutingBannerAndHistorySeededWithSystemPrompt(t *testing.T) {
@@ -442,5 +471,140 @@ func TestTutorModel_RetriesWhenReplyLeaksFakeToolCallJSON(t *testing.T) {
 	}
 	if !strings.Contains(view, "your code looks fine") {
 		t.Errorf("viewport view %q, want the retry's clean reply", view)
+	}
+}
+
+// --- Stage 3: live tool-call activity display, channel-based instead of
+// scrollbox.go's raw ANSI writes.
+
+func TestActivityEventMsg_UpdatesActiveCallsAndRearmsWait(t *testing.T) {
+	activityCh := make(chan []activityCall, 1)
+	doneCh := make(chan turnCompleteMsg, 1)
+	calls := []activityCall{{name: "read_solution_file", status: "running"}}
+
+	m := newTutorLayoutOnly()
+	newM, cmd := m.Update(activityEventMsg{calls: calls, activityCh: activityCh, doneCh: doneCh})
+	got := newM.(tutorModel)
+
+	if len(got.activeCalls) != 1 || got.activeCalls[0].name != "read_solution_file" {
+		t.Errorf("activeCalls = %+v, want the pushed snapshot", got.activeCalls)
+	}
+	if cmd == nil {
+		t.Fatal("expected activityEventMsg to re-arm the wait")
+	}
+
+	// Re-armed wait must target the SAME channels -- closing activityCh
+	// and pushing a result onto doneCh must be what the re-armed cmd
+	// picks up next.
+	close(activityCh)
+	doneCh <- turnCompleteMsg{userMessage: "done"}
+	msg := cmd()
+	if _, ok := msg.(turnCompleteMsg); !ok {
+		t.Errorf("re-armed wait produced %T, want turnCompleteMsg once activityCh closed", msg)
+	}
+}
+
+func TestPulseTickMsg_IncrementsPhaseAndAlwaysRearms(t *testing.T) {
+	m := newTutorLayoutOnly()
+	newM, cmd := m.Update(pulseTickMsg{})
+	got := newM.(tutorModel)
+
+	if got.pulsePhase != 1 {
+		t.Errorf("pulsePhase = %d, want 1", got.pulsePhase)
+	}
+	if cmd == nil {
+		t.Error("expected pulseTickMsg to always re-arm, even when idle -- cheap to run continuously, avoids needing to start/stop it per turn")
+	}
+}
+
+func TestTutorModel_View_ShowsActivityRegionOnlyWhileTurnInFlight(t *testing.T) {
+	m := newTutorLayoutOnly()
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+	m.activeCalls = []activityCall{{name: "read_solution_file", status: "running"}}
+
+	m.turnInFlight = false
+	if strings.Contains(m.View(), "read_solution_file") {
+		t.Error("expected no activity region when no turn is in flight")
+	}
+
+	m.turnInFlight = true
+	if !strings.Contains(m.View(), "read_solution_file") {
+		t.Error("expected the activity region to show the active call while a turn is in flight")
+	}
+}
+
+func TestTutorModel_TurnCompleteClearsActiveCallsAndTurnInFlight(t *testing.T) {
+	m := newTutorLayoutOnly()
+	m.turnInFlight = true
+	m.activeCalls = []activityCall{{name: "read_solution_file", status: "running"}}
+
+	newM, _ := m.Update(turnCompleteMsg{reply: schema.AssistantMessage("done", nil), userMessage: "x"})
+	got := newM.(tutorModel)
+
+	if got.turnInFlight {
+		t.Error("turnInFlight = true after turnCompleteMsg, want false")
+	}
+	if len(got.activeCalls) != 0 {
+		t.Errorf("activeCalls = %+v, want cleared", got.activeCalls)
+	}
+}
+
+func TestTutorModel_SubmitShowsLiveToolCallActivity(t *testing.T) {
+	// newToolCallOllama (toolcheck_test.go) simulates a real tool_calls
+	// response for its first request, then a plain-text reply for its
+	// second -- driving a real read_solution_file call through the real
+	// eino callback -> channel -> activityEventMsg pipeline, not a
+	// synthetic message.
+	mock := newToolCallOllama(t, "read_solution_file")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+	cfg.WorkDir = t.TempDir()
+
+	m, err := newTutorModel(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	m.textarea.SetValue("what does my code look like?")
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(tutorModel)
+	if cmd == nil {
+		t.Fatal("submit produced no command")
+	}
+
+	sawActivity := false
+	for i := 0; i < 100; i++ {
+		msg := cmd()
+		if ev, ok := msg.(activityEventMsg); ok {
+			for _, c := range ev.calls {
+				if c.name == "read_solution_file" {
+					sawActivity = true
+				}
+			}
+		}
+		newM, cmd = m.Update(msg)
+		m = newM.(tutorModel)
+		if _, ok := msg.(turnCompleteMsg); ok {
+			break
+		}
+		if cmd == nil {
+			t.Fatal("turn ended without a turnCompleteMsg")
+		}
+	}
+
+	if !sawActivity {
+		t.Error("expected a real activityEventMsg naming read_solution_file during the turn")
+	}
+	if m.turnInFlight {
+		t.Error("turnInFlight = true after the turn completed, want false")
+	}
+	if len(m.activeCalls) != 0 {
+		t.Errorf("activeCalls = %+v, want cleared once the turn completed", m.activeCalls)
+	}
+	if !strings.Contains(m.viewport.View(), "pong received") {
+		t.Errorf("viewport view %q, want the final reply", m.viewport.View())
 	}
 }
