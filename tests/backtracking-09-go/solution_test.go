@@ -59,3 +59,20 @@ func TestSolveNQueens_NoSolutionsForTwoOrThree(t *testing.T) {
 		t.Errorf("SolveNQueens(3) = %v, want empty (no solution exists)", got)
 	}
 }
+
+func TestSolveNQueens_FiveHasTenSolutions(t *testing.T) {
+	got := SolveNQueens(5)
+	if len(got) != 10 {
+		t.Errorf("SolveNQueens(5) returned %d solutions, want 10", len(got))
+	}
+	for _, board := range got {
+		if len(board) != 5 {
+			t.Fatalf("SolveNQueens(5) board has %d rows, want 5", len(board))
+		}
+		for _, row := range board {
+			if len(row) != 5 {
+				t.Fatalf("SolveNQueens(5) row %q has length %d, want 5", row, len(row))
+			}
+		}
+	}
+}

@@ -7,3 +7,7 @@ def test_letter_combinations():
     )
     assert letter_combinations("") == []
     assert sorted(letter_combinations("2")) == sorted(["a", "b", "c"])
+    assert sorted(letter_combinations("9")) == sorted(["w", "x", "y", "z"])
+    assert sorted(letter_combinations("79")) == sorted(
+        ["pw", "px", "py", "pz", "qw", "qx", "qy", "qz", "rw", "rx", "ry", "rz", "sw", "sx", "sy", "sz"]
+    )

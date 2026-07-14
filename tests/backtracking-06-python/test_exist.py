@@ -19,3 +19,9 @@ def test_exist():
 def test_exist_single_cell():
     assert exist([["A"]], "A") is True
     assert exist([["A"]], "AA") is False
+
+
+def test_exist_diagonal_not_allowed():
+    board = [list("ab"), list("cd")]
+    assert exist(board, "abdc") is True
+    assert exist(board, "abcd") is False

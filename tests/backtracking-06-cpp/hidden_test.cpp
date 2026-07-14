@@ -34,6 +34,14 @@ int main() {
         std::vector<std::vector<char>> b = {{'A'}};
         assert(Exist(b, "AA") == false);
     }
+    {
+        std::vector<std::vector<char>> b = {{'a', 'b'}, {'c', 'd'}};
+        assert(Exist(b, "abdc") == true);
+    }
+    {
+        std::vector<std::vector<char>> b = {{'a', 'b'}, {'c', 'd'}};
+        assert(Exist(b, "abcd") == false);
+    }
     printf("all assertions passed\n");
     return 0;
 }

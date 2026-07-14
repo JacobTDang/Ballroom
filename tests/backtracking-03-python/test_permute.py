@@ -11,3 +11,4 @@ def test_permute():
     )
     assert normalize_exact(permute([0, 1])) == normalize_exact([[0, 1], [1, 0]])
     assert normalize_exact(permute([1])) == [[1]]
+    assert normalize_exact(permute([1, -1])) == normalize_exact([[1, -1], [-1, 1]])

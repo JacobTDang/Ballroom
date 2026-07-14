@@ -10,3 +10,4 @@ def test_combination_sum2():
         [[1, 1, 6], [1, 2, 5], [1, 7], [2, 6]]
     )
     assert normalize(combination_sum2([2, 5, 2, 1, 2], 5)) == normalize([[1, 2, 2], [5]])
+    assert normalize(combination_sum2([1, 1, 1, 2, 2], 4)) == normalize([[1, 1, 2], [2, 2]])

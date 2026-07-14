@@ -55,6 +55,7 @@ func TestPermute(t *testing.T) {
 		},
 		{[]int{0, 1}, [][]int{{0, 1}, {1, 0}}},
 		{[]int{1}, [][]int{{1}}},
+		{[]int{1, -1}, [][]int{{1, -1}, {-1, 1}}},
 	}
 
 	for _, c := range cases {

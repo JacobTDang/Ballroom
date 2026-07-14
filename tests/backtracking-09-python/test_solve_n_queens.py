@@ -23,3 +23,12 @@ def test_solve_n_queens_one():
 def test_solve_n_queens_no_solutions_for_two_or_three():
     assert solve_n_queens(2) == []
     assert solve_n_queens(3) == []
+
+
+def test_solve_n_queens_five_has_ten_solutions():
+    got = solve_n_queens(5)
+    assert len(got) == 10
+    for board in got:
+        assert len(board) == 5
+        for row in board:
+            assert len(row) == 5

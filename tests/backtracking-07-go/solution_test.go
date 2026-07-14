@@ -35,6 +35,8 @@ func TestPartition(t *testing.T) {
 		{"aab", [][]string{{"a", "a", "b"}, {"aa", "b"}}},
 		{"a", [][]string{{"a"}}},
 		{"aba", [][]string{{"a", "b", "a"}, {"aba"}}},
+		{"aa", [][]string{{"a", "a"}, {"aa"}}},
+		{"abcba", [][]string{{"a", "b", "c", "b", "a"}, {"a", "bcb", "a"}, {"abcba"}}},
 	}
 
 	for _, c := range cases {

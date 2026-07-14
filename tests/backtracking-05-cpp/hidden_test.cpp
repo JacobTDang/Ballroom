@@ -19,6 +19,7 @@ void check(std::vector<int> candidates, int target, std::vector<std::vector<int>
 int main() {
     check({10, 1, 2, 7, 6, 1, 5}, 8, {{1, 1, 6}, {1, 2, 5}, {1, 7}, {2, 6}});
     check({2, 5, 2, 1, 2}, 5, {{1, 2, 2}, {5}});
+    check({1, 1, 1, 2, 2}, 4, {{1, 1, 2}, {2, 2}});
     printf("all assertions passed\n");
     return 0;
 }

@@ -14,6 +14,11 @@ func TestLetterCombinations(t *testing.T) {
 		{"23", []string{"ad", "ae", "af", "bd", "be", "bf", "cd", "ce", "cf"}},
 		{"", []string{}},
 		{"2", []string{"a", "b", "c"}},
+		{"9", []string{"w", "x", "y", "z"}},
+		{
+			"79",
+			[]string{"pw", "px", "py", "pz", "qw", "qx", "qy", "qz", "rw", "rx", "ry", "rz", "sw", "sx", "sy", "sz"},
+		},
 	}
 
 	for _, c := range cases {

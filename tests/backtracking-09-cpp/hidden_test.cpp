@@ -26,6 +26,16 @@ int main() {
     }
     assert(SolveNQueens(2).empty());
     assert(SolveNQueens(3).empty());
+    {
+        auto got = SolveNQueens(5);
+        assert(got.size() == 10);
+        for (const auto& board : got) {
+            assert(board.size() == 5);
+            for (const auto& row : board) {
+                assert(row.size() == 5);
+            }
+        }
+    }
     printf("all assertions passed\n");
     return 0;
 }
