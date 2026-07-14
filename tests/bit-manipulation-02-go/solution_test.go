@@ -25,3 +25,9 @@ func TestHammingWeight_PowerOfTwo(t *testing.T) {
 		t.Errorf("HammingWeight(1<<31) = %d, want 1", got)
 	}
 }
+
+func TestHammingWeight_AlternatingBits(t *testing.T) {
+	if got := HammingWeight(0xAAAAAAAA); got != 16 {
+		t.Errorf("HammingWeight(0xAAAAAAAA) = %d, want 16", got)
+	}
+}

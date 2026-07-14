@@ -29,3 +29,17 @@ func TestMissingNumber_SingleElement(t *testing.T) {
 		t.Errorf("MissingNumber(%v) = %d, want 1", nums, got)
 	}
 }
+
+func TestMissingNumber_MissingInMiddle(t *testing.T) {
+	nums := []int{0, 1, 3, 4, 5}
+	if got := MissingNumber(nums); got != 2 {
+		t.Errorf("MissingNumber(%v) = %d, want 2", nums, got)
+	}
+}
+
+func TestMissingNumber_LargerShuffled(t *testing.T) {
+	nums := []int{9, 6, 4, 2, 3, 5, 7, 0, 1}
+	if got := MissingNumber(nums); got != 8 {
+		t.Errorf("MissingNumber(%v) = %d, want 8", nums, got)
+	}
+}

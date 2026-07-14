@@ -15,3 +15,7 @@ def test_all_ones():
 
 def test_power_of_two():
     assert hamming_weight(1 << 31) == 1
+
+
+def test_alternating_bits():
+    assert hamming_weight(0xAAAAAAAA) == 16

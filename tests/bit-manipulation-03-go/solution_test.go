@@ -26,6 +26,13 @@ func TestCountBits_Zero(t *testing.T) {
 	}
 }
 
+func TestCountBits_One(t *testing.T) {
+	want := []int{0, 1}
+	if got := CountBits(1); !reflect.DeepEqual(got, want) {
+		t.Errorf("CountBits(1) = %v, want %v", got, want)
+	}
+}
+
 func TestCountBits_Larger(t *testing.T) {
 	want := []int{0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4}
 	if got := CountBits(15); !reflect.DeepEqual(got, want) {

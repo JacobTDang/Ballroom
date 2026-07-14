@@ -15,3 +15,11 @@ def test_single_element():
 
 def test_negative_numbers():
     assert single_number([-1, -1, -2]) == -2
+
+
+def test_boundary_values():
+    assert single_number([1000, 1000, -1000]) == -1000
+
+
+def test_larger_mixed_set():
+    assert single_number([5, 3, 5, 4, 3]) == 4
