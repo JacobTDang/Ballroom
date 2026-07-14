@@ -59,6 +59,40 @@ func TestIsValidSudoku(t *testing.T) {
 		".........",
 	}
 
+	solvedBoard := []string{
+		"534678912",
+		"672195348",
+		"198342567",
+		"859761423",
+		"426853791",
+		"713924856",
+		"961537284",
+		"287419635",
+		"345286179",
+	}
+	sameDigitDifferentUnitsBoard := []string{
+		"5........",
+		".........",
+		".........",
+		".........",
+		"....5....",
+		".........",
+		".........",
+		".........",
+		".........",
+	}
+	singleCellBoard := []string{
+		"5........",
+		".........",
+		".........",
+		".........",
+		".........",
+		".........",
+		".........",
+		".........",
+		".........",
+	}
+
 	cases := []struct {
 		name  string
 		board []string
@@ -69,6 +103,9 @@ func TestIsValidSudoku(t *testing.T) {
 		{"invalid row", invalidRowBoard, false},
 		{"invalid box", invalidBoxBoard, false},
 		{"empty", emptyBoard, true},
+		{"fully solved valid board", solvedBoard, true},
+		{"same digit different row/col/box", sameDigitDifferentUnitsBoard, true},
+		{"single cell filled", singleCellBoard, true},
 	}
 	for _, c := range cases {
 		got := IsValidSudoku(c.board)

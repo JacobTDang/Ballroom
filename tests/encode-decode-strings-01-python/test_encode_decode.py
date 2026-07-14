@@ -7,6 +7,11 @@ CASES = [
     ["", "", ""],
     ["a#b", "c##d", "5#hello"],
     ["hello world", "foo,bar", "123"],
+    ["4#abcd", "hello"],
+    ["#####"],
+    ["xyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxy"],
+    ["123", "456", "0"],
+    ["", "a", "", "b"],
 ]
 
 

@@ -38,6 +38,31 @@ int main() {
         auto want = normalize({{"abc", "bca", "cab"}, {"xyz"}});
         assert(got == want);
     }
+    {
+        auto got = normalize(group_anagrams({"cat", "dog", "bird"}));
+        auto want = normalize({{"cat"}, {"dog"}, {"bird"}});
+        assert(got == want);
+    }
+    {
+        auto got = normalize(group_anagrams({"abc", "bca", "cab", "acb"}));
+        auto want = normalize({{"abc", "bca", "cab", "acb"}});
+        assert(got == want);
+    }
+    {
+        auto got = normalize(group_anagrams({"", "", ""}));
+        auto want = normalize({{"", "", ""}});
+        assert(got == want);
+    }
+    {
+        auto got = normalize(group_anagrams({"bat", "tab", "cat", "act", "dog", "god", "xyz"}));
+        auto want = normalize({{"bat", "tab"}, {"cat", "act"}, {"dog", "god"}, {"xyz"}});
+        assert(got == want);
+    }
+    {
+        auto got = normalize(group_anagrams({"a", "b", "a", "c", "b"}));
+        auto want = normalize({{"a", "a"}, {"b", "b"}, {"c"}});
+        assert(got == want);
+    }
     printf("all assertions passed\n");
     return 0;
 }
