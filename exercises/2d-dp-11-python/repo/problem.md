@@ -1,0 +1,27 @@
+# Regular Expression Matching
+
+Given an input string `s` and a pattern `p`, implement regular
+expression matching with support for `.` and `*` where:
+
+- `.` Matches any single character.
+- `*` Matches zero or more of the preceding element.
+
+The matching should cover the **entire** input string (not partial).
+
+## Example
+
+```
+Input: s = "aab", p = "c*a*b"
+Output: true
+Explanation: 'c' can be matched 0 times, 'a' can be matched 2 times,
+and 'b' can be matched 1 time, giving "aab".
+```
+
+## Constraints
+
+- `1 <= s.length <= 20`
+- `1 <= p.length <= 30`
+- `s` consists of lowercase English letters.
+- `p` consists of lowercase English letters, `.`, and `*`.
+- It is guaranteed for each appearance of the character `*`, there
+  will be a previous valid character to match.

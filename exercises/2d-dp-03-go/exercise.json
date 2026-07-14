@@ -1,0 +1,11 @@
+{
+  "id": "2d-dp-03-go",
+  "problem_id": "2d-dp-03",
+  "title": "Best Time to Buy and Sell Stock with Cooldown",
+  "category": "2d-dp",
+  "language": "go",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}
