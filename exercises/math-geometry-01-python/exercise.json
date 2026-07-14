@@ -1,0 +1,11 @@
+{
+  "id": "math-geometry-01-python",
+  "problem_id": "math-geometry-01",
+  "title": "Rotate Image",
+  "category": "math-geometry",
+  "language": "python",
+  "time_limit_min": 20,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}

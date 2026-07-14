@@ -1,0 +1,11 @@
+{
+  "id": "math-geometry-08-go",
+  "problem_id": "math-geometry-08",
+  "title": "Detect Squares",
+  "category": "math-geometry",
+  "language": "go",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}
