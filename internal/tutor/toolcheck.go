@@ -25,12 +25,16 @@ type pingArgs struct {
 // ollamaHost and apiKey are only used for their respective providers
 // (see newChatModel) — pass "" for whichever doesn't apply to model.
 //
+// Takes ctx from the caller (rather than context.Background() internally,
+// as this did before newTutorModel started calling it as a blocking
+// session-construction step) so real cancellation -- e.g. quitting
+// during startup -- actually works; the TUI's own fire-and-forget
+// tea.Cmd use just passes context.Background() itself, unaffected.
+//
 // Ports the same wiring cmd/tutor-spike used to first confirm this
 // failure mode, as a small reusable check instead of a throwaway
 // binary.
-func CheckToolCalling(ollamaHost, model, apiKey string) (bool, error) {
-	ctx := context.Background()
-
+func CheckToolCalling(ctx context.Context, ollamaHost, model, apiKey string) (bool, error) {
 	cm, err := newChatModel(ctx, model, ollamaHost, apiKey)
 	if err != nil {
 		return false, fmt.Errorf("tutor: check tool calling: %w", err)
@@ -58,4 +62,30 @@ func CheckToolCalling(ollamaHost, model, apiKey string) (bool, error) {
 	}
 
 	return called, nil
+}
+
+// checkToolCallingForSession is CheckToolCalling, as a var so tests can
+// substitute a fake that skips the real network round-trip
+// newTutorModel's strategy detection (detectStrategy, below) would
+// otherwise make — same indirection pattern internal/tui/app.go's
+// checkToolCallingFn and cmd/ballroom's own var of the same name use for
+// the identical reason. See testmain_test.go for this package's own
+// test-suite default.
+var checkToolCallingForSession = CheckToolCalling
+
+// detectStrategy reports which toolCallingStrategy modelName needs,
+// via checkToolCallingForSession. Fails open toward nativeToolCalling —
+// this project's sole behavior before this strategy existed — on
+// anything short of a definitive "no": a check that errors out (bad
+// host, timeout) can't actually tell us the model lacks real tool
+// calling, so silently downgrading a previously-working native session
+// to the fallback loop on a transient check failure would be a worse
+// outcome than just trying native and letting the turn itself fail
+// visibly if the host really is unreachable.
+func detectStrategy(ctx context.Context, ollamaHost, modelName, apiKey string) toolCallingStrategy {
+	supported, err := checkToolCallingForSession(ctx, ollamaHost, modelName, apiKey)
+	if err != nil || supported {
+		return nativeToolCalling
+	}
+	return jsonFallbackToolCalling
 }

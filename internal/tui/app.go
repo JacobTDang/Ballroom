@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strconv"
@@ -106,7 +107,7 @@ type toolCallingCheckMsg struct {
 // threaded through to.
 func checkToolCallingCmd(model, apiKey string) tea.Cmd {
 	return func() tea.Msg {
-		supported, err := checkToolCallingFn(ollamaHost, model, apiKey)
+		supported, err := checkToolCallingFn(context.Background(), ollamaHost, model, apiKey)
 		return toolCallingCheckMsg{model: model, supported: supported, err: err}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -82,10 +83,28 @@ type tutorModel struct {
 
 	workerAgent          *react.Agent
 	orchestratorAgent    *react.Agent
+	workerCM             model.ToolCallingChatModel
 	orchestratorCM       model.ToolCallingChatModel
 	workerEndpoint       string
 	orchestratorEndpoint string
 	routingEnabled       bool
+
+	// workerStrategy/orchestratorStrategy are each role's detected
+	// toolCallingStrategy (newTutorModel, via detectStrategy) --
+	// orchestratorStrategy is only meaningful when routingEnabled.
+	// startTurn's callRole dispatch reads these to decide whether a
+	// role's Generate call goes through the real react.Agent or
+	// runFallbackToolLoop (fallback.go).
+	workerStrategy       toolCallingStrategy
+	orchestratorStrategy toolCallingStrategy
+
+	// tools/toolCatalogText are built once per session (buildTools +
+	// renderToolCatalog) and reused by both roles -- the tool set is
+	// identical regardless of which role answers a given turn.
+	// toolCatalogText only matters for a jsonFallbackToolCalling role
+	// (see prependToolsPrompt, prompts.go); a native role never sees it.
+	tools           []tool.BaseTool
+	toolCatalogText string
 
 	// history holds only the system prompt plus clean (user, assistant)
 	// pairs -- never a failed turn's fallback message, never
@@ -142,12 +161,17 @@ func newTutorModel(ctx context.Context, cfg Config) (tutorModel, error) {
 	if err != nil {
 		return tutorModel{}, err
 	}
-
-	workerCM, err := newChatModel(ctx, cfg.Model, cfg.OllamaHost, cfg.APIKey)
+	m.tools = tools
+	m.toolCatalogText, err = renderToolCatalog(ctx, tools)
 	if err != nil {
 		return tutorModel{}, err
 	}
-	m.workerAgent, err = newAgent(ctx, workerCM, tools)
+
+	m.workerCM, err = newChatModel(ctx, cfg.Model, cfg.OllamaHost, cfg.APIKey)
+	if err != nil {
+		return tutorModel{}, err
+	}
+	m.workerAgent, err = newAgent(ctx, m.workerCM, tools)
 	if err != nil {
 		return tutorModel{}, err
 	}
@@ -169,7 +193,39 @@ func newTutorModel(ctx context.Context, cfg Config) (tutorModel, error) {
 		m.banner = fmt.Sprintf("tutor (%s, mode=%s) — connected to %s. Ctrl-D to exit.", cfg.Model, cfg.Mode, m.workerEndpoint)
 	}
 
-	m.history = []*schema.Message{schema.SystemMessage(systemPromptForMode(cfg.Mode))}
+	// Detect each configured role's tool-calling strategy concurrently --
+	// halves the worst-case added session-startup latency versus running
+	// them sequentially (newTutorModel previously made zero network
+	// calls before Run()'s tea.NewProgram even started; this adds up to
+	// two). Written into separate local vars, not directly into m's
+	// fields, so there's no question of concurrent access to the same
+	// struct value across goroutines -- only the single-threaded code
+	// after wg.Wait() ever touches m.
+	var workerStrategy, orchestratorStrategy toolCallingStrategy
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		workerStrategy = detectStrategy(ctx, cfg.OllamaHost, cfg.Model, cfg.APIKey)
+	}()
+	if m.routingEnabled {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			orchestratorStrategy = detectStrategy(ctx, cfg.OllamaHost, cfg.OrchestratorModel, cfg.APIKey)
+		}()
+	}
+	wg.Wait()
+	m.workerStrategy = workerStrategy
+	m.orchestratorStrategy = orchestratorStrategy
+
+	// Seeded with persona text only, not systemPromptForMode's combined
+	// persona+native-tools string: the tools instruction is strategy-
+	// dependent and (once routing is enabled) can differ turn to turn
+	// depending on which role answers, so it's prepended fresh per call
+	// by startTurn (via prependToolsPrompt) instead of being baked once
+	// into the session's fixed history.
+	m.history = []*schema.Message{schema.SystemMessage(personaPromptForMode(cfg.Mode))}
 	m.comprehensionCheckPending = wantsComprehensionCheck(cfg.Mode)
 	m.displayLines = []string{m.banner}
 	m.refreshViewport()
@@ -563,12 +619,12 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 		activityOpt := buildActivityChannelOption(feed, activityCh)
 
 		if checkComprehension {
-			checkAgent := m.workerAgent
+			checkAgent, checkCM, checkStrategy := m.workerAgent, m.workerCM, m.workerStrategy
 			if m.routingEnabled {
-				checkAgent = m.orchestratorAgent
+				checkAgent, checkCM, checkStrategy = m.orchestratorAgent, m.orchestratorCM, m.orchestratorStrategy
 			}
-			checkMessages := comprehensionCheckMessages(m.history, m.cfg.WorkDir, line)
-			reply, err := generateWithLeakRetry(m.ctx, checkAgent, checkMessages, activityOpt)
+			checkMessages := prependToolsPrompt(checkStrategy, m.toolCatalogText, comprehensionCheckMessages(m.history, m.cfg.WorkDir, line))
+			reply, err := callRole(m.ctx, checkStrategy, checkAgent, checkCM, m.tools, checkMessages, feed, activityCh, activityOpt)
 			if err == nil {
 				// helpRequestCount stays at its pre-turn snapshot -- a
 				// successful comprehension check never counts as a
@@ -581,7 +637,7 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 			// silently dropping it, exactly like the old Run() loop.
 		}
 
-		turnAgent, turnEndpoint := m.workerAgent, m.workerEndpoint
+		turnAgent, turnCM, turnStrategy, turnEndpoint := m.workerAgent, m.workerCM, m.workerStrategy, m.workerEndpoint
 		routingWarning := ""
 		if m.routingEnabled {
 			handoff, err := decideHandoff(m.ctx, m.orchestratorCM, line)
@@ -595,7 +651,7 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 				routingWarning = fmt.Sprintf("routing decision failed, defaulting to handoff: %v", err)
 			}
 			if !handoff {
-				turnAgent, turnEndpoint = m.orchestratorAgent, m.orchestratorEndpoint
+				turnAgent, turnCM, turnStrategy, turnEndpoint = m.orchestratorAgent, m.orchestratorCM, m.orchestratorStrategy, m.orchestratorEndpoint
 			}
 		}
 
@@ -604,8 +660,8 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 		// own placement of helpRequestCount++ (unconditional, right
 		// before this same call).
 		newHelpRequestCount := m.helpRequestCount + 1
-		requestMessages := append(append([]*schema.Message{}, m.history...), turnMessages(m.cfg.Mode, newHelpRequestCount, line)...)
-		reply, err := generateWithLeakRetry(m.ctx, turnAgent, requestMessages, activityOpt)
+		requestMessages := prependToolsPrompt(turnStrategy, m.toolCatalogText, append(append([]*schema.Message{}, m.history...), turnMessages(m.cfg.Mode, newHelpRequestCount, line)...))
+		reply, err := callRole(m.ctx, turnStrategy, turnAgent, turnCM, m.tools, requestMessages, feed, activityCh, activityOpt)
 		if err != nil {
 			doneCh <- turnCompleteMsg{err: err, endpoint: turnEndpoint, userMessage: line, helpRequestCount: newHelpRequestCount, routingWarning: routingWarning}
 			return
@@ -624,18 +680,6 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 // terminal, which is how this package's now-deleted hand-rolled ANSI box
 // (internal/tutor/scrollbox.go) rendered them.
 func buildActivityChannelOption(feed *activityFeed, activityCh chan<- []activityCall) agentopt.AgentOption {
-	push := func() {
-		select {
-		case activityCh <- feed.currentCalls():
-		default:
-			// Buffer's full (a pathological number of rapid-fire events,
-			// never seen in practice given activityToolLines caps the
-			// feed at 4 calls) -- drop rather than block eino's own
-			// callback goroutine. currentCalls() is always the FULL
-			// current state, not a delta, so the next successful push
-			// still catches the UI up correctly.
-		}
-	}
 	toolHandler := &template.ToolCallbackHandler{
 		OnStart: func(ctx context.Context, info *callbacks.RunInfo, input *tool.CallbackInput) context.Context {
 			argsPreview := ""
@@ -643,7 +687,7 @@ func buildActivityChannelOption(feed *activityFeed, activityCh chan<- []activity
 				argsPreview = truncateLine(input.ArgumentsInJSON, activityArgsPreviewMax)
 			}
 			feed.started(compose.GetToolCallID(ctx), info.Name, argsPreview)
-			push()
+			pushActivity(feed, activityCh)
 			return ctx
 		},
 		OnEnd: func(ctx context.Context, info *callbacks.RunInfo, output *tool.CallbackOutput) context.Context {
@@ -652,12 +696,12 @@ func buildActivityChannelOption(feed *activityFeed, activityCh chan<- []activity
 				resultPreview = truncateLine(output.Response, activityResultPreviewMax)
 			}
 			feed.finished(compose.GetToolCallID(ctx), resultPreview)
-			push()
+			pushActivity(feed, activityCh)
 			return ctx
 		},
 		OnError: func(ctx context.Context, info *callbacks.RunInfo, err error) context.Context {
 			feed.failed(compose.GetToolCallID(ctx), truncateLine(err.Error(), activityResultPreviewMax))
-			push()
+			pushActivity(feed, activityCh)
 			return ctx
 		},
 	}
