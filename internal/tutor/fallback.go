@@ -1,10 +1,15 @@
 package tutor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
 )
 
 // fallbackToolCall is one parsed tool-call attempt from a
@@ -152,4 +157,176 @@ func extractFirstJSONObject(s string) (json.RawMessage, bool) {
 		}
 	}
 	return nil, false
+}
+
+// fallbackRoundCap mirrors reactMaxStep (agent.go): react.Agent's
+// MaxStep=30 gives ~14 tool rounds + 1 final call = 15 model calls (each
+// round = model call + tool exec = 2 steps). fallbackRoundCap counts
+// model calls directly, so 15 gives the fallback path the same real
+// budget, not just a superficially similar-looking number.
+const fallbackRoundCap = 15
+
+// fallbackLoopExhaustedReply is shown when the model never settles on a
+// final answer within fallbackRoundCap rounds -- the raw last tool-call
+// JSON (or whatever it was mid-attempt) must never reach the user,
+// matching generateWithLeakRetry's own fallback-reply guarantee.
+const fallbackLoopExhaustedReply = "Sorry, I wasn't able to work through that just now -- could you try asking again?"
+
+// findTool returns the tool named name from tools if it's both present
+// and invokable, or nil otherwise. Every tool buildTools returns is
+// InvokableTool (confirmed: utils.WrapToolWithErrorHandler's wrapper
+// still implements it for an Invokable-only input), so a nil return in
+// practice only ever means "no tool with that name exists".
+func findTool(ctx context.Context, tools []tool.BaseTool, name string) tool.InvokableTool {
+	for _, t := range tools {
+		info, err := t.Info(ctx)
+		if err != nil || info == nil || info.Name != name {
+			continue
+		}
+		if it, ok := t.(tool.InvokableTool); ok {
+			return it
+		}
+	}
+	return nil
+}
+
+// safeInvokeTool wraps t.InvokableRun with its own recover(). eino's
+// compose graph runner recovers tool panics internally
+// (compose/tool_node.go, compose/graph_manager.go) -- calling
+// InvokableRun by hand here bypasses that safety net entirely, and an
+// unrecovered panic in startTurn's goroutine would crash the whole
+// process, not just the turn.
+func safeInvokeTool(ctx context.Context, t tool.InvokableTool, argsJSON string) (result string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("tutor: tool panicked: %v", r)
+		}
+	}()
+	return t.InvokableRun(ctx, argsJSON)
+}
+
+// pushActivity publishes feed's current state onto activityCh without
+// blocking -- same non-blocking-send-or-drop semantics as
+// buildActivityChannelOption's own push closure (model.go), extracted
+// here so runFallbackToolLoop uses identical behavior instead of a
+// second copy of the same select/default.
+func pushActivity(feed *activityFeed, activityCh chan<- []activityCall) {
+	select {
+	case activityCh <- feed.currentCalls():
+	default:
+	}
+}
+
+// renderToolCatalog renders each tool's name/description/JSON schema as
+// text, teaching a jsonFallbackToolCalling model what tools exist and
+// how to call them -- computed once per session (newTutorModel), not
+// per call, since buildTools(cfg)'s output is identical for both roles
+// and doesn't change turn to turn.
+func renderToolCatalog(ctx context.Context, tools []tool.BaseTool) (string, error) {
+	var b strings.Builder
+	b.WriteString("Available tools:\n")
+	for _, t := range tools {
+		info, err := t.Info(ctx)
+		if err != nil {
+			return "", fmt.Errorf("tutor: render tool catalog: %w", err)
+		}
+		fmt.Fprintf(&b, "\n- %s: %s\n", info.Name, info.Desc)
+
+		params, err := info.ParamsOneOf.ToJSONSchema()
+		if err != nil {
+			return "", fmt.Errorf("tutor: render tool catalog: %s: %w", info.Name, err)
+		}
+		if params == nil {
+			b.WriteString("  Takes no arguments.\n")
+			continue
+		}
+		paramsJSON, err := json.Marshal(params)
+		if err != nil {
+			return "", fmt.Errorf("tutor: render tool catalog: %s: marshal schema: %w", info.Name, err)
+		}
+		fmt.Fprintf(&b, "  Arguments JSON schema: %s\n", paramsJSON)
+	}
+	return b.String(), nil
+}
+
+// runFallbackToolLoop is generateWithLeakRetry's counterpart (tutor.go)
+// for a role whose model CheckToolCalling found doesn't populate real
+// tool_calls. Calls cm.Generate directly (bare -- no WithTools; the
+// model only ever learns about tools from the text prompt the caller
+// already prepended via prependToolsPrompt/renderToolCatalog), parses
+// each reply, and either executes the named tool and loops with the
+// result appended as an ephemeral schema.SystemMessage("Tool result:
+// ...") -- not schema.RoleType("tool"), which requires a real
+// ToolCallID an OpenAI-compatible backend validates against a preceding
+// tool_calls entry that doesn't exist here -- or returns the first
+// reply that doesn't parse as a call attempt at all as the final
+// answer. Never returns raw tool-call JSON to the caller, matching
+// generateWithLeakRetry's own guarantee.
+//
+// Guards identical-consecutive-call looping (comparing only against the
+// immediately preceding round, not full history -- re-checking the same
+// file after a few other calls in between is a legitimate pattern, not
+// a bug) since react.Agent has no such guard of its own (confirmed via
+// its source: MaxStep is its only bound).
+func runFallbackToolLoop(ctx context.Context, cm model.ToolCallingChatModel, tools []tool.BaseTool, messages []*schema.Message, feed *activityFeed, activityCh chan<- []activityCall) (*schema.Message, error) {
+	convo := append([]*schema.Message{}, messages...)
+
+	var lastCall fallbackToolCall
+	haveLastCall := false
+
+	for round := 0; round < fallbackRoundCap; round++ {
+		reply, err := cm.Generate(ctx, convo)
+		if err != nil {
+			return nil, err
+		}
+
+		call, matched, parseErr := parseFallbackToolCall(reply.Content)
+		if !matched {
+			return reply, nil
+		}
+		if parseErr != nil {
+			convo = append(convo, schema.AssistantMessage(reply.Content, nil), schema.SystemMessage(
+				fmt.Sprintf("Your last reply looked like a tool call but wasn't valid: %v. Reply again with ONLY a valid JSON object of the shape {\"name\": \"...\", \"arguments\": {...}}, or with your real answer if you don't need a tool.", parseErr),
+			))
+			continue
+		}
+
+		if haveLastCall && call.Name == lastCall.Name && string(call.Arguments) == string(lastCall.Arguments) {
+			convo = append(convo, schema.AssistantMessage(reply.Content, nil), schema.SystemMessage(
+				fmt.Sprintf("You already called %s with those exact arguments -- you have that result already. Use it, call a different tool, or give your real answer now.", call.Name),
+			))
+			continue
+		}
+
+		t := findTool(ctx, tools, call.Name)
+		if t == nil {
+			// Not recorded as lastCall: nothing was actually invoked, so
+			// a repeat of this exact (unfound) call shouldn't be told
+			// "you already have that result" -- it should just be told
+			// again that the tool doesn't exist.
+			convo = append(convo, schema.AssistantMessage(reply.Content, nil), schema.SystemMessage(
+				fmt.Sprintf("There is no tool named %q. Check the tool catalog and try again, or give your real answer if you don't need a tool.", call.Name),
+			))
+			continue
+		}
+		lastCall, haveLastCall = call, true
+
+		callID := fmt.Sprintf("fallback-%d", round)
+		feed.started(callID, call.Name, truncateLine(string(call.Arguments), activityArgsPreviewMax))
+		pushActivity(feed, activityCh)
+
+		result, err := safeInvokeTool(ctx, t, string(call.Arguments))
+		if err != nil {
+			feed.failed(callID, truncateLine(err.Error(), activityResultPreviewMax))
+			pushActivity(feed, activityCh)
+			convo = append(convo, schema.AssistantMessage(reply.Content, nil), schema.SystemMessage(fmt.Sprintf("Tool error: %v", err)))
+			continue
+		}
+
+		feed.finished(callID, truncateLine(result, activityResultPreviewMax))
+		pushActivity(feed, activityCh)
+		convo = append(convo, schema.AssistantMessage(reply.Content, nil), schema.SystemMessage("Tool result: "+result))
+	}
+
+	return schema.AssistantMessage(fallbackLoopExhaustedReply, nil), nil
 }
