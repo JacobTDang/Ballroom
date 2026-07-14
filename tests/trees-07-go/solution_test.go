@@ -59,6 +59,8 @@ func TestLowestCommonAncestor(t *testing.T) {
 		{2, 4, 2},
 		{0, 5, 2},
 		{7, 9, 8},
+		{6, 6, 6},
+		{0, 3, 2},
 	}
 
 	for _, c := range cases {

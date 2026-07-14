@@ -78,6 +78,8 @@ func TestInvertTree(t *testing.T) {
 			[]*int{ip(2), ip(3), ip(1)},
 		},
 		{[]*int{}, []*int{}},
+		{[]*int{ip(1)}, []*int{ip(1)}},
+		{[]*int{ip(1), ip(2), nil}, []*int{ip(1), nil, ip(2)}},
 	}
 
 	for _, c := range cases {

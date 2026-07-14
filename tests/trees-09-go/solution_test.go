@@ -44,6 +44,8 @@ func TestRightSideView(t *testing.T) {
 		{[]*int{ip(1), nil, ip(3)}, []int{1, 3}},
 		{[]*int{}, nil},
 		{[]*int{ip(1), ip(2), ip(3), ip(4)}, []int{1, 3, 4}},
+		{[]*int{ip(1), ip(2), ip(3), ip(4), ip(5), ip(6), ip(7)}, []int{1, 3, 7}},
+		{[]*int{ip(1), ip(2), nil, ip(3)}, []int{1, 2, 3}},
 	}
 
 	for _, c := range cases {

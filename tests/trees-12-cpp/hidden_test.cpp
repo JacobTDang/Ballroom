@@ -47,6 +47,8 @@ int main() {
     assert(KthSmallest(buildTree({3, 1, 4, std::nullopt, 2}), 2) == 2);
     assert(KthSmallest(buildTree({3, 1, 4, std::nullopt, 2}), 4) == 4);
     assert(KthSmallest(buildTree({5, 3, 6, 2, 4, std::nullopt, std::nullopt, 1}), 3) == 3);
+    assert(KthSmallest(buildTree({5, 3, 6, 2, 4, std::nullopt, std::nullopt, 1}), 5) == 5);
+    assert(KthSmallest(buildTree({1}), 1) == 1);
     printf("all assertions passed\n");
     return 0;
 }

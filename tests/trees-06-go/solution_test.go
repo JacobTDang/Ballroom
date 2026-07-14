@@ -45,6 +45,8 @@ func TestIsSubtree(t *testing.T) {
 		},
 		{[]*int{ip(1), ip(1)}, []*int{ip(1)}, true},
 		{[]*int{ip(1)}, []*int{ip(1)}, true},
+		{[]*int{ip(3), ip(4), ip(5)}, []*int{ip(3), ip(4), ip(5)}, true},
+		{[]*int{ip(3), ip(4), ip(5)}, []*int{ip(6)}, false},
 	}
 
 	for _, c := range cases {

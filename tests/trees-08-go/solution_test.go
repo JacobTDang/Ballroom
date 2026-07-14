@@ -46,6 +46,8 @@ func TestLevelOrder(t *testing.T) {
 		},
 		{[]*int{ip(1)}, [][]int{{1}}},
 		{[]*int{}, nil},
+		{[]*int{ip(1), ip(2), ip(3), ip(4), ip(5), ip(6), ip(7)}, [][]int{{1}, {2, 3}, {4, 5, 6, 7}}},
+		{[]*int{ip(1), ip(2)}, [][]int{{1}, {2}}},
 	}
 
 	for _, c := range cases {

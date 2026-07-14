@@ -46,5 +46,11 @@ def test_lowest_common_ancestor():
     root = build_tree(TREE)
     assert lowest_common_ancestor(root, find_node(root, 7), find_node(root, 9)).val == 8
 
+    root = build_tree(TREE)
+    assert lowest_common_ancestor(root, find_node(root, 6), find_node(root, 6)).val == 6
+
+    root = build_tree(TREE)
+    assert lowest_common_ancestor(root, find_node(root, 0), find_node(root, 3)).val == 2
+
     root = build_tree([2, 1])
     assert lowest_common_ancestor(root, find_node(root, 2), find_node(root, 1)).val == 2

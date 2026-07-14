@@ -42,6 +42,8 @@ func TestIsValidBST(t *testing.T) {
 		{[]*int{ip(1)}, true},
 		{[]*int{ip(2), ip(2), ip(2)}, false},
 		{[]*int{ip(10), ip(5), ip(15), nil, nil, ip(6), ip(20)}, false},
+		{[]*int{ip(4), ip(2), ip(6), ip(1), ip(3), ip(5), ip(7)}, true},
+		{[]*int{ip(2147483647)}, true},
 	}
 
 	for _, c := range cases {

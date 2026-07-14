@@ -48,6 +48,8 @@ int main() {
     assert(IsValidBST(buildTree({1})) == true);
     assert(IsValidBST(buildTree({2, 2, 2})) == false);
     assert(IsValidBST(buildTree({10, 5, 15, std::nullopt, std::nullopt, 6, 20})) == false);
+    assert(IsValidBST(buildTree({4, 2, 6, 1, 3, 5, 7})) == true);
+    assert(IsValidBST(buildTree({2147483647})) == true);
     printf("all assertions passed\n");
     return 0;
 }

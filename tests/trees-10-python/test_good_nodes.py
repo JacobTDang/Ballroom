@@ -26,3 +26,5 @@ def test_good_nodes():
     assert good_nodes(build_tree([3, 1, 4, 3, None, 1, 5])) == 4
     assert good_nodes(build_tree([3, 3, None, 4, 2])) == 3
     assert good_nodes(build_tree([1])) == 1
+    assert good_nodes(build_tree([1, 2, None, 3])) == 3
+    assert good_nodes(build_tree([5, 3, 3])) == 1

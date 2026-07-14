@@ -26,3 +26,5 @@ def test_level_order():
     assert level_order(build_tree([3, 9, 20, None, None, 15, 7])) == [[3], [9, 20], [15, 7]]
     assert level_order(build_tree([1])) == [[1]]
     assert level_order(build_tree([])) == []
+    assert level_order(build_tree([1, 2, 3, 4, 5, 6, 7])) == [[1], [2, 3], [4, 5, 6, 7]]
+    assert level_order(build_tree([1, 2])) == [[1], [2]]

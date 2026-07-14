@@ -41,6 +41,8 @@ func TestDiameterOfBinaryTree(t *testing.T) {
 		{[]*int{ip(1), ip(2)}, 1},
 		{[]*int{ip(1)}, 0},
 		{[]*int{ip(1), ip(2), ip(3)}, 2},
+		{[]*int{ip(1), ip(2), ip(3), ip(4), ip(5), ip(6), ip(7)}, 4},
+		{[]*int{ip(0)}, 0},
 	}
 
 	for _, c := range cases {

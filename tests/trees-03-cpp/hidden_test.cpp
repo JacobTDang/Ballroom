@@ -47,6 +47,8 @@ int main() {
     assert(DiameterOfBinaryTree(buildTree({1, 2})) == 1);
     assert(DiameterOfBinaryTree(buildTree({1})) == 0);
     assert(DiameterOfBinaryTree(buildTree({1, 2, 3})) == 2);
+    assert(DiameterOfBinaryTree(buildTree({1, 2, 3, 4, 5, 6, 7})) == 4);
+    assert(DiameterOfBinaryTree(buildTree({0})) == 0);
     printf("all assertions passed\n");
     return 0;
 }

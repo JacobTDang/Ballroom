@@ -47,6 +47,9 @@ int main() {
     assert(IsBalanced(buildTree({1, 2, 2, 3, 3, std::nullopt, std::nullopt, 4, 4})) == false);
     assert(IsBalanced(buildTree({})) == true);
     assert(IsBalanced(buildTree({1})) == true);
+    assert(IsBalanced(buildTree({1, 2, 3, 4, 5, 6, 7})) == true);
+    assert(IsBalanced(buildTree({1, 2, 3, 4, std::nullopt, std::nullopt, std::nullopt, 5})) ==
+           false);
     printf("all assertions passed\n");
     return 0;
 }

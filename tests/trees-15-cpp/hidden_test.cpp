@@ -75,6 +75,8 @@ int main() {
     check({1});
     check({-1, -2, -3});
     check({5, 4, 7, 3, std::nullopt, 2, std::nullopt, -1, std::nullopt, 9});
+    check({0});
+    check({100, std::nullopt, 200, std::nullopt, std::nullopt, std::nullopt, 300});
     printf("all assertions passed\n");
     return 0;
 }

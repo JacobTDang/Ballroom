@@ -33,3 +33,5 @@ def test_is_subtree():
     )
     assert is_subtree(build_tree([1, 1]), build_tree([1])) is True
     assert is_subtree(build_tree([1]), build_tree([1])) is True
+    assert is_subtree(build_tree([3, 4, 5]), build_tree([3, 4, 5])) is True
+    assert is_subtree(build_tree([3, 4, 5]), build_tree([6])) is False

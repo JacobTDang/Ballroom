@@ -42,6 +42,8 @@ func TestIsSameTree(t *testing.T) {
 		{[]*int{ip(1), ip(2), ip(1)}, []*int{ip(1), ip(1), ip(2)}, false},
 		{[]*int{}, []*int{}, true},
 		{[]*int{ip(1)}, []*int{}, false},
+		{[]*int{ip(-5)}, []*int{ip(-5)}, true},
+		{[]*int{ip(1)}, []*int{ip(2)}, false},
 	}
 
 	for _, c := range cases {

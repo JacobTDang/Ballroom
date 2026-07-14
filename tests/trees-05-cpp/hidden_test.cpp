@@ -48,6 +48,8 @@ int main() {
     assert(IsSameTree(buildTree({1, 2, 1}), buildTree({1, 1, 2})) == false);
     assert(IsSameTree(buildTree({}), buildTree({})) == true);
     assert(IsSameTree(buildTree({1}), buildTree({})) == false);
+    assert(IsSameTree(buildTree({-5}), buildTree({-5})) == true);
+    assert(IsSameTree(buildTree({1}), buildTree({2})) == false);
     printf("all assertions passed\n");
     return 0;
 }

@@ -27,3 +27,5 @@ def test_max_depth():
     assert max_depth(build_tree([1, None, 2])) == 2
     assert max_depth(build_tree([])) == 0
     assert max_depth(build_tree([1])) == 1
+    assert max_depth(build_tree([1, 2, None, 3])) == 3
+    assert max_depth(build_tree([1, 2, 3, 4, 5, 6, 7])) == 3
