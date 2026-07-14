@@ -1,0 +1,11 @@
+{
+  "id": "math-geometry-04-go",
+  "problem_id": "math-geometry-04",
+  "title": "Happy Number",
+  "category": "math-geometry",
+  "language": "go",
+  "time_limit_min": 15,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}

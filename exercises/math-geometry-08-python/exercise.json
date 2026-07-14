@@ -1,0 +1,11 @@
+{
+  "id": "math-geometry-08-python",
+  "problem_id": "math-geometry-08",
+  "title": "Detect Squares",
+  "category": "math-geometry",
+  "language": "python",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "math-geometry-05-python",
+  "problem_id": "math-geometry-05",
+  "title": "Plus One",
+  "category": "math-geometry",
+  "language": "python",
+  "time_limit_min": 15,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}
