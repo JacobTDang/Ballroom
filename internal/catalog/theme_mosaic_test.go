@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestMosaicBanner_DifferentPhasesProduceDifferentColorOutput(t *testing.T) {
-	a := MosaicBanner(0)
-	b := MosaicBanner(1)
+func TestMosaicBannerScaled_DifferentPhasesProduceDifferentColorOutput(t *testing.T) {
+	a := MosaicBannerScaled(0, 2)
+	b := MosaicBannerScaled(1, 2)
 	if a == b {
 		t.Error("expected different phases to change the rendered output (animation would be a no-op otherwise)")
 	}
@@ -17,8 +17,8 @@ func TestMosaicBanner_DifferentPhasesProduceDifferentColorOutput(t *testing.T) {
 	}
 }
 
-func TestMosaicBanner_ContainsArtAndTagline(t *testing.T) {
-	out := stripAnsi(MosaicBanner(0))
+func TestMosaicBannerScaled_ContainsArtAndTagline(t *testing.T) {
+	out := stripAnsi(MosaicBannerScaled(0, 2))
 	if !strings.Contains(out, "I N T E R V I E W") {
 		t.Errorf("mosaic banner missing tagline:\n%s", out)
 	}

@@ -53,20 +53,6 @@ func TestCheckDocker_ReportsStructuredResult(t *testing.T) {
 	}
 }
 
-func TestCheckImage_UnknownImageReportsNotOK(t *testing.T) {
-	c := CheckImage("this-image-definitely-does-not-exist-12345")
-	if c.OK {
-		t.Error("expected OK=false for a nonexistent image")
-	}
-	if c.Detail == "" {
-		t.Error("expected a non-empty detail message explaining how to fix it")
-	}
-	want := `docker image inspect this-image-definitely-does-not-exist-12345 --format "{{.Id}}"`
-	if c.Command != want {
-		t.Errorf("Command = %q, want %q", c.Command, want)
-	}
-}
-
 func TestCheckOllama_UnreachableHostReportsNotOK(t *testing.T) {
 	c := CheckOllama("http://127.0.0.1:1")
 	if c.OK {

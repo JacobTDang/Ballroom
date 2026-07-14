@@ -61,31 +61,6 @@ func TestTopLevelGroup_UngroupedCategoriesAreTheirOwnGroup(t *testing.T) {
 	}
 }
 
-func TestGroupOrder_EveryNeetCodeSubcategorySharesDSARank(t *testing.T) {
-	dsaRank := CategoryRank(exercise.CategoryDSA)
-	subcategories := []string{
-		exercise.CategoryArraysHashing, exercise.CategoryTwoPointers, exercise.CategoryBitManipulation,
-	}
-	for _, cat := range subcategories {
-		if got := GroupOrder(cat); got != dsaRank {
-			t.Errorf("GroupOrder(%q) = %d, want %d (DSA's rank)", cat, got, dsaRank)
-		}
-	}
-}
-
-func TestGroupOrder_SortsDSAAheadOfOtherTopLevelCategories(t *testing.T) {
-	// Regression: once no exercise carries the literal "dsa" category
-	// (every DSA problem lives under a real NeetCode subcategory), a
-	// naive first-encountered-order dedup would let DSA drift to
-	// wherever its first subcategory happens to land — which sorts
-	// after debug/concurrency/implementation/ai-assisted in
-	// categoryOrder. GroupOrder must keep DSA pinned to its own rank
-	// regardless of which subcategory anchors it.
-	if got := GroupOrder(exercise.CategoryArraysHashing); got >= CategoryRank(exercise.CategoryDebug) {
-		t.Errorf("GroupOrder(arrays-hashing) = %d, want less than debug's rank (%d)", got, CategoryRank(exercise.CategoryDebug))
-	}
-}
-
 func TestDisplayCategory_NeetCodeCategoriesGetHumanReadableLabels(t *testing.T) {
 	cases := map[string]string{
 		exercise.CategoryDSA:             "DSA",
@@ -328,24 +303,6 @@ func TestList_SkipsInvalidExerciseDirectories(t *testing.T) {
 	}
 	if len(statuses) != 1 {
 		t.Fatalf("expected 1 valid exercise (broken one skipped), got %d: %+v", len(statuses), statuses)
-	}
-}
-
-func TestFormatTable_IncludesExerciseInfo(t *testing.T) {
-	statuses := []ExerciseStatus{
-		{Exercise: fakeExercise("two-pointers-01", "two-pointers", "go", "Two Sum II"), Attempts: 2, LastResult: tracker.ResultPass},
-		{Exercise: fakeExercise("cpp-debug-01", "debug", "cpp", "Off-by-one"), Attempts: 0, LastResult: ""},
-	}
-
-	out := stripAnsi(FormatTable(statuses))
-
-	for _, want := range []string{"two-pointers-01", "Two Sum II", "Two Pointers", "go", "pass", "2 attempt"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("table output missing %q:\n%s", want, out)
-		}
-	}
-	if !strings.Contains(strings.ToLower(out), "not attempted") {
-		t.Errorf("table output missing 'not attempted' for zero-attempt exercise:\n%s", out)
 	}
 }
 

@@ -48,22 +48,6 @@ func CheckDocker() Check {
 	return Check{Name: CheckNameDocker, OK: true, Detail: "running", Command: cmd, Output: string(out)}
 }
 
-// CheckImage reports whether the given Docker image has been built.
-func CheckImage(image string) Check {
-	cmd := fmt.Sprintf(`docker image inspect %s --format "{{.Id}}"`, image)
-	out, err := exec.Command("docker", "image", "inspect", image, "--format", "{{.Id}}").CombinedOutput()
-	if err != nil || strings.TrimSpace(string(out)) == "" {
-		return Check{
-			Name:    CheckNameImage,
-			OK:      false,
-			Detail:  fmt.Sprintf("%q not built — docker build -f docker/Dockerfile -t %s .", image, image),
-			Command: cmd,
-			Output:  string(out),
-		}
-	}
-	return Check{Name: CheckNameImage, OK: true, Detail: "built", Command: cmd, Output: string(out)}
-}
-
 // CheckOllama reports whether the Ollama endpoint at host is reachable.
 func CheckOllama(host string) Check {
 	cmd := "GET " + host + "/api/tags"
