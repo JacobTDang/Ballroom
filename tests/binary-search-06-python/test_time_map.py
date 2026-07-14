@@ -20,3 +20,11 @@ def test_get_before_any_set_returns_empty():
 def test_unknown_key_returns_empty():
     m = TimeMap()
     assert m.get("missing", 1) == ""
+
+
+def test_multiple_keys_do_not_interfere():
+    m = TimeMap()
+    m.set("foo", "foo-val", 1)
+    m.set("bar", "bar-val", 2)
+    assert m.get("foo", 10) == "foo-val"
+    assert m.get("bar", 10) == "bar-val"

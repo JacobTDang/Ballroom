@@ -10,6 +10,8 @@ int main() {
     assert(FindMin({11, 13, 15, 17}) == 11);
     assert(FindMin({2, 1}) == 1);
     assert(FindMin({1}) == 1);
+    assert(FindMin({1, 2, 3, 4, 5}) == 1);
+    assert(FindMin({15, 18, 2, 3, 6, 12}) == 2);
     printf("all assertions passed\n");
     return 0;
 }

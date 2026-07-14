@@ -12,6 +12,8 @@ int main() {
     assert(SearchMatrix({{1, 3}}, 3) == true);
     assert(SearchMatrix(m, 60) == true);
     assert(SearchMatrix(m, 0) == false);
+    assert(SearchMatrix(m, 1) == true);
+    assert(SearchMatrix(m, 23) == true);
     printf("all assertions passed\n");
     return 0;
 }

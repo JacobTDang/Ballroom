@@ -22,6 +22,13 @@ int main() {
         TimeMap m;
         assert(m.get("missing", 1) == "");
     }
+    {
+        TimeMap m;
+        m.set("foo", "foo-val", 1);
+        m.set("bar", "bar-val", 2);
+        assert(m.get("foo", 10) == "foo-val");
+        assert(m.get("bar", 10) == "bar-val");
+    }
     printf("all assertions passed\n");
     return 0;
 }
