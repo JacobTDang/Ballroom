@@ -12,6 +12,9 @@ func TestMinWindow(t *testing.T) {
 		{"a", "aa", ""},
 		{"ab", "b", "b"},
 		{"bba", "ab", "ba"},
+		{"abc", "abc", "abc"},
+		{"aaflslflsldkalskaaa", "aaa", "aaa"},
+		{"cabwefgewcwaefgcf", "cae", "cwae"},
 	}
 
 	for _, c := range cases {

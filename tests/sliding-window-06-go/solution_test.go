@@ -17,6 +17,9 @@ func TestMaxSlidingWindow(t *testing.T) {
 		{[]int{9, 11}, 2, []int{11}},
 		{[]int{4, -2}, 2, []int{4}},
 		{[]int{1, 3, 1, 2, 0, 5}, 3, []int{3, 3, 2, 5}},
+		{[]int{7, 2, 4}, 2, []int{7, 4}},
+		{[]int{1, 2, 3, 4, 5}, 5, []int{5}},
+		{[]int{-7, -8, 7, 5, 7, 1, 6, 0}, 4, []int{7, 7, 7, 7, 7}},
 	}
 
 	for _, c := range cases {

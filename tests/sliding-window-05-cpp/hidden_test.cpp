@@ -10,6 +10,9 @@ int main() {
     assert(MinWindow("a", "aa") == "");
     assert(MinWindow("ab", "b") == "b");
     assert(MinWindow("bba", "ab") == "ba");
+    assert(MinWindow("abc", "abc") == "abc");
+    assert(MinWindow("aaflslflsldkalskaaa", "aaa") == "aaa");
+    assert(MinWindow("cabwefgewcwaefgcf", "cae") == "cwae");
     printf("all assertions passed\n");
     return 0;
 }
