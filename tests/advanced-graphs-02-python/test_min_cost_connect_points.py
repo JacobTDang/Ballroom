@@ -13,3 +13,11 @@ def test_three_points():
 
 def test_single_point():
     assert min_cost_connect_points([[0, 0]]) == 0
+
+
+def test_negative_coordinates():
+    assert min_cost_connect_points([[-1, -1], [1, 1]]) == 4
+
+
+def test_collinear():
+    assert min_cost_connect_points([[0, 0], [100, 100], [200, 200]]) == 400

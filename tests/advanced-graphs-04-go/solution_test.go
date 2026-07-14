@@ -28,3 +28,14 @@ func TestSwimInWater_SingleCell(t *testing.T) {
 		t.Errorf("SwimInWater(%v) = %d, want 0", grid, got)
 	}
 }
+
+func TestSwimInWater_SpiralBlocksDirectPath(t *testing.T) {
+	grid := [][]int{
+		{0, 1, 2},
+		{7, 8, 3},
+		{6, 5, 4},
+	}
+	if got := SwimInWater(grid); got != 4 {
+		t.Errorf("SwimInWater(%v) = %d, want 4", grid, got)
+	}
+}

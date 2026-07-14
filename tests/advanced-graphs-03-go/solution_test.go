@@ -22,3 +22,16 @@ func TestNetworkDelayTime_Unreachable(t *testing.T) {
 		t.Errorf("NetworkDelayTime(%v, 2, 2) = %d, want -1", times, got)
 	}
 }
+
+func TestNetworkDelayTime_ShortestOfMultiplePaths(t *testing.T) {
+	times := [][]int{{1, 2, 1}, {2, 3, 2}, {1, 3, 4}}
+	if got := NetworkDelayTime(times, 3, 1); got != 3 {
+		t.Errorf("NetworkDelayTime(%v, 3, 1) = %d, want 3", times, got)
+	}
+}
+
+func TestNetworkDelayTime_SingleNodeNoEdges(t *testing.T) {
+	if got := NetworkDelayTime(nil, 1, 1); got != 0 {
+		t.Errorf("NetworkDelayTime(nil, 1, 1) = %d, want 0", got)
+	}
+}

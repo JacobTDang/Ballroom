@@ -14,3 +14,13 @@ def test_simple():
 def test_lexical_tie_break():
     tickets = [["JFK", "KUL"], ["JFK", "NRT"], ["NRT", "JFK"]]
     assert find_itinerary(tickets) == ["JFK", "NRT", "JFK", "KUL"]
+
+
+def test_simple_two_cycle():
+    tickets = [["JFK", "A"], ["A", "JFK"]]
+    assert find_itinerary(tickets) == ["JFK", "A", "JFK"]
+
+
+def test_branching_at_origin():
+    tickets = [["JFK", "B"], ["JFK", "A"], ["B", "JFK"], ["A", "JFK"]]
+    assert find_itinerary(tickets) == ["JFK", "A", "JFK", "B", "JFK"]

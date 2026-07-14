@@ -22,3 +22,17 @@ func TestFindCheapestPrice_NoStopsAllowed(t *testing.T) {
 		t.Errorf("FindCheapestPrice(3, %v, 0, 2, 0) = %d, want 500", flights, got)
 	}
 }
+
+func TestFindCheapestPrice_UnreachableWithinStopLimit(t *testing.T) {
+	flights := [][]int{{0, 1, 100}, {1, 2, 100}}
+	if got := FindCheapestPrice(3, flights, 0, 2, 0); got != -1 {
+		t.Errorf("FindCheapestPrice(3, %v, 0, 2, 0) = %d, want -1", flights, got)
+	}
+}
+
+func TestFindCheapestPrice_GenuinelyUnreachable(t *testing.T) {
+	flights := [][]int{{0, 1, 100}}
+	if got := FindCheapestPrice(3, flights, 0, 2, 1); got != -1 {
+		t.Errorf("FindCheapestPrice(3, %v, 0, 2, 1) = %d, want -1", flights, got)
+	}
+}

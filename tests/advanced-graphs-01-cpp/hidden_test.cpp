@@ -29,10 +29,26 @@ void testLexicalTieBreak() {
     assert(FindItinerary(tickets) == want);
 }
 
+void testSimpleTwoCycle() {
+    std::vector<std::vector<std::string>> tickets = {{"JFK", "A"}, {"A", "JFK"}};
+    std::vector<std::string> want = {"JFK", "A", "JFK"};
+    assert(FindItinerary(tickets) == want);
+}
+
+void testBranchingAtOrigin() {
+    std::vector<std::vector<std::string>> tickets = {
+        {"JFK", "B"}, {"JFK", "A"}, {"B", "JFK"}, {"A", "JFK"}
+    };
+    std::vector<std::string> want = {"JFK", "A", "JFK", "B", "JFK"};
+    assert(FindItinerary(tickets) == want);
+}
+
 int main() {
     testDeadEnd();
     testSimple();
     testLexicalTieBreak();
+    testSimpleTwoCycle();
+    testBranchingAtOrigin();
     std::printf("all tests passed\n");
     return 0;
 }

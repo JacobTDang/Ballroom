@@ -22,3 +22,17 @@ func TestMinCostConnectPoints_SinglePoint(t *testing.T) {
 		t.Errorf("MinCostConnectPoints(%v) = %d, want 0", points, got)
 	}
 }
+
+func TestMinCostConnectPoints_NegativeCoordinates(t *testing.T) {
+	points := [][]int{{-1, -1}, {1, 1}}
+	if got := MinCostConnectPoints(points); got != 4 {
+		t.Errorf("MinCostConnectPoints(%v) = %d, want 4", points, got)
+	}
+}
+
+func TestMinCostConnectPoints_Collinear(t *testing.T) {
+	points := [][]int{{0, 0}, {100, 100}, {200, 200}}
+	if got := MinCostConnectPoints(points); got != 400 {
+		t.Errorf("MinCostConnectPoints(%v) = %d, want 400", points, got)
+	}
+}

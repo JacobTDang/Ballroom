@@ -19,10 +19,22 @@ void testNoStopsAllowed() {
     assert(FindCheapestPrice(3, flights, 0, 2, 0) == 500);
 }
 
+void testUnreachableWithinStopLimit() {
+    std::vector<std::vector<int>> flights = {{0, 1, 100}, {1, 2, 100}};
+    assert(FindCheapestPrice(3, flights, 0, 2, 0) == -1);
+}
+
+void testGenuinelyUnreachable() {
+    std::vector<std::vector<int>> flights = {{0, 1, 100}};
+    assert(FindCheapestPrice(3, flights, 0, 2, 1) == -1);
+}
+
 int main() {
     testOneStop();
     testCheaperViaStop();
     testNoStopsAllowed();
+    testUnreachableWithinStopLimit();
+    testGenuinelyUnreachable();
     std::printf("all tests passed\n");
     return 0;
 }
