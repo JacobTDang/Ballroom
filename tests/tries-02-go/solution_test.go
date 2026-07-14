@@ -38,3 +38,17 @@ func TestWordDictionary_EmptyDictionaryNeverMatches(t *testing.T) {
 		t.Error("Search('.') on empty dictionary should be false")
 	}
 }
+
+func TestWordDictionary_WrongLengthQueries(t *testing.T) {
+	d := NewWordDictionary()
+	d.AddWord("bad")
+	d.AddWord("dad")
+	d.AddWord("mad")
+
+	if d.Search(".") {
+		t.Error(`Search(".") = true, want false (no 1-letter word)`)
+	}
+	if !d.Search("ba.") {
+		t.Error(`Search("ba.") = false, want true`)
+	}
+}

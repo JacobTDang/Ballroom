@@ -23,6 +23,14 @@ int main() {
         assert(d.search("a") == false);
         assert(d.search(".") == false);
     }
+    {
+        WordDictionary d;
+        d.addWord("bad");
+        d.addWord("dad");
+        d.addWord("mad");
+        assert(d.search(".") == false);
+        assert(d.search("ba.") == true);
+    }
     printf("all assertions passed\n");
     return 0;
 }
