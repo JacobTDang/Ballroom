@@ -74,7 +74,7 @@ var categoryDisplayNames = map[string]string{
 
 // DisplayCategory maps a raw category id to how it's shown in the UI.
 // Exported so internal/tui can render category names the same way
-// FormatTable and FormatSummary do below.
+// FormatSummary does below.
 func DisplayCategory(category string) string {
 	if name, ok := categoryDisplayNames[category]; ok {
 		return name
@@ -137,20 +137,10 @@ func IsGroupedCategory(category string) bool {
 // CategoryRank returns category's position in the canonical taxonomy
 // order (categoryOrder) — exported so internal/tui can sort derived
 // category lists (the top-level practice picker, and DSA's subcategory
-// picker) consistently with FormatTable/FormatSummary without
-// duplicating the ordering itself.
+// picker) consistently with FormatSummary without duplicating the
+// ordering itself.
 func CategoryRank(category string) int {
 	return categoryOrder[category]
-}
-
-// GroupOrder returns the sort rank of the top-level practice-picker
-// group category belongs to. Every NeetCode subcategory shares DSA's
-// rank, so they always sort together as one block at DSA's position —
-// this keeps DSA pinned first in the top-level list even though no
-// exercise carries the literal "dsa" category anymore (they all live
-// under a specific subcategory like "two-pointers").
-func GroupOrder(category string) int {
-	return categoryOrder[TopLevelGroup(category)]
 }
 
 // ExerciseStatus is one exercise plus its practice history summary.
@@ -243,42 +233,6 @@ func lastResult(attempts []tracker.Attempt) string {
 	return attempts[len(attempts)-1].Result
 }
 
-// FormatTable renders a numbered table of exercises for the homepage.
-//
-// Fields are padded to their column width BEFORE being wrapped in ANSI
-// color codes — styling first would make the invisible escape-code bytes
-// count toward the padding width and break column alignment.
-func FormatTable(statuses []ExerciseStatus) string {
-	var b strings.Builder
-	header := fmt.Sprintf("  %-3s %-15s %-8s %-36s %s", "#", "Category", "Lang", "Title", "Status")
-	fmt.Fprintln(&b, styled(ansiBold+colorTeal, header))
-
-	for i, s := range statuses {
-		status := "not attempted"
-		statusColor := colorDim
-		if s.LastResult != "" {
-			plural := "s"
-			if s.Attempts == 1 {
-				plural = ""
-			}
-			status = fmt.Sprintf("%s (%d attempt%s)", s.LastResult, s.Attempts, plural)
-			statusColor = colorFail
-			if s.LastResult == tracker.ResultPass {
-				statusColor = colorPass
-			}
-		}
-
-		num := fmt.Sprintf("%-3d", i+1)
-		category := styled(colorBlue, fmt.Sprintf("%-15s", DisplayCategory(s.Exercise.Category)))
-		lang := styled(colorPurple, fmt.Sprintf("%-8s", s.Exercise.Language))
-		title := fmt.Sprintf("%-36s", truncate(s.Exercise.Title, 36))
-
-		fmt.Fprintf(&b, "  %s %s %s %s %s\n", num, category, lang, title, styled(statusColor, status))
-		fmt.Fprintf(&b, "      %s\n", styled(colorDim, s.Exercise.ID))
-	}
-	return b.String()
-}
-
 // FormatSummary renders a "solved/total" count per category, in
 // categoryOrder. Solved means the most recent attempt passed.
 func FormatSummary(statuses []ExerciseStatus) string {
@@ -310,26 +264,4 @@ func FormatSummary(statuses []ExerciseStatus) string {
 		parts[i] = fmt.Sprintf("%s: %s", styled(colorBlue, DisplayCategory(cat)), fraction)
 	}
 	return strings.Join(parts, styled(colorDim, " · "))
-}
-
-// FormatSandboxRow renders the sandbox menu option, styled consistently
-// with FormatTable's rows.
-func FormatSandboxRow(n int) string {
-	num := fmt.Sprintf("%-3d", n)
-	return fmt.Sprintf("  %s %s\n", num, styled(colorPink, "sandbox — free practice, no grading"))
-}
-
-// Prompt styles the input-prompt line shown at the bottom of the homepage.
-func Prompt(s string) string {
-	return styled(ansiBold+colorCream, s)
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	if n <= 3 {
-		return s[:n]
-	}
-	return s[:n-3] + "..."
 }
