@@ -20,6 +20,8 @@ int main() {
     check({2, 3, 6, 7}, 7, {{2, 2, 3}, {7}});
     check({2, 3, 5}, 8, {{2, 2, 2, 2}, {2, 3, 3}, {3, 5}});
     check({2}, 1, {});
+    check({3, 4, 5}, 8, {{3, 5}, {4, 4}});
+    check({2}, 4, {{2, 2}});
     printf("all assertions passed\n");
     return 0;
 }

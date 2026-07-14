@@ -38,6 +38,10 @@ func TestCombinationSum2(t *testing.T) {
 			[]int{2, 5, 2, 1, 2}, 5,
 			[][]int{{1, 2, 2}, {5}},
 		},
+		{
+			[]int{1, 1, 1, 2, 2}, 4,
+			[][]int{{1, 1, 2}, {2, 2}},
+		},
 	}
 
 	for _, c := range cases {

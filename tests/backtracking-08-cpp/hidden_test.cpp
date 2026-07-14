@@ -17,6 +17,9 @@ int main() {
     check("23", {"ad", "ae", "af", "bd", "be", "bf", "cd", "ce", "cf"});
     check("", {});
     check("2", {"a", "b", "c"});
+    check("9", {"w", "x", "y", "z"});
+    check("79", {"pw", "px", "py", "pz", "qw", "qx", "qy", "qz", "rw", "rx", "ry", "rz", "sw",
+                 "sx", "sy", "sz"});
     printf("all assertions passed\n");
     return 0;
 }

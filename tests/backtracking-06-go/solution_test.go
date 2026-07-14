@@ -40,3 +40,13 @@ func TestExist_SingleCell(t *testing.T) {
 		t.Error("Exist should be false when the word needs more cells than exist")
 	}
 }
+
+func TestExist_DiagonalNotAllowed(t *testing.T) {
+	board := [][]byte{[]byte("ab"), []byte("cd")}
+	if !Exist(board, "abdc") {
+		t.Error("Exist(board, \"abdc\") = false, want true")
+	}
+	if Exist(board, "abcd") {
+		t.Error("Exist(board, \"abcd\") = true, want false (b and c are diagonal, not adjacent)")
+	}
+}

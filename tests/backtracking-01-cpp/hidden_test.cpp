@@ -19,6 +19,8 @@ void check(std::vector<int> nums, std::vector<std::vector<int>> want) {
 int main() {
     check({1, 2, 3}, {{}, {1}, {2}, {1, 2}, {3}, {1, 3}, {2, 3}, {1, 2, 3}});
     check({0}, {{}, {0}});
+    check({1, 2}, {{}, {1}, {2}, {1, 2}});
+    check({-1, 1}, {{}, {-1}, {1}, {-1, 1}});
     printf("all assertions passed\n");
     return 0;
 }

@@ -11,3 +11,5 @@ def test_combination_sum():
         [[2, 2, 2, 2], [2, 3, 3], [3, 5]]
     )
     assert normalize(combination_sum([2], 1)) == []
+    assert normalize(combination_sum([3, 4, 5], 8)) == normalize([[3, 5], [4, 4]])
+    assert normalize(combination_sum([2], 4)) == normalize([[2, 2]])

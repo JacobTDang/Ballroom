@@ -20,6 +20,8 @@ int main() {
     check("aab", {{"a", "a", "b"}, {"aa", "b"}});
     check("a", {{"a"}});
     check("aba", {{"a", "b", "a"}, {"aba"}});
+    check("aa", {{"a", "a"}, {"aa"}});
+    check("abcba", {{"a", "b", "c", "b", "a"}, {"a", "bcb", "a"}, {"abcba"}});
     printf("all assertions passed\n");
     return 0;
 }

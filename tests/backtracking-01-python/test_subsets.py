@@ -10,3 +10,5 @@ def test_subsets():
         [[], [1], [2], [1, 2], [3], [1, 3], [2, 3], [1, 2, 3]]
     )
     assert normalize(subsets([0])) == normalize([[], [0]])
+    assert normalize(subsets([1, 2])) == normalize([[], [1], [2], [1, 2]])
+    assert normalize(subsets([-1, 1])) == normalize([[], [-1], [1], [-1, 1]])
