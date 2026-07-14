@@ -1,9 +1,11 @@
 package tutor
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/JacobTDang/Ballroom/internal/exercise"
+	"github.com/cloudwego/eino/schema"
 )
 
 func TestSystemPromptForMode_DiffersByMode(t *testing.T) {
@@ -50,6 +52,105 @@ func TestToolsInstructions_HasNativeEntry(t *testing.T) {
 	}
 	if got != toolsInstruction {
 		t.Errorf("toolsInstructions[nativeToolCalling] = %q, want it to match the toolsInstruction constant", got)
+	}
+}
+
+func TestToolsInstructions_HasJSONFallbackEntry(t *testing.T) {
+	got := toolsInstructions[jsonFallbackToolCalling]
+	if got == "" {
+		t.Fatal("toolsInstructions[jsonFallbackToolCalling] is empty")
+	}
+	if got == toolsInstructions[nativeToolCalling] {
+		t.Error("jsonFallbackToolCalling's instruction is identical to native's -- it needs fundamentally different protocol text, not a copy")
+	}
+}
+
+// TestPersonaPromptForMode_ExcludesToolsText locks in why
+// personaPromptForMode exists at all: newTutorModel seeds history with
+// this (not systemPromptForMode), because the tools instruction is
+// strategy-dependent and can change per role per turn once routing is
+// enabled, unlike the persona text which is fixed for the session. If
+// this ever accidentally included tools text again, a fallback-strategy
+// role would see native-style instructions baked permanently into
+// history with no way to override them per turn.
+func TestPersonaPromptForMode_ExcludesToolsText(t *testing.T) {
+	for _, mode := range []string{exercise.TutorModeSyntaxOnly, exercise.TutorModeHintsFirst, exercise.TutorModeFullAssist} {
+		got := personaPromptForMode(mode)
+		if got == "" {
+			t.Errorf("personaPromptForMode(%q) is empty", mode)
+		}
+		if strings.Contains(got, toolsInstruction) {
+			t.Errorf("personaPromptForMode(%q) contains the native toolsInstruction text, want persona-only", mode)
+		}
+		if strings.Contains(got, jsonFallbackInstruction) {
+			t.Errorf("personaPromptForMode(%q) contains jsonFallbackInstruction text, want persona-only", mode)
+		}
+	}
+}
+
+func TestPersonaPromptForMode_UnknownModeDefaultsToFullAssist(t *testing.T) {
+	got := personaPromptForMode("some-unrecognized-mode")
+	want := personaPromptForMode(exercise.TutorModeFullAssist)
+	if got != want {
+		t.Errorf("unknown mode persona = %q, want it to match full-assist's %q", got, want)
+	}
+}
+
+func TestSystemPromptForMode_EqualsPersonaPlusNativeToolsInstruction(t *testing.T) {
+	for _, mode := range []string{exercise.TutorModeSyntaxOnly, exercise.TutorModeHintsFirst, exercise.TutorModeFullAssist} {
+		got := systemPromptForMode(mode)
+		want := toolsInstructions[nativeToolCalling] + personaPromptForMode(mode)
+		if got != want {
+			t.Errorf("systemPromptForMode(%q) = %q, want %q", mode, got, want)
+		}
+	}
+}
+
+func TestPrependToolsPrompt_NativeStrategyOmitsToolCatalog(t *testing.T) {
+	msgs := []*schema.Message{schema.UserMessage("hello")}
+	got := prependToolsPrompt(nativeToolCalling, "CATALOG_MARKER", msgs)
+
+	if len(got) != 2 {
+		t.Fatalf("got %d messages, want 2 (prepended system message + original user message)", len(got))
+	}
+	if got[0].Role != schema.System {
+		t.Errorf("got[0].Role = %v, want schema.System", got[0].Role)
+	}
+	if got[0].Content != toolsInstructions[nativeToolCalling] {
+		t.Errorf("got[0].Content = %q, want exactly the native toolsInstructions entry", got[0].Content)
+	}
+	if strings.Contains(got[0].Content, "CATALOG_MARKER") {
+		t.Error("native strategy must not include the tool catalog text -- tool schemas are already bound via the real API, not described in prose")
+	}
+	if got[1] != msgs[0] {
+		t.Error("original message was not preserved as the second element")
+	}
+}
+
+func TestPrependToolsPrompt_JSONFallbackStrategyIncludesToolCatalog(t *testing.T) {
+	msgs := []*schema.Message{schema.UserMessage("hello")}
+	got := prependToolsPrompt(jsonFallbackToolCalling, "CATALOG_MARKER", msgs)
+
+	if len(got) != 2 {
+		t.Fatalf("got %d messages, want 2", len(got))
+	}
+	if !strings.Contains(got[0].Content, jsonFallbackInstruction) {
+		t.Error("expected the fallback protocol instruction text")
+	}
+	if !strings.Contains(got[0].Content, "CATALOG_MARKER") {
+		t.Error("expected the tool catalog text to be appended for the fallback strategy, since the model has no other way to learn tool schemas")
+	}
+}
+
+func TestPrependToolsPrompt_DoesNotMutateInputSlice(t *testing.T) {
+	original := []*schema.Message{schema.UserMessage("hello")}
+	_ = prependToolsPrompt(nativeToolCalling, "", original)
+
+	if len(original) != 1 {
+		t.Fatalf("caller's slice was mutated: len = %d, want 1", len(original))
+	}
+	if original[0].Role != schema.User {
+		t.Error("caller's slice was mutated")
 	}
 }
 
