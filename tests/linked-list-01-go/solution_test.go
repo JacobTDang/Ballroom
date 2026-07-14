@@ -32,6 +32,8 @@ func TestReverseList(t *testing.T) {
 		{[]int{1, 2}, []int{2, 1}},
 		{[]int{}, []int{}},
 		{[]int{7}, []int{7}},
+		{[]int{1, 1, 2, 2, 3}, []int{3, 2, 2, 1, 1}},
+		{[]int{-5, -3, 0, 3, 5}, []int{5, 3, 0, -3, -5}},
 	}
 
 	for _, c := range cases {

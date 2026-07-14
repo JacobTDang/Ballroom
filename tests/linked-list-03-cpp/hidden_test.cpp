@@ -41,6 +41,8 @@ int main() {
     check({1, 2, 3, 4, 5}, {1, 5, 2, 4, 3});
     check({1}, {1});
     check({1, 2}, {1, 2});
+    check({1, 2, 3, 4, 5, 6}, {1, 6, 2, 5, 3, 4});
+    check({10, 20, 30}, {10, 30, 20});
     printf("all assertions passed\n");
     return 0;
 }

@@ -27,6 +27,7 @@ int main() {
     assert(HasCycle(buildCycleList({1}, -1)) == false);
     assert(HasCycle(buildCycleList({}, -1)) == false);
     assert(HasCycle(buildCycleList({1, 2, 3}, -1)) == false);
+    assert(HasCycle(buildCycleList({1, 2, 3, 4, 5, 6}, 2)) == true);
     printf("all assertions passed\n");
     return 0;
 }

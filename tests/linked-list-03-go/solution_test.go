@@ -32,6 +32,8 @@ func TestReorderList(t *testing.T) {
 		{[]int{1, 2, 3, 4, 5}, []int{1, 5, 2, 4, 3}},
 		{[]int{1}, []int{1}},
 		{[]int{1, 2}, []int{1, 2}},
+		{[]int{1, 2, 3, 4, 5, 6}, []int{1, 6, 2, 5, 3, 4}},
+		{[]int{10, 20, 30}, []int{10, 30, 20}},
 	}
 
 	for _, c := range cases {

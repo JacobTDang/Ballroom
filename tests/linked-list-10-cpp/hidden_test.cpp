@@ -40,6 +40,10 @@ int main() {
     assert(toVector(ReverseKGroup(buildList({1, 2, 3, 4, 5, 6}), 6)) ==
            std::vector<int>({6, 5, 4, 3, 2, 1}));
     assert(toVector(ReverseKGroup(buildList({1}), 1)) == std::vector<int>({1}));
+    assert(toVector(ReverseKGroup(buildList({1, 2, 3, 4, 5}), 4)) ==
+           std::vector<int>({4, 3, 2, 1, 5}));
+    assert(toVector(ReverseKGroup(buildList({1, 2, 3, 4, 5, 6, 7, 8}), 2)) ==
+           std::vector<int>({2, 1, 4, 3, 6, 5, 8, 7}));
     printf("all assertions passed\n");
     return 0;
 }
