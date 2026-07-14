@@ -30,3 +30,13 @@ func TestKthLargest_EmptyInitialStream(t *testing.T) {
 		t.Errorf("Add(-2) = %d, want -2", got)
 	}
 }
+
+func TestKthLargest_KEqualsTwo(t *testing.T) {
+	kl := NewKthLargest(2, []int{0})
+	if got := kl.Add(-1); got != -1 {
+		t.Errorf("Add(-1) = %d, want -1", got)
+	}
+	if got := kl.Add(1); got != 0 {
+		t.Errorf("Add(1) = %d, want 0", got)
+	}
+}

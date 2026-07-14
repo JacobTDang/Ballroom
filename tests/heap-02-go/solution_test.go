@@ -12,6 +12,8 @@ func TestLastStoneWeight(t *testing.T) {
 		{[]int{1, 1}, 0},
 		{[]int{1, 3}, 2},
 		{[]int{2, 2}, 0},
+		{[]int{10, 4, 2, 10}, 2},
+		{[]int{1, 1, 1, 1}, 0},
 	}
 
 	for _, c := range cases {

@@ -7,3 +7,5 @@ def test_last_stone_weight():
     assert last_stone_weight([1, 1]) == 0
     assert last_stone_weight([1, 3]) == 2
     assert last_stone_weight([2, 2]) == 0
+    assert last_stone_weight([10, 4, 2, 10]) == 2
+    assert last_stone_weight([1, 1, 1, 1]) == 0
