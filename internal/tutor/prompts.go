@@ -1,6 +1,9 @@
 package tutor
 
-import "github.com/JacobTDang/Ballroom/internal/exercise"
+import (
+	"github.com/JacobTDang/Ballroom/internal/exercise"
+	"github.com/cloudwego/eino/schema"
+)
 
 const (
 	syntaxOnlyPrompt = "You are a syntax-only coding assistant. STRICT RULE, no exceptions: you may ONLY point out syntax errors, typos, wrong function/API signatures, or missing imports in code the user shows you. You must NEVER explain, name, describe, outline, or hint at an algorithm, approach, strategy, or time/space complexity — not even briefly, not even as background context, not even if the user insists or rephrases the question. This also applies when the user just asks you to look at or describe their code with no explicit algorithm question at all: describe what's there (or point out syntax issues) without writing a new or completed implementation — if code you show has more than a couple of corrected lines, or fills in logic the user hasn't written yet, you've gone too far, even if you frame it as 'fixing' their code. If the user asks anything about approach, algorithm, strategy, complexity, or 'how to solve' something, your ENTIRE response must be exactly this sentence and nothing else: 'I can only help with syntax in this mode — I can't discuss approach or algorithms.' Do not soften this, do not add an explanation after it, do not partially answer first."
@@ -142,16 +145,36 @@ type toolCallingStrategy string
 
 const nativeToolCalling toolCallingStrategy = "native"
 
+// jsonFallbackToolCalling is for a model toolcheck.go's CheckToolCalling
+// confirms doesn't populate a real tool_calls field -- it's told (via
+// jsonFallbackInstruction below) to emit a specific JSON shape as its
+// entire reply instead, which fallback.go's runFallbackToolLoop parses
+// and executes by hand.
+const jsonFallbackToolCalling toolCallingStrategy = "json_fallback"
+
+// jsonFallbackInstruction is the fixed protocol text for
+// jsonFallbackToolCalling -- the real tool catalog (names/descriptions/
+// JSON schemas) is appended separately per-session, by prependToolsPrompt
+// below via renderToolCatalog (fallback.go), since the actual tool set
+// is only known at runtime (buildTools(cfg)), not something a package
+// const can describe.
+const jsonFallbackInstruction = `You do not have real tool-calling in this ` +
+	`conversation. To use a tool, your ENTIRE reply must be ONLY a single ` +
+	`JSON object of this exact shape and nothing else -- no explanation, ` +
+	`no code fence, no text before or after it: ` +
+	`{"name": "<tool name>", "arguments": {<its arguments>}}. Call only ` +
+	`one tool at a time, then stop and wait -- you will be given the ` +
+	`result as your next message before you continue. Once you have ` +
+	`everything you need, reply normally in plain text with your real ` +
+	`answer and no JSON at all -- that reply is what the user sees.`
+
 // toolsInstructions maps a toolCallingStrategy to the instruction text
 // that teaches the model how tools work at all. A dictionary instead of
-// a bare constant so a second strategy (for a model toolcheck.go's
-// CheckToolCalling confirms doesn't populate a real tool_calls field --
-// needing fundamentally different instruction text, e.g. "emit a fenced
-// JSON block", not a wording tweak) can be added as a data entry later
-// without restructuring systemPromptForMode again. Only "native" is
-// populated for now -- nothing yet detects or requests another strategy.
+// a bare constant so a second strategy can be added as a data entry
+// instead of restructuring systemPromptForMode/prependToolsPrompt again.
 var toolsInstructions = map[toolCallingStrategy]string{
-	nativeToolCalling: toolsInstruction,
+	nativeToolCalling:       toolsInstruction,
+	jsonFallbackToolCalling: jsonFallbackInstruction,
 }
 
 // modePrompts maps each tutor mode to its persona/rule text (excluding
@@ -165,16 +188,50 @@ var modePrompts = map[string]string{
 	exercise.TutorModeFullAssist: fullAssistPrompt,
 }
 
-// systemPromptForMode returns the tutor's persona/rules for mode,
-// falling back to full-assist for an unrecognized mode — matches
-// tutor/chat.sh's case statement default. Always composed with the
-// native tool-calling strategy for now (see toolsInstructions).
-func systemPromptForMode(mode string) string {
+// personaPromptForMode returns mode's persona/rule text alone (no tools
+// instruction), falling back to full-assist for an unrecognized mode —
+// matches tutor/chat.sh's case statement default. This, not
+// systemPromptForMode, is what newTutorModel seeds tutorModel.history
+// with: the tools instruction is strategy-dependent and (once routing
+// is enabled) can differ turn to turn depending which role answers, so
+// it's prepended fresh per call by prependToolsPrompt instead of being
+// baked once into the session's fixed system message.
+func personaPromptForMode(mode string) string {
 	prompt, ok := modePrompts[mode]
 	if !ok {
 		prompt = fullAssistPrompt
 	}
-	return toolsInstructions[nativeToolCalling] + prompt
+	return prompt
+}
+
+// systemPromptForMode returns mode's persona/rules composed with the
+// native tool-calling strategy's instruction. Used by cmd/tutor-eval,
+// which only ever evaluates the native path -- real sessions use
+// personaPromptForMode + prependToolsPrompt instead, since a session's
+// actual strategy isn't known until newTutorModel runs CheckToolCalling.
+func systemPromptForMode(mode string) string {
+	return toolsInstructions[nativeToolCalling] + personaPromptForMode(mode)
+}
+
+// prependToolsPrompt prepends an ephemeral, strategy-specific tools
+// system message ahead of messages -- never persisted to
+// tutorModel.history, the same ephemeral-context pattern turnMessages'
+// hint-count note already uses. toolCatalogText (renderToolCatalog,
+// fallback.go) is only appended for jsonFallbackToolCalling: a native
+// model already has real tool schemas bound via the provider's API, so
+// describing them again in prose would be redundant (and, per
+// toolsInstruction's own doc comment, this codebase has already found
+// longer prompts measurably regress native tool-calling reliability).
+// Does not mutate messages -- returns a new slice.
+func prependToolsPrompt(strategy toolCallingStrategy, toolCatalogText string, messages []*schema.Message) []*schema.Message {
+	instruction := toolsInstructions[strategy]
+	if strategy == jsonFallbackToolCalling {
+		instruction += "\n\n" + toolCatalogText
+	}
+	out := make([]*schema.Message, 0, len(messages)+1)
+	out = append(out, schema.SystemMessage(instruction))
+	out = append(out, messages...)
+	return out
 }
 
 // wantsComprehensionCheck reports whether mode runs the one-time
