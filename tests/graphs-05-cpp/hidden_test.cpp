@@ -13,6 +13,10 @@ int main() {
     assert(OrangesRotting(c) == 0);
     std::vector<std::vector<int>> d = {{0}};
     assert(OrangesRotting(d) == 0);
+    std::vector<std::vector<int>> e = {{2, 1, 1}, {1, 1, 1}, {1, 1, 2}};
+    assert(OrangesRotting(e) == 2);
+    std::vector<std::vector<int>> f = {{2, 2}, {2, 2}};
+    assert(OrangesRotting(f) == 0);
     printf("all assertions passed\n");
     return 0;
 }

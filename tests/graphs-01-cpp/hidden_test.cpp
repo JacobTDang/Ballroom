@@ -20,6 +20,10 @@ int main() {
     assert(NumIslands(g3) == 0);
     auto g4 = gridOf({"1"});
     assert(NumIslands(g4) == 1);
+    auto g5 = gridOf({"000", "000"});
+    assert(NumIslands(g5) == 0);
+    auto g6 = gridOf({"11", "11"});
+    assert(NumIslands(g6) == 1);
     printf("all assertions passed\n");
     return 0;
 }

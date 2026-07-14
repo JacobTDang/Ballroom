@@ -22,3 +22,17 @@ func TestLadderLength_DirectNeighbor(t *testing.T) {
 		t.Errorf("LadderLength(hit, hot, %v) = %d, want 2", wordList, got)
 	}
 }
+
+func TestLadderLength_EndUnreachableNotInList(t *testing.T) {
+	wordList := []string{"hot", "dot", "dog", "lot", "log", "cog"}
+	if got := LadderLength("hit", "xyz", wordList); got != 0 {
+		t.Errorf("LadderLength(hit, xyz, %v) = %d, want 0", wordList, got)
+	}
+}
+
+func TestLadderLength_SingleCharWords(t *testing.T) {
+	wordList := []string{"a", "b", "c"}
+	if got := LadderLength("a", "c", wordList); got != 2 {
+		t.Errorf("LadderLength(a, c, %v) = %d, want 2", wordList, got)
+	}
+}

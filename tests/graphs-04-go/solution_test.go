@@ -46,3 +46,12 @@ func TestWallsAndGates_NoGates(t *testing.T) {
 		t.Errorf("WallsAndGates(...) -> %v, want %v", rooms, want)
 	}
 }
+
+func TestWallsAndGates_NearestGateWins(t *testing.T) {
+	rooms := [][]int{{0, Inf, Inf, 0}}
+	want := [][]int{{0, 1, 1, 0}}
+	WallsAndGates(rooms)
+	if !reflect.DeepEqual(rooms, want) {
+		t.Errorf("WallsAndGates(...) -> %v, want %v (equidistant from both gates)", rooms, want)
+	}
+}

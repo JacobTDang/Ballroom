@@ -27,3 +27,10 @@ func TestCountComponents_SingleNode(t *testing.T) {
 		t.Errorf("CountComponents(1, nil) = %d, want 1", got)
 	}
 }
+
+func TestCountComponents_MultiplePairsAndIsolatedNodes(t *testing.T) {
+	edges := [][]int{{0, 1}, {2, 3}}
+	if got := CountComponents(6, edges); got != 4 {
+		t.Errorf("CountComponents(6, %v) = %d, want 4", edges, got)
+	}
+}

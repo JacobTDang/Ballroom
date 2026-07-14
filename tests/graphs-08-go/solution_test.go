@@ -26,3 +26,10 @@ func TestCanFinish_LongerCycle(t *testing.T) {
 		t.Errorf("CanFinish(4, %v) = true, want false", prereqs)
 	}
 }
+
+func TestCanFinish_DiamondDAGNoCycle(t *testing.T) {
+	prereqs := [][]int{{1, 0}, {2, 0}, {3, 1}, {3, 2}}
+	if !CanFinish(4, prereqs) {
+		t.Errorf("CanFinish(4, %v) = false, want true (diamond DAG, no cycle)", prereqs)
+	}
+}

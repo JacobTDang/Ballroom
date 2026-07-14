@@ -24,3 +24,10 @@ def test_single_cell():
     want = to_grid(["O"])
     solve(board)
     assert board == want
+
+
+def test_mixed_surrounded_and_border_connected():
+    board = to_grid(["XXXXX", "XOOXX", "XOXXX", "XXXOX", "XXOOX"])
+    want = to_grid(["XXXXX", "XXXXX", "XXXXX", "XXXOX", "XXOOX"])
+    solve(board)
+    assert board == want

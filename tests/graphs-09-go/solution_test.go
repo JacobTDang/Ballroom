@@ -45,3 +45,11 @@ func TestFindOrder_NoPrerequisites(t *testing.T) {
 		t.Errorf("FindOrder(3, nil) = %v, not a valid order", order)
 	}
 }
+
+func TestFindOrder_LinearChain(t *testing.T) {
+	prereqs := [][]int{{1, 0}, {2, 1}, {3, 2}, {4, 3}}
+	order := FindOrder(5, prereqs)
+	if !isValidOrder(5, prereqs, order) {
+		t.Errorf("FindOrder(5, %v) = %v, not a valid topological order", prereqs, order)
+	}
+}

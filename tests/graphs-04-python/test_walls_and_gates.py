@@ -30,3 +30,10 @@ def test_walls_and_gates_no_gates():
     want = [[INF, INF]]
     walls_and_gates(rooms)
     assert rooms == want
+
+
+def test_walls_and_gates_nearest_gate_wins():
+    rooms = [[0, INF, INF, 0]]
+    want = [[0, 1, 1, 0]]
+    walls_and_gates(rooms)
+    assert rooms == want

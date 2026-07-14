@@ -15,3 +15,7 @@ def test_no_edges():
 
 def test_single_node():
     assert count_components(1, []) == 1
+
+
+def test_multiple_pairs_and_isolated_nodes():
+    assert count_components(6, [[0, 1], [2, 3]]) == 4

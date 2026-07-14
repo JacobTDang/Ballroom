@@ -25,3 +25,9 @@ def test_cycle():
 def test_no_prerequisites():
     order = find_order(3, [])
     assert is_valid_order(3, [], order)
+
+
+def test_linear_chain():
+    prereqs = [[1, 0], [2, 1], [3, 2], [4, 3]]
+    order = find_order(5, prereqs)
+    assert is_valid_order(5, prereqs, order)

@@ -19,6 +19,8 @@ func TestNumIslands(t *testing.T) {
 		{gridOf([]string{"11000", "11000", "00100", "00011"}), 3},
 		{gridOf([]string{"0"}), 0},
 		{gridOf([]string{"1"}), 1},
+		{gridOf([]string{"000", "000"}), 0},
+		{gridOf([]string{"11", "11"}), 1},
 	}
 
 	for _, c := range cases {

@@ -20,10 +20,22 @@ void testDirectNeighbor() {
     assert(LadderLength("hit", "hot", wordList) == 2);
 }
 
+void testEndUnreachableNotInList() {
+    std::vector<std::string> wordList = {"hot", "dot", "dog", "lot", "log", "cog"};
+    assert(LadderLength("hit", "xyz", wordList) == 0);
+}
+
+void testSingleCharWords() {
+    std::vector<std::string> wordList = {"a", "b", "c"};
+    assert(LadderLength("a", "c", wordList) == 2);
+}
+
 int main() {
     testClassic();
     testEndWordNotInList();
     testDirectNeighbor();
+    testEndUnreachableNotInList();
+    testSingleCharWords();
     std::printf("all tests passed\n");
     return 0;
 }

@@ -35,6 +35,12 @@ int main() {
         WallsAndGates(rooms);
         assert(rooms == want);
     }
+    {
+        std::vector<std::vector<int>> rooms = {{0, kInf, kInf, 0}};
+        std::vector<std::vector<int>> want = {{0, 1, 1, 0}};
+        WallsAndGates(rooms);
+        assert(rooms == want);
+    }
     printf("all assertions passed\n");
     return 0;
 }

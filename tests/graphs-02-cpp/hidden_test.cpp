@@ -22,6 +22,12 @@ int main() {
 
     std::vector<std::vector<int>> single = {{1}};
     assert(MaxAreaOfIsland(single) == 1);
+
+    std::vector<std::vector<int>> allOnes = {{1, 1}, {1, 1}};
+    assert(MaxAreaOfIsland(allOnes) == 4);
+
+    std::vector<std::vector<int>> scattered = {{1, 0, 1}, {0, 0, 0}, {1, 0, 1}};
+    assert(MaxAreaOfIsland(scattered) == 1);
     printf("all assertions passed\n");
     return 0;
 }
