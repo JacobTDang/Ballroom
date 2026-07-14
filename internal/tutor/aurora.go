@@ -86,20 +86,42 @@ func auroraGlowDepth(w int) float64 {
 	return d
 }
 
+// auroraDepthWave modulates how deep the glow reaches at a given point
+// and moment: a sum of slow traveling waves, incommensurate in both
+// frequency and speed so the undulation never settles into a visible
+// repeat. Normalized to [0,1]. This is what keeps the glow's inner
+// boundary alive -- a constant depth read as a rigid box frame (real
+// feedback: "rn its just a box"), while a boundary that swells and
+// recedes as tongues of light travel the border reads as aurora.
+func auroraDepthWave(u, v, t float64) float64 {
+	s := math.Sin(u*7.3+t*1.1) +
+		math.Sin(u*3.1-t*0.7+1.7) +
+		math.Sin(v*5.9+t*0.9+3.9) +
+		math.Sin(v*2.3-t*1.3+0.6)
+	return (s/4 + 1) / 2
+}
+
 // auroraEdgeMask is the glow's intensity at a cell: 1 at the pane's
-// outermost cells, easing quadratically to 0 at glowDepth column-units
-// inward. This mask is the whole difference between "border glow" and
-// "background wash" -- interior cells (mask 0) are never painted at
-// all, so the conversation sits on the terminal's own background.
-func auroraEdgeMask(col, row, w, h int, depth float64) float64 {
+// outermost cells, dissolving to 0 at a locally undulating depth (0.5x
+// to 1.2x the base glowDepth, per auroraDepthWave). The falloff is a
+// smoothstep rather than a plain quadratic: zero slope at both ends
+// gives a brightness plateau right at the edge and a completely soft
+// entry at the inner boundary, so there's no visible line where the
+// glow begins. This mask is the whole difference between "border glow"
+// and "background wash" -- interior cells (mask 0) are never painted
+// at all, so the conversation sits on the terminal's own background.
+func auroraEdgeMask(col, row, w, h int, depth, t float64) float64 {
 	d := math.Min(float64(col), float64(w-1-col))
 	d = math.Min(d, 2*float64(row))
 	d = math.Min(d, 2*float64(h-1-row))
-	if d >= depth {
+	u := float64(col) / math.Max(float64(w-1), 1)
+	v := float64(row) / math.Max(float64(h-1), 1)
+	local := depth * (0.5 + 0.7*auroraDepthWave(u, v, t))
+	if d >= local {
 		return 0
 	}
-	t := 1 - d/depth
-	return t * t
+	s := 1 - d/local
+	return s * s * (3 - 2*s)
 }
 
 // auroraFadeDuration is how long the glow takes to disappear after a
@@ -197,7 +219,7 @@ func overlayAurora(content string, w, h int, t, brightness float64) string {
 		painted := false
 		var state byte
 		emitCell := func() {
-			eb := brightness * auroraEdgeMask(col, row, w, rows, depth)
+			eb := brightness * auroraEdgeMask(col, row, w, rows, depth, t)
 			if eb >= auroraPaintFloor {
 				out.WriteString(auroraBG(col, row, w, rows, t, eb))
 				painted = true
