@@ -57,3 +57,24 @@ func TestSolve_SingleCell(t *testing.T) {
 		t.Errorf("Solve(...) = %v, want %v", board, want)
 	}
 }
+
+func TestSolve_MixedSurroundedAndBorderConnected(t *testing.T) {
+	board := toGrid([]string{
+		"XXXXX",
+		"XOOXX",
+		"XOXXX",
+		"XXXOX",
+		"XXOOX",
+	})
+	want := toGrid([]string{
+		"XXXXX",
+		"XXXXX",
+		"XXXXX",
+		"XXXOX",
+		"XXOOX",
+	})
+	Solve(board)
+	if !reflect.DeepEqual(board, want) {
+		t.Errorf("Solve(...) = %v, want %v", board, want)
+	}
+}

@@ -8,3 +8,8 @@ def test_triangle():
 def test_later_cycle():
     edges = [[1, 2], [2, 3], [3, 4], [1, 4], [1, 5]]
     assert find_redundant_connection(edges) == [1, 4]
+
+
+def test_merging_components():
+    edges = [[1, 4], [3, 4], [1, 3], [1, 2], [4, 5]]
+    assert find_redundant_connection(edges) == [1, 3]

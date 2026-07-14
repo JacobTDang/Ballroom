@@ -24,11 +24,17 @@ void testSingleNode() {
     assert(CountComponents(1, edges) == 1);
 }
 
+void testMultiplePairsAndIsolatedNodes() {
+    std::vector<std::vector<int>> edges = {{0, 1}, {2, 3}};
+    assert(CountComponents(6, edges) == 4);
+}
+
 int main() {
     testClassic();
     testAllConnected();
     testNoEdges();
     testSingleNode();
+    testMultiplePairsAndIsolatedNodes();
     std::printf("all tests passed\n");
     return 0;
 }

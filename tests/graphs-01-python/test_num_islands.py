@@ -10,3 +10,5 @@ def test_num_islands():
     assert num_islands(grid_of(["11000", "11000", "00100", "00011"])) == 3
     assert num_islands(grid_of(["0"])) == 0
     assert num_islands(grid_of(["1"])) == 1
+    assert num_islands(grid_of(["000", "000"])) == 0
+    assert num_islands(grid_of(["11", "11"])) == 1

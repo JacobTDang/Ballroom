@@ -34,10 +34,18 @@ void testSingleCell() {
     assert(board == want);
 }
 
+void testMixedSurroundedAndBorderConnected() {
+    auto board = toGrid({"XXXXX", "XOOXX", "XOXXX", "XXXOX", "XXOOX"});
+    auto want = toGrid({"XXXXX", "XXXXX", "XXXXX", "XXXOX", "XXOOX"});
+    Solve(board);
+    assert(board == want);
+}
+
 int main() {
     testClassic();
     testAllBorderConnected();
     testSingleCell();
+    testMixedSurroundedAndBorderConnected();
     std::printf("all tests passed\n");
     return 0;
 }

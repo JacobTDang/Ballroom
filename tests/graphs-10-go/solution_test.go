@@ -28,3 +28,9 @@ func TestValidTree_SingleNode(t *testing.T) {
 		t.Errorf("ValidTree(1, nil) = false, want true")
 	}
 }
+
+func TestValidTree_NoEdgesMultipleNodes(t *testing.T) {
+	if ValidTree(3, nil) {
+		t.Errorf("ValidTree(3, nil) = true, want false (disconnected)")
+	}
+}

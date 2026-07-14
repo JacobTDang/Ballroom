@@ -15,3 +15,7 @@ def test_no_prerequisites():
 
 def test_longer_cycle():
     assert can_finish(4, [[1, 0], [2, 1], [3, 2], [0, 3]]) is False
+
+
+def test_diamond_dag_no_cycle():
+    assert can_finish(4, [[1, 0], [2, 0], [3, 1], [3, 2]]) is True

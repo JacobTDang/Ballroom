@@ -24,11 +24,17 @@ void testLongerCycle() {
     assert(CanFinish(4, prereqs) == false);
 }
 
+void testDiamondDAGNoCycle() {
+    std::vector<std::vector<int>> prereqs = {{1, 0}, {2, 0}, {3, 1}, {3, 2}};
+    assert(CanFinish(4, prereqs) == true);
+}
+
 int main() {
     testNoCycle();
     testCycle();
     testNoPrerequisites();
     testLongerCycle();
+    testDiamondDAGNoCycle();
     std::printf("all tests passed\n");
     return 0;
 }

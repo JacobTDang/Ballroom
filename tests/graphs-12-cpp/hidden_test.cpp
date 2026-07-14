@@ -18,9 +18,17 @@ void testLaterCycle() {
     assert(got == want);
 }
 
+void testMergingComponents() {
+    std::vector<std::vector<int>> edges = {{1, 4}, {3, 4}, {1, 3}, {1, 2}, {4, 5}};
+    auto got = FindRedundantConnection(edges);
+    std::vector<int> want = {1, 3};
+    assert(got == want);
+}
+
 int main() {
     testTriangle();
     testLaterCycle();
+    testMergingComponents();
     std::printf("all tests passed\n");
     return 0;
 }

@@ -24,11 +24,17 @@ void testSingleNode() {
     assert(ValidTree(1, edges) == true);
 }
 
+void testNoEdgesMultipleNodes() {
+    std::vector<std::vector<int>> edges = {};
+    assert(ValidTree(3, edges) == false);
+}
+
 int main() {
     testValid();
     testHasCycle();
     testDisconnected();
     testSingleNode();
+    testNoEdgesMultipleNodes();
     std::printf("all tests passed\n");
     return 0;
 }

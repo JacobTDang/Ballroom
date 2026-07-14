@@ -15,3 +15,7 @@ def test_disconnected():
 
 def test_single_node():
     assert valid_tree(1, []) is True
+
+
+def test_no_edges_multiple_nodes():
+    assert valid_tree(3, []) is False

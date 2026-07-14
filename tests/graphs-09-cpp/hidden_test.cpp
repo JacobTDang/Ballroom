@@ -41,10 +41,17 @@ void testNoPrerequisites() {
     assert(isValidOrder(3, prereqs, order));
 }
 
+void testLinearChain() {
+    std::vector<std::vector<int>> prereqs = {{1, 0}, {2, 1}, {3, 2}, {4, 3}};
+    auto order = FindOrder(5, prereqs);
+    assert(isValidOrder(5, prereqs, order));
+}
+
 int main() {
     testValid();
     testCycle();
     testNoPrerequisites();
+    testLinearChain();
     std::printf("all tests passed\n");
     return 0;
 }
