@@ -224,6 +224,38 @@ func TestList_SortsByCategoryThenID(t *testing.T) {
 	}
 }
 
+func TestList_LanguageVariantsSortPythonFirst(t *testing.T) {
+	cfg := testConfig(t)
+	// Written in an order that would leave "cpp" first if the sort still
+	// fell back to raw ID string comparison ("cpp" < "go" < "python").
+	writeExercise(t, cfg.ExercisesDir, "two-sum-01-cpp", map[string]any{
+		"problem_id": "two-sum-01", "language": "cpp",
+	})
+	writeExercise(t, cfg.ExercisesDir, "two-sum-01-go", map[string]any{
+		"problem_id": "two-sum-01", "language": "go",
+	})
+	writeExercise(t, cfg.ExercisesDir, "two-sum-01-python", map[string]any{
+		"problem_id": "two-sum-01", "language": "python",
+	})
+
+	statuses, err := List(cfg)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(statuses) != 3 {
+		t.Fatalf("expected 3 exercises, got %d", len(statuses))
+	}
+
+	var gotOrder []string
+	for _, s := range statuses {
+		gotOrder = append(gotOrder, s.Exercise.Language)
+	}
+	want := []string{"python", "go", "cpp"}
+	if strings.Join(gotOrder, ",") != strings.Join(want, ",") {
+		t.Errorf("language order = %v, want %v (python first so it's the TUI language picker's default)", gotOrder, want)
+	}
+}
+
 func TestList_ComputesAttemptsAndLastResult(t *testing.T) {
 	cfg := testConfig(t)
 	writeExercise(t, cfg.ExercisesDir, "two-pointers-01", nil)
