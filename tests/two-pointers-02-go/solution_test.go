@@ -14,6 +14,10 @@ func TestIsPalindrome(t *testing.T) {
 		{"Was it a car or a cat I saw?", true},
 		{".,", true},
 		{"a_b", false},
+		{"12321", true},
+		{"ab", false},
+		{"", true},
+		{"Able was I, ere I saw Elba", true},
 	}
 
 	for _, c := range cases {

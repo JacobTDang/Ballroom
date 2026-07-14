@@ -15,3 +15,9 @@ def test_three_sum():
     assert normalize(three_sum([])) == []
     assert normalize(three_sum([0, 0, 0, 0])) == [[0, 0, 0]]
     assert normalize(three_sum([-2, 0, 1, 1, 2])) == normalize([[-2, 0, 2], [-2, 1, 1]])
+    assert normalize(three_sum([-3, -2, -1])) == []
+    assert normalize(three_sum([1, 2, 3])) == []
+    assert normalize(three_sum([1, -1])) == []
+    assert normalize(three_sum([3, -2, 1, 0, -1, -3, 2, -2, 0])) == normalize(
+        [[-3, 0, 3], [-3, 1, 2], [-2, -1, 3], [-2, 0, 2], [-1, 0, 1]]
+    )

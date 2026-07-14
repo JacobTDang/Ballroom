@@ -11,6 +11,10 @@ int main() {
     assert(MaxArea({1, 2, 1}) == 2);
     assert(MaxArea({1, 2, 4, 3}) == 4);
     assert(MaxArea({1, 3, 2, 5, 25, 24, 5}) == 24);
+    assert(MaxArea({0, 2}) == 0);
+    assert(MaxArea({5, 5, 5, 5, 5}) == 20);
+    assert(MaxArea({1, 2, 3, 4, 5, 25, 1}) == 9);
+    assert(MaxArea({10000, 10000}) == 10000);
     printf("all assertions passed\n");
     return 0;
 }

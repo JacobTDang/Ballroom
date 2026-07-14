@@ -12,6 +12,10 @@ int main() {
     assert(Trap({5, 4, 3, 2, 1}) == 0);
     assert(Trap({3, 0, 3}) == 3);
     assert(Trap({2, 0, 2}) == 2);
+    assert(Trap({5}) == 0);
+    assert(Trap({1, 0, 1}) == 1);
+    assert(Trap({4, 4, 4, 4}) == 0);
+    assert(Trap({5, 2, 1, 2, 1, 5}) == 14);
     printf("all assertions passed\n");
     return 0;
 }

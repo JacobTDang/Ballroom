@@ -8,3 +8,7 @@ def test_max_area():
     assert max_area([1, 2, 1]) == 2
     assert max_area([1, 2, 4, 3]) == 4
     assert max_area([1, 3, 2, 5, 25, 24, 5]) == 24
+    assert max_area([0, 2]) == 0
+    assert max_area([5, 5, 5, 5, 5]) == 20
+    assert max_area([1, 2, 3, 4, 5, 25, 1]) == 9
+    assert max_area([10000, 10000]) == 10000

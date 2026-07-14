@@ -9,3 +9,7 @@ def test_is_palindrome():
     assert is_palindrome("Was it a car or a cat I saw?") is True
     assert is_palindrome(".,") is True
     assert is_palindrome("a_b") is False
+    assert is_palindrome("12321") is True
+    assert is_palindrome("ab") is False
+    assert is_palindrome("") is True
+    assert is_palindrome("Able was I, ere I saw Elba") is True
