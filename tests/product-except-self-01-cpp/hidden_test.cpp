@@ -10,6 +10,11 @@ int main() {
     assert((product_except_self({2, 3}) == std::vector<int>{3, 2}));
     assert((product_except_self({5, 0, 0, 4}) == std::vector<int>{0, 0, 0, 0}));
     assert((product_except_self({1, 1, 1, 1}) == std::vector<int>{1, 1, 1, 1}));
+    assert((product_except_self({-1, -2, -3, -4}) == std::vector<int>{-24, -12, -8, -6}));
+    assert((product_except_self({1, 2, 3, 4, 5, 6, 7, 8}) == std::vector<int>{40320, 20160, 13440, 10080, 8064, 6720, 5760, 5040}));
+    assert((product_except_self({-1, 2, -3, 4}) == std::vector<int>{-24, 12, -8, 6}));
+    assert((product_except_self({30, -30, 1}) == std::vector<int>{-30, 30, -900}));
+    assert((product_except_self({1, 0, 3, 4}) == std::vector<int>{0, 12, 0, 0}));
     printf("all assertions passed\n");
     return 0;
 }

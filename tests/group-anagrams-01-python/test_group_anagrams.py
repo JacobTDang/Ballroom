@@ -15,3 +15,16 @@ def test_group_anagrams():
     assert normalize(group_anagrams(["abc", "bca", "cab", "xyz"])) == normalize(
         [["abc", "bca", "cab"], ["xyz"]]
     )
+    assert normalize(group_anagrams(["cat", "dog", "bird"])) == normalize(
+        [["cat"], ["dog"], ["bird"]]
+    )
+    assert normalize(group_anagrams(["abc", "bca", "cab", "acb"])) == normalize(
+        [["abc", "bca", "cab", "acb"]]
+    )
+    assert normalize(group_anagrams(["", "", ""])) == normalize([["", "", ""]])
+    assert normalize(
+        group_anagrams(["bat", "tab", "cat", "act", "dog", "god", "xyz"])
+    ) == normalize([["bat", "tab"], ["cat", "act"], ["dog", "god"], ["xyz"]])
+    assert normalize(group_anagrams(["a", "b", "a", "c", "b"])) == normalize(
+        [["a", "a"], ["b", "b"], ["c"]]
+    )

@@ -33,6 +33,11 @@ func TestGroupAnagrams(t *testing.T) {
 		{[]string{""}, [][]string{{""}}},
 		{[]string{"a"}, [][]string{{"a"}}},
 		{[]string{"abc", "bca", "cab", "xyz"}, [][]string{{"abc", "bca", "cab"}, {"xyz"}}},
+		{[]string{"cat", "dog", "bird"}, [][]string{{"cat"}, {"dog"}, {"bird"}}},
+		{[]string{"abc", "bca", "cab", "acb"}, [][]string{{"abc", "bca", "cab", "acb"}}},
+		{[]string{"", "", ""}, [][]string{{"", "", ""}}},
+		{[]string{"bat", "tab", "cat", "act", "dog", "god", "xyz"}, [][]string{{"bat", "tab"}, {"cat", "act"}, {"dog", "god"}, {"xyz"}}},
+		{[]string{"a", "b", "a", "c", "b"}, [][]string{{"a", "a"}, {"b", "b"}, {"c"}}},
 	}
 	for _, c := range cases {
 		got := normalizeGroups(GroupAnagrams(c.strs))

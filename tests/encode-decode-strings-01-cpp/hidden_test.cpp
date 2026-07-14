@@ -14,6 +14,11 @@ int main() {
         {"", "", ""},
         {"a#b", "c##d", "5#hello"},
         {"hello world", "foo,bar", "123"},
+        {"4#abcd", "hello"},
+        {"#####"},
+        {"xyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxyxy"},
+        {"123", "456", "0"},
+        {"", "a", "", "b"},
     };
     for (const auto& strs : cases) {
         std::string encoded = encode(strs);

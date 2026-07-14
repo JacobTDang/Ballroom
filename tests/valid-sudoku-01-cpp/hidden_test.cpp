@@ -21,12 +21,24 @@ int main() {
     std::vector<std::string> empty_board = {
         ".........", ".........", ".........", ".........", ".........",
         ".........", ".........", ".........", "........."};
+    std::vector<std::string> solved_board = {
+        "534678912", "672195348", "198342567", "859761423", "426853791",
+        "713924856", "961537284", "287419635", "345286179"};
+    std::vector<std::string> same_digit_different_units_board = {
+        "5........", ".........", ".........", ".........", "....5....",
+        ".........", ".........", ".........", "........."};
+    std::vector<std::string> single_cell_board = {
+        "5........", ".........", ".........", ".........", ".........",
+        ".........", ".........", ".........", "........."};
 
     assert(is_valid_sudoku(valid_board) == true);
     assert(is_valid_sudoku(invalid_column_board) == false);
     assert(is_valid_sudoku(invalid_row_board) == false);
     assert(is_valid_sudoku(invalid_box_board) == false);
     assert(is_valid_sudoku(empty_board) == true);
+    assert(is_valid_sudoku(solved_board) == true);
+    assert(is_valid_sudoku(same_digit_different_units_board) == true);
+    assert(is_valid_sudoku(single_cell_board) == true);
     printf("all assertions passed\n");
     return 0;
 }
