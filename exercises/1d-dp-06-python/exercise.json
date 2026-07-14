@@ -1,0 +1,11 @@
+{
+  "id": "1d-dp-06-python",
+  "problem_id": "1d-dp-06",
+  "title": "Palindromic Substrings",
+  "category": "1d-dp",
+  "language": "python",
+  "time_limit_min": 20,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}

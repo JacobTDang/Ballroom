@@ -1,0 +1,11 @@
+{
+  "id": "1d-dp-04-go",
+  "problem_id": "1d-dp-04",
+  "title": "House Robber II",
+  "category": "1d-dp",
+  "language": "go",
+  "time_limit_min": 20,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}
