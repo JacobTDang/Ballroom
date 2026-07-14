@@ -14,3 +14,13 @@ def test_cheaper_via_stop():
 def test_no_stops_allowed():
     flights = [[0, 1, 100], [1, 2, 100], [0, 2, 500]]
     assert find_cheapest_price(3, flights, 0, 2, 0) == 500
+
+
+def test_unreachable_within_stop_limit():
+    flights = [[0, 1, 100], [1, 2, 100]]
+    assert find_cheapest_price(3, flights, 0, 2, 0) == -1
+
+
+def test_genuinely_unreachable():
+    flights = [[0, 1, 100]]
+    assert find_cheapest_price(3, flights, 0, 2, 1) == -1

@@ -19,10 +19,22 @@ void testSinglePoint() {
     assert(MinCostConnectPoints(points) == 0);
 }
 
+void testNegativeCoordinates() {
+    std::vector<std::vector<int>> points = {{-1, -1}, {1, 1}};
+    assert(MinCostConnectPoints(points) == 4);
+}
+
+void testCollinear() {
+    std::vector<std::vector<int>> points = {{0, 0}, {100, 100}, {200, 200}};
+    assert(MinCostConnectPoints(points) == 400);
+}
+
 int main() {
     testClassic();
     testThreePoints();
     testSinglePoint();
+    testNegativeCoordinates();
+    testCollinear();
     std::printf("all tests passed\n");
     return 0;
 }

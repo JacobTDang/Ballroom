@@ -43,3 +43,27 @@ func TestFindItinerary_LexicalTieBreak(t *testing.T) {
 		t.Errorf("FindItinerary(%v) = %v, want %v", tickets, got, want)
 	}
 }
+
+func TestFindItinerary_SimpleTwoCycle(t *testing.T) {
+	tickets := [][]string{
+		{"JFK", "A"},
+		{"A", "JFK"},
+	}
+	want := []string{"JFK", "A", "JFK"}
+	if got := FindItinerary(tickets); !reflect.DeepEqual(got, want) {
+		t.Errorf("FindItinerary(%v) = %v, want %v", tickets, got, want)
+	}
+}
+
+func TestFindItinerary_BranchingAtOrigin(t *testing.T) {
+	tickets := [][]string{
+		{"JFK", "B"},
+		{"JFK", "A"},
+		{"B", "JFK"},
+		{"A", "JFK"},
+	}
+	want := []string{"JFK", "A", "JFK", "B", "JFK"}
+	if got := FindItinerary(tickets); !reflect.DeepEqual(got, want) {
+		t.Errorf("FindItinerary(%v) = %v, want %v", tickets, got, want)
+	}
+}

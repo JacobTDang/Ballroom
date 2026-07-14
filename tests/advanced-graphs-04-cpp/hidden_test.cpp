@@ -25,10 +25,20 @@ void testSingleCell() {
     assert(SwimInWater(grid) == 0);
 }
 
+void testSpiralBlocksDirectPath() {
+    std::vector<std::vector<int>> grid = {
+        {0, 1, 2},
+        {7, 8, 3},
+        {6, 5, 4}
+    };
+    assert(SwimInWater(grid) == 4);
+}
+
 int main() {
     testSmall();
     testLarger();
     testSingleCell();
+    testSpiralBlocksDirectPath();
     std::printf("all tests passed\n");
     return 0;
 }

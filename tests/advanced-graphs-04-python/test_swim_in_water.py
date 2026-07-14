@@ -18,3 +18,12 @@ def test_larger():
 
 def test_single_cell():
     assert swim_in_water([[0]]) == 0
+
+
+def test_spiral_blocks_direct_path():
+    grid = [
+        [0, 1, 2],
+        [7, 8, 3],
+        [6, 5, 4],
+    ]
+    assert swim_in_water(grid) == 4

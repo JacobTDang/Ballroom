@@ -47,3 +47,11 @@ def test_invalid_prefix():
 
 def test_cycle():
     assert alien_order(["z", "x", "z"]) == ""
+
+
+def test_single_word():
+    assert alien_order(["z"]) == "z"
+
+
+def test_two_distinct_chars():
+    assert alien_order(["a", "b"]) == "ab"

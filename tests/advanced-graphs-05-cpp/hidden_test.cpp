@@ -64,10 +64,22 @@ void testCycle() {
     assert(AlienOrder(words) == "");
 }
 
+void testSingleWord() {
+    std::vector<std::string> words = {"z"};
+    assert(AlienOrder(words) == "z");
+}
+
+void testTwoDistinctChars() {
+    std::vector<std::string> words = {"a", "b"};
+    assert(AlienOrder(words) == "ab");
+}
+
 int main() {
     testValid();
     testInvalidPrefix();
     testCycle();
+    testSingleWord();
+    testTwoDistinctChars();
     std::printf("all tests passed\n");
     return 0;
 }

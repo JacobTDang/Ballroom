@@ -77,3 +77,15 @@ func TestAlienOrder_Cycle(t *testing.T) {
 		t.Errorf("AlienOrder(%v) = %q, want empty (cycle)", words, got)
 	}
 }
+
+func TestAlienOrder_SingleWord(t *testing.T) {
+	if got := AlienOrder([]string{"z"}); got != "z" {
+		t.Errorf(`AlienOrder(["z"]) = %q, want "z"`, got)
+	}
+}
+
+func TestAlienOrder_TwoDistinctChars(t *testing.T) {
+	if got := AlienOrder([]string{"a", "b"}); got != "ab" {
+		t.Errorf(`AlienOrder(["a", "b"]) = %q, want "ab"`, got)
+	}
+}
