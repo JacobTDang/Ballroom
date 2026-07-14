@@ -1,6 +1,7 @@
 package tutor
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -46,7 +47,7 @@ func newToolCallOllama(t *testing.T, toolName string) *httptest.Server {
 func TestCheckToolCalling_ReportsTrueWhenModelCallsTheTool(t *testing.T) {
 	srv := newToolCallOllama(t, "ping")
 
-	supported, err := CheckToolCalling(srv.URL, "test-model", "")
+	supported, err := CheckToolCalling(context.Background(), srv.URL, "test-model", "")
 	if err != nil {
 		t.Fatalf("CheckToolCalling: %v", err)
 	}
@@ -58,7 +59,7 @@ func TestCheckToolCalling_ReportsTrueWhenModelCallsTheTool(t *testing.T) {
 func TestCheckToolCalling_ReportsFalseWhenModelOnlyRepliesWithText(t *testing.T) {
 	mock := newSequencedOllama(t, "I would call the tool but here is text instead")
 
-	supported, err := CheckToolCalling(mock.URL, "test-model", "")
+	supported, err := CheckToolCalling(context.Background(), mock.URL, "test-model", "")
 	if err != nil {
 		t.Fatalf("CheckToolCalling: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestCheckToolCalling_ReportsFalseWhenModelOnlyRepliesWithText(t *testing.T)
 }
 
 func TestCheckToolCalling_UnreachableHostReturnsError(t *testing.T) {
-	_, err := CheckToolCalling("http://127.0.0.1:1", "test-model", "")
+	_, err := CheckToolCalling(context.Background(), "http://127.0.0.1:1", "test-model", "")
 	if err == nil {
 		t.Fatal("expected an error for an unreachable Ollama host")
 	}
@@ -119,7 +120,7 @@ func TestCheckToolCalling_RoutesOpenRouterPrefixedModelAndThreadsAPIKey(t *testi
 	openRouterBaseURL = srv.URL
 	t.Cleanup(func() { openRouterBaseURL = origBaseURL })
 
-	supported, err := CheckToolCalling("unused-for-openrouter", OpenRouterModelPrefix+"some/model", "sk-test-key")
+	supported, err := CheckToolCalling(context.Background(), "unused-for-openrouter", OpenRouterModelPrefix+"some/model", "sk-test-key")
 	if err != nil {
 		t.Fatalf("CheckToolCalling: %v", err)
 	}
