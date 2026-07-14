@@ -90,6 +90,55 @@ func TestOverlayAurora_GlowsAtEdgesNotCenter(t *testing.T) {
 	}
 }
 
+// leftGlowWidth counts the painted cells at the start of a rendered
+// blank row -- one background escape per padding cell up to the first
+// background reset, which is exactly how deep the left glow reaches.
+func leftGlowWidth(line string) int {
+	cut := strings.Index(line, "\x1b[49m")
+	if cut < 0 {
+		cut = len(line)
+	}
+	return strings.Count(line[:cut], "\x1b[48;2;")
+}
+
+func TestOverlayAurora_GlowDepthUndulatesAlongTheBorder(t *testing.T) {
+	// A constant-depth glow reads as a rigid box frame (real feedback:
+	// "rn its just a box"). The inner boundary must vary along the
+	// border -- different rows reach different depths at the same
+	// instant.
+	const w, h = 60, 25
+	lines := strings.Split(overlayAurora("", w, h, 2.0, auroraBrightness), "\n")
+	minRun, maxRun := w, 0
+	// Rows 8..16 are far enough from the top/bottom glow that their
+	// left run is governed purely by horizontal distance.
+	for r := 8; r <= 16; r++ {
+		run := leftGlowWidth(lines[r])
+		if run < minRun {
+			minRun = run
+		}
+		if run > maxRun {
+			maxRun = run
+		}
+	}
+	if minRun == maxRun {
+		t.Errorf("left glow reaches exactly %d cells on every middle row -- the boundary is a straight box edge, not an undulating one", minRun)
+	}
+}
+
+func TestOverlayAurora_GlowBoundaryMovesOverTime(t *testing.T) {
+	// The undulation must travel, not just exist -- the same row's
+	// glow reach should differ a moment later.
+	const w, h = 60, 25
+	a := strings.Split(overlayAurora("", w, h, 0.0, auroraBrightness), "\n")
+	b := strings.Split(overlayAurora("", w, h, 1.5, auroraBrightness), "\n")
+	for r := 8; r <= 16; r++ {
+		if leftGlowWidth(a[r]) != leftGlowWidth(b[r]) {
+			return // boundary moved somewhere in the band -- good
+		}
+	}
+	t.Error("no middle row's glow reach changed over 1.5s -- the boundary undulation isn't traveling")
+}
+
 func TestOverlayAurora_ResetsBackgroundLeavingTheGlow(t *testing.T) {
 	// Where a painted edge cell is followed by an unpainted interior
 	// cell, the background must be explicitly reset -- otherwise the
