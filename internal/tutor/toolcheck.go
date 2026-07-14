@@ -73,18 +73,30 @@ func CheckToolCalling(ctx context.Context, ollamaHost, model, apiKey string) (bo
 // test-suite default.
 var checkToolCallingForSession = CheckToolCalling
 
-// detectStrategy reports which toolCallingStrategy modelName needs,
-// via checkToolCallingForSession. Fails open toward nativeToolCalling —
-// this project's sole behavior before this strategy existed — on
-// anything short of a definitive "no": a check that errors out (bad
-// host, timeout) can't actually tell us the model lacks real tool
-// calling, so silently downgrading a previously-working native session
-// to the fallback loop on a transient check failure would be a worse
-// outcome than just trying native and letting the turn itself fail
-// visibly if the host really is unreachable.
+// detectStrategy reports which toolCallingStrategy modelName needs, via
+// checkToolCallingForSession. Only a clean, definitive "yes" (supported,
+// no error) picks nativeToolCalling — anything else, including an
+// error, defaults to jsonFallbackToolCalling.
+//
+// An earlier version of this function defaulted to native on any error
+// ("fail open toward this project's sole behavior before this strategy
+// existed"), reasoning a check failure (bad host, timeout) couldn't
+// prove the model lacks real tool calling. Live-reproduced against the
+// real OpenRouter API (cmd/ballroom, against
+// meta-llama/llama-3.2-3b-instruct:free) before this comment existed:
+// that model's provider rejects ANY request that binds a tools
+// parameter at all with a 404 "No endpoints found that support tool
+// use" — including CheckToolCalling's own probe. Defaulting to native
+// on that error broke the session completely, since the real worker/
+// orchestrator agent ALSO binds tools via WithTools and hit the
+// identical rejection on every turn. runFallbackToolLoop never binds
+// tools via the API (it teaches the model about them through the text
+// prompt instead), so it's immune to this failure — making fallback the
+// strategy actually capable of working whenever the check itself
+// couldn't complete, not just the safer-sounding guess.
 func detectStrategy(ctx context.Context, ollamaHost, modelName, apiKey string) toolCallingStrategy {
 	supported, err := checkToolCallingForSession(ctx, ollamaHost, modelName, apiKey)
-	if err != nil || supported {
+	if err == nil && supported {
 		return nativeToolCalling
 	}
 	return jsonFallbackToolCalling
