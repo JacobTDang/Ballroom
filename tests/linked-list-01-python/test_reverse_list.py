@@ -23,3 +23,5 @@ def test_reverse_list():
     assert to_list(reverse_list(build_list([1, 2]))) == [2, 1]
     assert to_list(reverse_list(build_list([]))) == []
     assert to_list(reverse_list(build_list([7]))) == [7]
+    assert to_list(reverse_list(build_list([1, 1, 2, 2, 3]))) == [3, 2, 2, 1, 1]
+    assert to_list(reverse_list(build_list([-5, -3, 0, 3, 5]))) == [5, 3, 0, -3, -5]

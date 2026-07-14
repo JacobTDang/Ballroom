@@ -30,3 +30,19 @@ def test_merge_two_lists():
     assert to_list(merge_two_lists(build_list([]), build_list([]))) == []
     assert to_list(merge_two_lists(build_list([]), build_list([0]))) == [0]
     assert to_list(merge_two_lists(build_list([5]), build_list([1, 2, 4]))) == [1, 2, 4, 5]
+    assert to_list(merge_two_lists(build_list([1, 1, 1]), build_list([1, 1, 1]))) == [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+    ]
+    assert to_list(merge_two_lists(build_list([-3, -1, 2]), build_list([-2, 0, 5]))) == [
+        -3,
+        -2,
+        -1,
+        0,
+        2,
+        5,
+    ]

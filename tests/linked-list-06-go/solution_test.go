@@ -32,6 +32,8 @@ func TestAddTwoNumbers(t *testing.T) {
 		{[]int{0}, []int{0}, []int{0}},
 		{[]int{9, 9, 9, 9, 9, 9, 9}, []int{9, 9, 9, 9}, []int{8, 9, 9, 9, 0, 0, 0, 1}},
 		{[]int{5}, []int{5}, []int{0, 1}},
+		{[]int{1, 8}, []int{0}, []int{1, 8}},
+		{[]int{2, 4, 3}, []int{5, 6, 4, 9}, []int{7, 0, 8, 9}},
 	}
 
 	for _, c := range cases {

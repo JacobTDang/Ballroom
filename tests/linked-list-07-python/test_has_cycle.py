@@ -18,3 +18,4 @@ def test_has_cycle():
     assert has_cycle(build_cycle_list([1], -1)) is False
     assert has_cycle(build_cycle_list([], -1)) is False
     assert has_cycle(build_cycle_list([1, 2, 3], -1)) is False
+    assert has_cycle(build_cycle_list([1, 2, 3, 4, 5, 6], 2)) is True

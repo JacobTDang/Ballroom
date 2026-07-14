@@ -76,4 +76,5 @@ func TestCopyRandomList(t *testing.T) {
 	checkCopyRandomList(t, []int{1, 2}, []int{1, 1})
 	checkCopyRandomList(t, []int{3, 3, 3}, []int{-1, -1, -1})
 	checkCopyRandomList(t, []int{}, []int{})
+	checkCopyRandomList(t, []int{5}, []int{0})
 }

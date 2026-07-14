@@ -12,6 +12,8 @@ func TestFindDuplicate(t *testing.T) {
 		{[]int{1, 1}, 1},
 		{[]int{1, 1, 2}, 1},
 		{[]int{2, 2, 2, 2, 2}, 2},
+		{[]int{1, 2, 3, 4, 5, 6, 7, 8, 9, 5}, 5},
+		{[]int{1, 2, 2}, 2},
 	}
 
 	for _, c := range cases {

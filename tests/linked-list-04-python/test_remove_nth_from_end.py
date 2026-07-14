@@ -23,3 +23,5 @@ def test_remove_nth_from_end():
     assert to_list(remove_nth_from_end(build_list([1]), 1)) == []
     assert to_list(remove_nth_from_end(build_list([1, 2]), 1)) == [1]
     assert to_list(remove_nth_from_end(build_list([1, 2]), 2)) == [2]
+    assert to_list(remove_nth_from_end(build_list([1, 2, 3, 4, 5]), 5)) == [2, 3, 4, 5]
+    assert to_list(remove_nth_from_end(build_list([1, 2, 3, 4, 5]), 1)) == [1, 2, 3, 4]

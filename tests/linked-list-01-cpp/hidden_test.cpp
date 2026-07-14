@@ -36,6 +36,10 @@ int main() {
     assert(toVector(ReverseList(buildList({1, 2}))) == std::vector<int>({2, 1}));
     assert(toVector(ReverseList(buildList({}))) == std::vector<int>({}));
     assert(toVector(ReverseList(buildList({7}))) == std::vector<int>({7}));
+    assert(toVector(ReverseList(buildList({1, 1, 2, 2, 3}))) ==
+           std::vector<int>({3, 2, 2, 1, 1}));
+    assert(toVector(ReverseList(buildList({-5, -3, 0, 3, 5}))) ==
+           std::vector<int>({5, 3, 0, -3, -5}));
     printf("all assertions passed\n");
     return 0;
 }

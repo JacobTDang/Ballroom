@@ -63,6 +63,7 @@ int main() {
     check({1, 2}, {1, 1});
     check({3, 3, 3}, {-1, -1, -1});
     check({}, {});
+    check({5}, {0});
     printf("all assertions passed\n");
     return 0;
 }

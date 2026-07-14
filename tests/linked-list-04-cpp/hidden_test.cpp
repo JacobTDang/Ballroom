@@ -36,6 +36,10 @@ int main() {
     assert(toVector(RemoveNthFromEnd(buildList({1}), 1)) == std::vector<int>({}));
     assert(toVector(RemoveNthFromEnd(buildList({1, 2}), 1)) == std::vector<int>({1}));
     assert(toVector(RemoveNthFromEnd(buildList({1, 2}), 2)) == std::vector<int>({2}));
+    assert(toVector(RemoveNthFromEnd(buildList({1, 2, 3, 4, 5}), 5)) ==
+           std::vector<int>({2, 3, 4, 5}));
+    assert(toVector(RemoveNthFromEnd(buildList({1, 2, 3, 4, 5}), 1)) ==
+           std::vector<int>({1, 2, 3, 4}));
     printf("all assertions passed\n");
     return 0;
 }

@@ -32,6 +32,8 @@ func TestMergeTwoLists(t *testing.T) {
 		{[]int{}, []int{}, []int{}},
 		{[]int{}, []int{0}, []int{0}},
 		{[]int{5}, []int{1, 2, 4}, []int{1, 2, 4, 5}},
+		{[]int{1, 1, 1}, []int{1, 1, 1}, []int{1, 1, 1, 1, 1, 1}},
+		{[]int{-3, -1, 2}, []int{-2, 0, 5}, []int{-3, -2, -1, 0, 2, 5}},
 	}
 
 	for _, c := range cases {

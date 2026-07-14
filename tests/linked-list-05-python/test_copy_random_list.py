@@ -42,3 +42,4 @@ def test_copy_random_list():
     check([1, 2], [1, 1])
     check([3, 3, 3], [-1, -1, -1])
     check([], [])
+    check([5], [0])

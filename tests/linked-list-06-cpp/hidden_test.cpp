@@ -37,6 +37,10 @@ int main() {
     assert(toVector(AddTwoNumbers(buildList({9, 9, 9, 9, 9, 9, 9}), buildList({9, 9, 9, 9}))) ==
            std::vector<int>({8, 9, 9, 9, 0, 0, 0, 1}));
     assert(toVector(AddTwoNumbers(buildList({5}), buildList({5}))) == std::vector<int>({0, 1}));
+    assert(toVector(AddTwoNumbers(buildList({1, 8}), buildList({0}))) ==
+           std::vector<int>({1, 8}));
+    assert(toVector(AddTwoNumbers(buildList({2, 4, 3}), buildList({5, 6, 4, 9}))) ==
+           std::vector<int>({7, 0, 8, 9}));
     printf("all assertions passed\n");
     return 0;
 }

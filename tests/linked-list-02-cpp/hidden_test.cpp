@@ -37,6 +37,10 @@ int main() {
     assert(toVector(MergeTwoLists(buildList({}), buildList({0}))) == std::vector<int>({0}));
     assert(toVector(MergeTwoLists(buildList({5}), buildList({1, 2, 4}))) ==
            std::vector<int>({1, 2, 4, 5}));
+    assert(toVector(MergeTwoLists(buildList({1, 1, 1}), buildList({1, 1, 1}))) ==
+           std::vector<int>({1, 1, 1, 1, 1, 1}));
+    assert(toVector(MergeTwoLists(buildList({-3, -1, 2}), buildList({-2, 0, 5}))) ==
+           std::vector<int>({-3, -2, -1, 0, 2, 5}));
     printf("all assertions passed\n");
     return 0;
 }

@@ -32,6 +32,7 @@ func TestHasCycle(t *testing.T) {
 		{[]int{1}, -1, false},
 		{[]int{}, -1, false},
 		{[]int{1, 2, 3}, -1, false},
+		{[]int{1, 2, 3, 4, 5, 6}, 2, true},
 	}
 
 	for _, c := range cases {

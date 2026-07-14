@@ -33,6 +33,8 @@ func TestRemoveNthFromEnd(t *testing.T) {
 		{[]int{1}, 1, []int{}},
 		{[]int{1, 2}, 1, []int{1}},
 		{[]int{1, 2}, 2, []int{2}},
+		{[]int{1, 2, 3, 4, 5}, 5, []int{2, 3, 4, 5}},
+		{[]int{1, 2, 3, 4, 5}, 1, []int{1, 2, 3, 4}},
 	}
 
 	for _, c := range cases {
