@@ -59,26 +59,61 @@ func TestOverlayAurora_ZeroBrightnessReturnsContentUnchanged(t *testing.T) {
 	}
 }
 
-func TestOverlayAurora_PaintsBackgroundOnEveryCell(t *testing.T) {
-	got := overlayAurora("hi", 6, 3, 1.0, 0.35)
+func TestOverlayAurora_GlowsAtEdgesNotCenter(t *testing.T) {
+	const w, h = 60, 21
+	got := overlayAurora("hi", w, h, 1.0, auroraBrightness)
 	lines := strings.Split(got, "\n")
-	if len(lines) != 3 {
-		t.Fatalf("overlayAurora produced %d lines, want 3 (content padded to full height)", len(lines))
+	if len(lines) != h {
+		t.Fatalf("overlayAurora produced %d lines, want %d (content padded to full height)", len(lines), h)
 	}
-	for i, line := range lines {
-		if n := strings.Count(line, "\x1b[48;2;"); n != 6 {
-			t.Errorf("line %d has %d background escapes, want 6 (one per cell, full width)", i, n)
-		}
-		if !strings.HasSuffix(line, "\x1b[49m") {
-			t.Errorf("line %d = %q, want it to end by restoring the default background so nothing bleeds past the pane", i, line)
-		}
+
+	// The top border row sits fully inside the glow: every cell painted.
+	if n := strings.Count(lines[0], "\x1b[48;2;"); n != w {
+		t.Errorf("top row has %d background escapes, want %d (the border itself glows end to end)", n, w)
+	}
+
+	// The middle row is painted only near its left/right edges -- the
+	// glow must dissolve before reaching the center, leaving the
+	// conversation area on the terminal's own background.
+	mid := lines[h/2]
+	nMid := strings.Count(mid, "\x1b[48;2;")
+	if nMid == 0 {
+		t.Fatal("middle row has no background escapes at all -- the side glow is missing")
+	}
+	if nMid >= w/2 {
+		t.Errorf("middle row has %d background escapes, want well under %d -- the glow is flooding the center instead of fading at the borders", nMid, w/2)
+	}
+	// The exact center cell must be untouched: unpainted center is what
+	// keeps text readable and makes this a border glow, not a wash.
+	if centerRun := strings.Contains(ansi.Strip(mid), strings.Repeat(" ", 10)); !centerRun {
+		t.Errorf("middle row = %q, want a wide plain-space run at the center", mid)
+	}
+}
+
+func TestOverlayAurora_ResetsBackgroundLeavingTheGlow(t *testing.T) {
+	// Where a painted edge cell is followed by an unpainted interior
+	// cell, the background must be explicitly reset -- otherwise the
+	// glow color would smear across the whole line through
+	// background-color inheritance.
+	const w, h = 60, 21
+	got := overlayAurora("", w, h, 1.0, auroraBrightness)
+	mid := strings.Split(got, "\n")[h/2]
+	lastPaint := strings.LastIndex(mid, "\x1b[48;2;")
+	lastReset := strings.LastIndex(mid, "\x1b[49m")
+	firstPaint := strings.Index(mid, "\x1b[48;2;")
+	firstReset := strings.Index(mid, "\x1b[49m")
+	if firstReset < firstPaint {
+		t.Errorf("middle row resets background before ever painting -- reset placement is wrong: %q", mid)
+	}
+	if lastReset < lastPaint {
+		t.Errorf("middle row's last paint at %d is never followed by a reset (last reset at %d) -- the glow will smear across the line", lastPaint, lastReset)
 	}
 }
 
 func TestOverlayAurora_PreservesGlyphsAndForegroundStyling(t *testing.T) {
 	fg := "\x1b[38;2;10;20;30m"
 	content := fg + "hi\x1b[0m"
-	got := overlayAurora(content, 6, 1, 1.0, 0.35)
+	got := overlayAurora(content, 6, 1, 1.0, auroraBrightness)
 	if !strings.Contains(got, fg) {
 		t.Errorf("overlayAurora dropped the content's own foreground escape %q", fg)
 	}
@@ -88,17 +123,21 @@ func TestOverlayAurora_PreservesGlyphsAndForegroundStyling(t *testing.T) {
 	}
 }
 
-func TestOverlayAurora_AnimatesOverTime(t *testing.T) {
-	a := overlayAurora("hi", 8, 2, 0.0, 0.35)
-	b := overlayAurora("hi", 8, 2, 5.0, 0.35)
+func TestOverlayAurora_VisiblyAnimatesWithinASecond(t *testing.T) {
+	// The motion has to be perceptible, not technically-nonzero -- the
+	// first version drifted so slowly it read as a static image (real
+	// feedback: "the aurora should be moving"). One second apart, the
+	// top border row must render differently.
+	a := strings.Split(overlayAurora("hi", 60, 12, 0.0, auroraBrightness), "\n")[0]
+	b := strings.Split(overlayAurora("hi", 60, 12, 1.0, auroraBrightness), "\n")[0]
 	if a == b {
-		t.Error("overlayAurora output identical at t=0 and t=5 -- the background isn't animating")
+		t.Error("top border row identical 1 second apart -- the glow isn't visibly moving")
 	}
 }
 
 func TestOverlayAurora_KeepsContentTallerThanPane(t *testing.T) {
 	content := "1\n2\n3\n4\n5"
-	got := overlayAurora(content, 4, 3, 1.0, 0.35)
+	got := overlayAurora(content, 4, 3, 1.0, auroraBrightness)
 	if n := len(strings.Split(got, "\n")); n != 5 {
 		t.Errorf("overlayAurora produced %d lines for 5-line content, want 5 -- a background paints behind content, it never clips it", n)
 	}
