@@ -1,0 +1,11 @@
+{
+  "id": "1d-dp-12-go",
+  "problem_id": "1d-dp-12",
+  "title": "Partition Equal Subset Sum",
+  "category": "1d-dp",
+  "language": "go",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}

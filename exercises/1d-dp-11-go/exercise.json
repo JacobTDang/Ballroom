@@ -1,0 +1,11 @@
+{
+  "id": "1d-dp-11-go",
+  "problem_id": "1d-dp-11",
+  "title": "Longest Increasing Subsequence",
+  "category": "1d-dp",
+  "language": "go",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}
