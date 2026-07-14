@@ -14,3 +14,9 @@ def test_kth_largest_empty_initial_stream():
     kl = KthLargest(1, [])
     assert kl.add(-3) == -3
     assert kl.add(-2) == -2
+
+
+def test_kth_largest_k_equals_two():
+    kl = KthLargest(2, [0])
+    assert kl.add(-1) == -1
+    assert kl.add(1) == 0

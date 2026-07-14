@@ -20,6 +20,12 @@ int main() {
         assert(kl.add(-3) == -3);
         assert(kl.add(-2) == -2);
     }
+    {
+        std::vector<int> nums = {0};
+        KthLargest kl(2, nums);
+        assert(kl.add(-1) == -1);
+        assert(kl.add(1) == 0);
+    }
     printf("all assertions passed\n");
     return 0;
 }

@@ -45,3 +45,19 @@ func TestMedianFinder_OutOfOrderInserts(t *testing.T) {
 		t.Errorf("FindMedian() = %v, want 6.0", got)
 	}
 }
+
+func TestMedianFinder_NegativeValues(t *testing.T) {
+	mf := NewMedianFinder()
+	for _, n := range []int{-5, -1, -3} {
+		mf.AddNum(n)
+	}
+	// sorted: -5,-3,-1 -> median -3
+	if got := mf.FindMedian(); !closeEnough(got, -3.0) {
+		t.Errorf("FindMedian() = %v, want -3.0", got)
+	}
+	mf.AddNum(-2)
+	// sorted: -5,-3,-2,-1 -> median (-3+-2)/2=-2.5
+	if got := mf.FindMedian(); !closeEnough(got, -2.5) {
+		t.Errorf("FindMedian() = %v, want -2.5", got)
+	}
+}

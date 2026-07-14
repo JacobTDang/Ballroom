@@ -18,6 +18,10 @@ int main() {
     assert(LeastInterval(t3, 2) == 16);
     auto t4 = toChars("A");
     assert(LeastInterval(t4, 5) == 1);
+    auto t5 = toChars("AAAB");
+    assert(LeastInterval(t5, 3) == 9);
+    auto t6 = toChars("AB");
+    assert(LeastInterval(t6, 2) == 2);
     printf("all assertions passed\n");
     return 0;
 }

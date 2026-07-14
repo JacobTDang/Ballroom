@@ -15,6 +15,10 @@ int main() {
     assert(LastStoneWeight(d) == 2);
     std::vector<int> e = {2, 2};
     assert(LastStoneWeight(e) == 0);
+    std::vector<int> f = {10, 4, 2, 10};
+    assert(LastStoneWeight(f) == 2);
+    std::vector<int> g = {1, 1, 1, 1};
+    assert(LastStoneWeight(g) == 0);
     printf("all assertions passed\n");
     return 0;
 }

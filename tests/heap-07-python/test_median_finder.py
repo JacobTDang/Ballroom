@@ -23,3 +23,12 @@ def test_median_finder_out_of_order_inserts():
     assert mf.find_median() == 5.0
     mf.add_num(10)
     assert mf.find_median() == 6.0
+
+
+def test_median_finder_negative_values():
+    mf = MedianFinder()
+    for n in [-5, -1, -3]:
+        mf.add_num(n)
+    assert mf.find_median() == -3.0
+    mf.add_num(-2)
+    assert mf.find_median() == -2.5

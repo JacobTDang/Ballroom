@@ -29,6 +29,13 @@ int main() {
         mf.addNum(10);
         assert(closeEnough(mf.findMedian(), 6.0));
     }
+    {
+        MedianFinder mf;
+        for (int n : {-5, -1, -3}) mf.addNum(n);
+        assert(closeEnough(mf.findMedian(), -3.0));
+        mf.addNum(-2);
+        assert(closeEnough(mf.findMedian(), -2.5));
+    }
     printf("all assertions passed\n");
     return 0;
 }
