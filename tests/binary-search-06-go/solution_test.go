@@ -34,3 +34,15 @@ func TestTimeMap_UnknownKeyReturnsEmpty(t *testing.T) {
 		t.Fatalf("Get(missing, 1) = %q, want empty", got)
 	}
 }
+
+func TestTimeMap_MultipleKeysDoNotInterfere(t *testing.T) {
+	m := NewTimeMap()
+	m.Set("foo", "foo-val", 1)
+	m.Set("bar", "bar-val", 2)
+	if got := m.Get("foo", 10); got != "foo-val" {
+		t.Fatalf("Get(foo, 10) = %q, want foo-val", got)
+	}
+	if got := m.Get("bar", 10); got != "bar-val" {
+		t.Fatalf("Get(bar, 10) = %q, want bar-val", got)
+	}
+}

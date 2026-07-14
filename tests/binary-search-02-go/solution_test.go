@@ -15,6 +15,8 @@ func TestSearchMatrix(t *testing.T) {
 		{[][]int{{1, 3}}, 3, true},
 		{m, 60, true},
 		{m, 0, false},
+		{m, 1, true},
+		{m, 23, true},
 	}
 
 	for _, c := range cases {

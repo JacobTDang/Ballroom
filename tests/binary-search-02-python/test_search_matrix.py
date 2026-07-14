@@ -10,3 +10,5 @@ def test_search_matrix():
     assert search_matrix([[1, 3]], 3) is True
     assert search_matrix(M, 60) is True
     assert search_matrix(M, 0) is False
+    assert search_matrix(M, 1) is True
+    assert search_matrix(M, 23) is True
