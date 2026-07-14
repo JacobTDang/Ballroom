@@ -33,6 +33,19 @@ int main() {
         s.pop();
         assert(s.getMin() == 3);
     }
+    {
+        MinStack s;
+        s.push(2);
+        s.push(2);
+        s.push(2);
+        assert(s.getMin() == 2);
+        s.pop();
+        assert(s.getMin() == 2);
+        s.pop();
+        assert(s.getMin() == 2);
+        s.push(-5);
+        assert(s.getMin() == -5);
+    }
     printf("all assertions passed\n");
     return 0;
 }

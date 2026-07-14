@@ -49,3 +49,25 @@ func TestMinStack_MinRevertsAfterPoppingNewMin(t *testing.T) {
 		t.Fatalf("GetMin() = %d, want 3", got)
 	}
 }
+
+func TestMinStack_AllSameValuesThenNewMin(t *testing.T) {
+	s := NewMinStack()
+	s.Push(2)
+	s.Push(2)
+	s.Push(2)
+	if got := s.GetMin(); got != 2 {
+		t.Fatalf("GetMin() = %d, want 2", got)
+	}
+	s.Pop()
+	if got := s.GetMin(); got != 2 {
+		t.Fatalf("GetMin() = %d, want 2", got)
+	}
+	s.Pop()
+	if got := s.GetMin(); got != 2 {
+		t.Fatalf("GetMin() = %d, want 2", got)
+	}
+	s.Push(-5)
+	if got := s.GetMin(); got != -5 {
+		t.Fatalf("GetMin() = %d, want -5", got)
+	}
+}

@@ -14,6 +14,10 @@ func TestIsValid(t *testing.T) {
 		{"{[]}", true},
 		{"(", false},
 		{"]", false},
+		{"", true},
+		{"((()))", true},
+		{"(((", false},
+		{"){", false},
 	}
 
 	for _, c := range cases {

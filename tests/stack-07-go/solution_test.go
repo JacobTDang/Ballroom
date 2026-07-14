@@ -11,6 +11,9 @@ func TestLargestRectangleArea(t *testing.T) {
 		{[]int{2, 4}, 4},
 		{[]int{1}, 1},
 		{[]int{0, 0}, 0},
+		{[]int{5, 5, 5, 5}, 20},
+		{[]int{5, 4, 3, 2, 1}, 9},
+		{[]int{1, 2, 3, 4, 5}, 9},
 	}
 
 	for _, c := range cases {

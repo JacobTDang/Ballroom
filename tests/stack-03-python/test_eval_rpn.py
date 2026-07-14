@@ -10,3 +10,6 @@ def test_eval_rpn():
     )
     assert eval_rpn(["18"]) == 18
     assert eval_rpn(["4", "3", "-"]) == 1
+    assert eval_rpn(["-3", "4", "+"]) == 1
+    assert eval_rpn(["7", "-2", "/"]) == -3
+    assert eval_rpn(["5", "5", "*", "5", "*"]) == 125
