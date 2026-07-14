@@ -11,6 +11,9 @@ int main() {
     assert(CheckInclusion("hello", "ooolleoooleh") == false);
     assert(CheckInclusion("a", "a") == true);
     assert(CheckInclusion("abc", "ab") == false);
+    assert(CheckInclusion("aa", "ab") == false);
+    assert(CheckInclusion("abcd", "dcba") == true);
+    assert(CheckInclusion("ab", "a") == false);
     printf("all assertions passed\n");
     return 0;
 }

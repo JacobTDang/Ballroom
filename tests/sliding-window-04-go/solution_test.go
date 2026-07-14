@@ -13,6 +13,9 @@ func TestCheckInclusion(t *testing.T) {
 		{"hello", "ooolleoooleh", false},
 		{"a", "a", true},
 		{"abc", "ab", false},
+		{"aa", "ab", false},
+		{"abcd", "dcba", true},
+		{"ab", "a", false},
 	}
 
 	for _, c := range cases {

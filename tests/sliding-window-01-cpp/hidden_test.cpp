@@ -11,6 +11,9 @@ int main() {
     assert(MaxProfit({1}) == 0);
     assert(MaxProfit({3, 3, 3, 3}) == 0);
     assert(MaxProfit({1, 2, 4, 2, 5, 7, 2, 4, 9, 0}) == 8);
+    assert(MaxProfit({}) == 0);
+    assert(MaxProfit({3, 1, 4, 1, 5, 9, 2, 6}) == 8);
+    assert(MaxProfit({2, 1, 2, 1, 0, 1, 2}) == 2);
     printf("all assertions passed\n");
     return 0;
 }

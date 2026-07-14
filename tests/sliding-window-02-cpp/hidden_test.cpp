@@ -13,6 +13,9 @@ int main() {
     assert(LengthOfLongestSubstring("au") == 2);
     assert(LengthOfLongestSubstring("dvdf") == 3);
     assert(LengthOfLongestSubstring("abba") == 2);
+    assert(LengthOfLongestSubstring("tmmzuxt") == 5);
+    assert(LengthOfLongestSubstring("aaaaaaaaaa") == 1);
+    assert(LengthOfLongestSubstring("abcdefg") == 7);
     printf("all assertions passed\n");
     return 0;
 }

@@ -8,3 +8,6 @@ def test_check_inclusion():
     assert check_inclusion("hello", "ooolleoooleh") is False
     assert check_inclusion("a", "a") is True
     assert check_inclusion("abc", "ab") is False
+    assert check_inclusion("aa", "ab") is False
+    assert check_inclusion("abcd", "dcba") is True
+    assert check_inclusion("ab", "a") is False

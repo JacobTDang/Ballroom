@@ -13,6 +13,10 @@ func TestCharacterReplacement(t *testing.T) {
 		{"ABCDE", 1, 2},
 		{"AAAA", 0, 4},
 		{"A", 0, 1},
+		{"ABBB", 2, 4},
+		{"", 2, 0},
+		{"AAAA", 4, 4},
+		{"ABABABAB", 3, 7},
 	}
 
 	for _, c := range cases {

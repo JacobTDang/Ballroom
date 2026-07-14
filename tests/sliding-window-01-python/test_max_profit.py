@@ -8,3 +8,6 @@ def test_max_profit():
     assert max_profit([1]) == 0
     assert max_profit([3, 3, 3, 3]) == 0
     assert max_profit([1, 2, 4, 2, 5, 7, 2, 4, 9, 0]) == 8
+    assert max_profit([]) == 0
+    assert max_profit([3, 1, 4, 1, 5, 9, 2, 6]) == 8
+    assert max_profit([2, 1, 2, 1, 0, 1, 2]) == 2
