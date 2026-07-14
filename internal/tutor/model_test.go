@@ -467,12 +467,22 @@ func TestNewTutorModel_DetectsNativeStrategyWhenCheckReportsSupported(t *testing
 	}
 }
 
-// TestNewTutorModel_DetectsNativeStrategyOnCheckError locks in the
-// fail-open default: a check that can't even run (unreachable host,
-// timeout) must not silently switch a previously-working native session
-// to the fallback loop -- only a definitive "no" from a real answer
-// should do that.
-func TestNewTutorModel_DetectsNativeStrategyOnCheckError(t *testing.T) {
+// TestNewTutorModel_DetectsFallbackStrategyOnCheckError locks in a
+// real, live-reproduced case (not a hypothetical): OpenRouter's free
+// meta-llama/llama-3.2-3b-instruct:free returns a 404 "No endpoints
+// found that support tool use" for ANY request that binds a tools
+// parameter at all -- including CheckToolCalling's own probe. Defaulting
+// to nativeToolCalling on that error (an earlier version of this
+// function did) breaks the session completely: the real worker/
+// orchestrator agent ALSO binds tools via WithTools, so every single
+// real turn 404s identically -- confirmed live via cmd/ballroom against
+// the real OpenRouter API before this test existed. runFallbackToolLoop
+// never binds tools via the API at all (it teaches the model about
+// tools through the text prompt instead), so it's immune to this
+// specific failure -- meaning an error here should default to
+// fallback, not native, since fallback is the strategy actually capable
+// of working when the check itself couldn't even complete.
+func TestNewTutorModel_DetectsFallbackStrategyOnCheckError(t *testing.T) {
 	withFakeCheckToolCallingForSession(t, func(context.Context, string, string, string) (bool, error) {
 		return false, fmt.Errorf("simulated check failure")
 	})
@@ -483,8 +493,8 @@ func TestNewTutorModel_DetectsNativeStrategyOnCheckError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
-	if m.workerStrategy != nativeToolCalling {
-		t.Errorf("workerStrategy = %v, want nativeToolCalling (fail open on a check error)", m.workerStrategy)
+	if m.workerStrategy != jsonFallbackToolCalling {
+		t.Errorf("workerStrategy = %v, want jsonFallbackToolCalling (fail toward the strategy that can actually work when the check itself fails)", m.workerStrategy)
 	}
 }
 
