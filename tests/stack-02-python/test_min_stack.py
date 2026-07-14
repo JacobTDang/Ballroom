@@ -31,3 +31,17 @@ def test_min_reverts_after_popping_new_min():
     assert s.get_min() == 1
     s.pop()
     assert s.get_min() == 3
+
+
+def test_all_same_values_then_new_min():
+    s = MinStack()
+    s.push(2)
+    s.push(2)
+    s.push(2)
+    assert s.get_min() == 2
+    s.pop()
+    assert s.get_min() == 2
+    s.pop()
+    assert s.get_min() == 2
+    s.push(-5)
+    assert s.get_min() == -5
