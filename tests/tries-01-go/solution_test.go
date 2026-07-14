@@ -43,3 +43,23 @@ func TestTrie_EmptyTrieHasNoMatches(t *testing.T) {
 		t.Error("StartsWith on empty trie should be false")
 	}
 }
+
+func TestTrie_MultipleWordsShareCommonPrefix(t *testing.T) {
+	trie := NewTrie()
+	trie.Insert("app")
+	trie.Insert("apple")
+	trie.Insert("application")
+
+	if !trie.Search("app") {
+		t.Error("Search(app) = false, want true")
+	}
+	if !trie.Search("apple") {
+		t.Error("Search(apple) = false, want true")
+	}
+	if trie.Search("appl") {
+		t.Error("Search(appl) = true, want false (only a prefix, not inserted)")
+	}
+	if !trie.StartsWith("appl") {
+		t.Error("StartsWith(appl) = false, want true")
+	}
+}

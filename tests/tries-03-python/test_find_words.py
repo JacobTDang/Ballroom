@@ -19,3 +19,5 @@ def test_find_words():
     )
     check([list("ab"), list("cd")], ["abcb"], [])
     check([list("a")], ["a"], ["a"])
+    check([list("aa")], ["aaa"], [])
+    check([list("ab"), list("cd")], ["abdc"], ["abdc"])

@@ -37,6 +37,21 @@ func TestFindWords(t *testing.T) {
 			[]string{"a"},
 			[]string{"a"},
 		},
+		{
+			[][]byte{
+				[]byte("aa"),
+			},
+			[]string{"aaa"},
+			[]string{},
+		},
+		{
+			[][]byte{
+				[]byte("ab"),
+				[]byte("cd"),
+			},
+			[]string{"abdc"},
+			[]string{"abdc"},
+		},
 	}
 
 	for _, c := range cases {
