@@ -43,6 +43,17 @@ var categoryOrder = map[string]int{
 	exercise.CategoryBitManipulation: 22,
 }
 
+// languageOrder ranks language variants of the same problem so Python
+// sorts first (and is therefore the TUI language picker's default
+// selection) — before this map existed, variants sorted by raw
+// exercise ID string, which put cpp first purely as an alphabetical
+// accident ("cpp" < "go" < "python").
+var languageOrder = map[string]int{
+	exercise.LanguagePython: 0,
+	exercise.LanguageGo:     1,
+	exercise.LanguageCpp:    2,
+}
+
 // categoryDisplayNames holds the categories whose display label isn't
 // just the raw id read as-is — an acronym (DSA), a NeetCode roadmap name
 // with punctuation/casing a simple humanizer can't derive
@@ -176,6 +187,13 @@ func List(cfg config.Config) ([]ExerciseStatus, error) {
 		ci, cj := categoryOrder[exercises[i].Category], categoryOrder[exercises[j].Category]
 		if ci != cj {
 			return ci < cj
+		}
+		if exercises[i].ProblemID != exercises[j].ProblemID {
+			return exercises[i].ProblemID < exercises[j].ProblemID
+		}
+		li, lj := languageOrder[exercises[i].Language], languageOrder[exercises[j].Language]
+		if li != lj {
+			return li < lj
 		}
 		return exercises[i].ID < exercises[j].ID
 	})
