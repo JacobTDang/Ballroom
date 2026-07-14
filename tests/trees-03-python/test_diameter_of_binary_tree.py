@@ -27,3 +27,5 @@ def test_diameter_of_binary_tree():
     assert diameter_of_binary_tree(build_tree([1, 2])) == 1
     assert diameter_of_binary_tree(build_tree([1])) == 0
     assert diameter_of_binary_tree(build_tree([1, 2, 3])) == 2
+    assert diameter_of_binary_tree(build_tree([1, 2, 3, 4, 5, 6, 7])) == 4
+    assert diameter_of_binary_tree(build_tree([0])) == 0

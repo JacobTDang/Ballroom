@@ -48,6 +48,8 @@ int main() {
     assert((RightSideView(buildTree({1, std::nullopt, 3})) == std::vector<int>{1, 3}));
     assert((RightSideView(buildTree({})) == std::vector<int>{}));
     assert((RightSideView(buildTree({1, 2, 3, 4})) == std::vector<int>{1, 3, 4}));
+    assert((RightSideView(buildTree({1, 2, 3, 4, 5, 6, 7})) == std::vector<int>{1, 3, 7}));
+    assert((RightSideView(buildTree({1, 2, std::nullopt, 3})) == std::vector<int>{1, 2, 3}));
     printf("all assertions passed\n");
     return 0;
 }

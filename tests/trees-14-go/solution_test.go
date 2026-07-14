@@ -41,6 +41,8 @@ func TestMaxPathSum(t *testing.T) {
 		{[]*int{ip(-10), ip(9), ip(20), nil, nil, ip(15), ip(7)}, 42},
 		{[]*int{ip(-3)}, -3},
 		{[]*int{ip(2), ip(-1)}, 2},
+		{[]*int{ip(1), ip(2), ip(3), ip(4), ip(5), ip(6), ip(7)}, 18},
+		{[]*int{ip(-2), ip(-1)}, -1},
 	}
 
 	for _, c := range cases {

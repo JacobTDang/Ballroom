@@ -31,3 +31,13 @@ def test_build_tree():
     ]
     assert to_level_order(build_tree([-1], [-1])) == [-1]
     assert to_level_order(build_tree([1, 2, 3], [3, 2, 1])) == [1, 2, None, 3]
+    assert to_level_order(build_tree([1, 2, 4, 5, 3, 6, 7], [4, 2, 5, 1, 6, 3, 7])) == [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+    ]
+    assert to_level_order(build_tree([1, 2], [1, 2])) == [1, None, 2]

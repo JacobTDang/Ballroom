@@ -40,6 +40,8 @@ func TestGoodNodes(t *testing.T) {
 		{[]*int{ip(3), ip(1), ip(4), ip(3), nil, ip(1), ip(5)}, 4},
 		{[]*int{ip(3), ip(3), nil, ip(4), ip(2)}, 3},
 		{[]*int{ip(1)}, 1},
+		{[]*int{ip(1), ip(2), nil, ip(3)}, 3},
+		{[]*int{ip(5), ip(3), ip(3)}, 1},
 	}
 
 	for _, c := range cases {

@@ -27,3 +27,5 @@ def test_is_balanced():
     assert is_balanced(build_tree([1, 2, 2, 3, 3, None, None, 4, 4])) is False
     assert is_balanced(build_tree([])) is True
     assert is_balanced(build_tree([1])) is True
+    assert is_balanced(build_tree([1, 2, 3, 4, 5, 6, 7])) is True
+    assert is_balanced(build_tree([1, 2, 3, 4, None, None, None, 5])) is False

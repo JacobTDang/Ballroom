@@ -49,6 +49,8 @@ int main() {
                       buildTree({4, 1, 2})) == false);
     assert(IsSubtree(buildTree({1, 1}), buildTree({1})) == true);
     assert(IsSubtree(buildTree({1}), buildTree({1})) == true);
+    assert(IsSubtree(buildTree({3, 4, 5}), buildTree({3, 4, 5})) == true);
+    assert(IsSubtree(buildTree({3, 4, 5}), buildTree({6})) == false);
     printf("all assertions passed\n");
     return 0;
 }

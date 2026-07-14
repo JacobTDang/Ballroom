@@ -43,6 +43,8 @@ int main() {
     check({3, 9, 20, 15, 7}, {9, 3, 15, 20, 7}, {3, 9, 20, std::nullopt, std::nullopt, 15, 7});
     check({-1}, {-1}, {-1});
     check({1, 2, 3}, {3, 2, 1}, {1, 2, std::nullopt, 3});
+    check({1, 2, 4, 5, 3, 6, 7}, {4, 2, 5, 1, 6, 3, 7}, {1, 2, 3, 4, 5, 6, 7});
+    check({1, 2}, {1, 2}, {1, std::nullopt, 2});
     printf("all assertions passed\n");
     return 0;
 }

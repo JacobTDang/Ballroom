@@ -47,6 +47,8 @@ int main() {
     assert(MaxPathSum(buildTree({-10, 9, 20, std::nullopt, std::nullopt, 15, 7})) == 42);
     assert(MaxPathSum(buildTree({-3})) == -3);
     assert(MaxPathSum(buildTree({2, -1})) == 2);
+    assert(MaxPathSum(buildTree({1, 2, 3, 4, 5, 6, 7})) == 18);
+    assert(MaxPathSum(buildTree({-2, -1})) == -1);
     printf("all assertions passed\n");
     return 0;
 }

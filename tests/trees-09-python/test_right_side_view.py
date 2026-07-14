@@ -27,3 +27,5 @@ def test_right_side_view():
     assert right_side_view(build_tree([1, None, 3])) == [1, 3]
     assert right_side_view(build_tree([])) == []
     assert right_side_view(build_tree([1, 2, 3, 4])) == [1, 3, 4]
+    assert right_side_view(build_tree([1, 2, 3, 4, 5, 6, 7])) == [1, 3, 7]
+    assert right_side_view(build_tree([1, 2, None, 3])) == [1, 2, 3]

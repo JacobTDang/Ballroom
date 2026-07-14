@@ -27,3 +27,5 @@ def test_max_path_sum():
     assert max_path_sum(build_tree([-10, 9, 20, None, None, 15, 7])) == 42
     assert max_path_sum(build_tree([-3])) == -3
     assert max_path_sum(build_tree([2, -1])) == 2
+    assert max_path_sum(build_tree([1, 2, 3, 4, 5, 6, 7])) == 18
+    assert max_path_sum(build_tree([-2, -1])) == -1

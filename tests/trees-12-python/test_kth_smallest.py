@@ -27,3 +27,5 @@ def test_kth_smallest():
     assert kth_smallest(build_tree([3, 1, 4, None, 2]), 2) == 2
     assert kth_smallest(build_tree([3, 1, 4, None, 2]), 4) == 4
     assert kth_smallest(build_tree([5, 3, 6, 2, 4, None, None, 1]), 3) == 3
+    assert kth_smallest(build_tree([5, 3, 6, 2, 4, None, None, 1]), 5) == 5
+    assert kth_smallest(build_tree([1]), 1) == 1

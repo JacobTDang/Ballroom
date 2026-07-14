@@ -41,6 +41,8 @@ func TestIsBalanced(t *testing.T) {
 		{[]*int{ip(1), ip(2), ip(2), ip(3), ip(3), nil, nil, ip(4), ip(4)}, false},
 		{[]*int{}, true},
 		{[]*int{ip(1)}, true},
+		{[]*int{ip(1), ip(2), ip(3), ip(4), ip(5), ip(6), ip(7)}, true},
+		{[]*int{ip(1), ip(2), ip(3), ip(4), nil, nil, nil, ip(5)}, false},
 	}
 
 	for _, c := range cases {

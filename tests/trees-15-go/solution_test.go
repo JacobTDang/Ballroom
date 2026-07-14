@@ -65,6 +65,8 @@ func TestSerializeDeserialize_RoundTrip(t *testing.T) {
 		{ip(1)},
 		{ip(-1), ip(-2), ip(-3)},
 		{ip(5), ip(4), ip(7), ip(3), nil, ip(2), nil, ip(-1), nil, ip(9)},
+		{ip(0)},
+		{ip(100), nil, ip(200), nil, nil, nil, ip(300)},
 	}
 
 	for _, vals := range cases {

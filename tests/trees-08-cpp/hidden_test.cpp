@@ -47,6 +47,9 @@ int main() {
             std::vector<std::vector<int>>{{3}, {9, 20}, {15, 7}}));
     assert((LevelOrder(buildTree({1})) == std::vector<std::vector<int>>{{1}}));
     assert((LevelOrder(buildTree({})) == std::vector<std::vector<int>>{}));
+    assert((LevelOrder(buildTree({1, 2, 3, 4, 5, 6, 7})) ==
+            std::vector<std::vector<int>>{{1}, {2, 3}, {4, 5, 6, 7}}));
+    assert((LevelOrder(buildTree({1, 2})) == std::vector<std::vector<int>>{{1}, {2}}));
     printf("all assertions passed\n");
     return 0;
 }

@@ -41,6 +41,8 @@ func TestMaxDepth(t *testing.T) {
 		{[]*int{ip(1), nil, ip(2)}, 2},
 		{[]*int{}, 0},
 		{[]*int{ip(1)}, 1},
+		{[]*int{ip(1), ip(2), nil, ip(3)}, 3},
+		{[]*int{ip(1), ip(2), ip(3), ip(4), ip(5), ip(6), ip(7)}, 3},
 	}
 
 	for _, c := range cases {

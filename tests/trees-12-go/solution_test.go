@@ -42,6 +42,8 @@ func TestKthSmallest(t *testing.T) {
 		{[]*int{ip(3), ip(1), ip(4), nil, ip(2)}, 2, 2},
 		{[]*int{ip(3), ip(1), ip(4), nil, ip(2)}, 4, 4},
 		{[]*int{ip(5), ip(3), ip(6), ip(2), ip(4), nil, nil, ip(1)}, 3, 3},
+		{[]*int{ip(5), ip(3), ip(6), ip(2), ip(4), nil, nil, ip(1)}, 5, 5},
+		{[]*int{ip(1)}, 1, 1},
 	}
 
 	for _, c := range cases {

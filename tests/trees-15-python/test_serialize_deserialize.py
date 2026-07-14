@@ -52,3 +52,5 @@ def test_serialize_deserialize_round_trip():
     check([1])
     check([-1, -2, -3])
     check([5, 4, 7, 3, None, 2, None, -1, None, 9])
+    check([0])
+    check([100, None, 200, None, None, None, 300])

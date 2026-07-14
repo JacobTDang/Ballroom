@@ -28,3 +28,5 @@ def test_is_same_tree():
     assert is_same_tree(build_tree([1, 2, 1]), build_tree([1, 1, 2])) is False
     assert is_same_tree(build_tree([]), build_tree([])) is True
     assert is_same_tree(build_tree([1]), build_tree([])) is False
+    assert is_same_tree(build_tree([-5]), build_tree([-5])) is True
+    assert is_same_tree(build_tree([1]), build_tree([2])) is False

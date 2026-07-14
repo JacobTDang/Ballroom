@@ -47,6 +47,8 @@ int main() {
     assert(MaxDepth(buildTree({1, std::nullopt, 2})) == 2);
     assert(MaxDepth(buildTree({})) == 0);
     assert(MaxDepth(buildTree({1})) == 1);
+    assert(MaxDepth(buildTree({1, 2, std::nullopt, 3})) == 3);
+    assert(MaxDepth(buildTree({1, 2, 3, 4, 5, 6, 7})) == 3);
     printf("all assertions passed\n");
     return 0;
 }

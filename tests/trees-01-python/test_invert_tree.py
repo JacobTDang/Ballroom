@@ -57,3 +57,5 @@ def test_invert_tree():
     ]
     assert to_level_order(invert_tree(build_tree([2, 1, 3]))) == [2, 3, 1]
     assert to_level_order(invert_tree(build_tree([]))) == []
+    assert to_level_order(invert_tree(build_tree([1]))) == [1]
+    assert to_level_order(invert_tree(build_tree([1, 2, None]))) == [1, None, 2]

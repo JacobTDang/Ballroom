@@ -70,6 +70,14 @@ int main() {
         assert(LowestCommonAncestor(root, findNode(root, 7), findNode(root, 9))->val == 8);
     }
     {
+        TreeNode* root = buildTree(tree);
+        assert(LowestCommonAncestor(root, findNode(root, 6), findNode(root, 6))->val == 6);
+    }
+    {
+        TreeNode* root = buildTree(tree);
+        assert(LowestCommonAncestor(root, findNode(root, 0), findNode(root, 3))->val == 2);
+    }
+    {
         TreeNode* root = buildTree({2, 1});
         assert(LowestCommonAncestor(root, findNode(root, 2), findNode(root, 1))->val == 2);
     }

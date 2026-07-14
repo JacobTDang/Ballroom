@@ -48,6 +48,16 @@ func TestBuildTree(t *testing.T) {
 			[]int{3, 2, 1},
 			[]*int{ip(1), ip(2), nil, ip(3)},
 		},
+		{
+			[]int{1, 2, 4, 5, 3, 6, 7},
+			[]int{4, 2, 5, 1, 6, 3, 7},
+			[]*int{ip(1), ip(2), ip(3), ip(4), ip(5), ip(6), ip(7)},
+		},
+		{
+			[]int{1, 2},
+			[]int{1, 2},
+			[]*int{ip(1), nil, ip(2)},
+		},
 	}
 
 	for _, c := range cases {
