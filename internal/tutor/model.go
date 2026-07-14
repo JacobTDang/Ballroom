@@ -120,9 +120,16 @@ type tutorModel struct {
 	// only ever non-nil while turnInFlight; pulsePhase free-runs for the
 	// program's whole lifetime (see pulseTickMsg) rather than being
 	// started/stopped per turn, which is only visually relevant while
-	// turnInFlight anyway and avoids any start/stop bookkeeping.
+	// turnInFlight (plus the border fade window just after -- see
+	// thinkingBorderFade) anyway and avoids any start/stop bookkeeping.
 	activeCalls []activityCall
 	pulsePhase  int
+
+	// turnSettledAt is when turnInFlight last flipped from true to
+	// false -- the origin point for the thinking border's fade-out
+	// (thinkingborder.go). Zero means no turn has ever completed, so
+	// the border has never had a reason to exist.
+	turnSettledAt time.Time
 }
 
 // newTutorLayoutOnly builds a model with just the textarea/viewport
@@ -352,6 +359,7 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case turnCompleteMsg:
 		m.turnInFlight = false
+		m.turnSettledAt = time.Now()
 		calls := m.activeCalls
 		m.activeCalls = nil
 		m.helpRequestCount = msg.helpRequestCount
@@ -410,9 +418,15 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // rows as it's told to, so there is no way for overflow to land outside
 // the box and corrupt anything else, unlike raw cooked-mode wrapping.
 func (m *tutorModel) recomputeLayout() {
-	m.textarea.SetWidth(max(m.width-textareaBoxStyle.GetHorizontalFrameSize(), 1))
+	// Everything is sized against the inner content box, not the raw
+	// terminal -- the thinking border's ring (thinkingborder.go's
+	// borderInset) permanently reserves the outermost cell on each side
+	// so the conversation never reflows when the border appears and
+	// fades.
+	innerW, innerH := m.innerWidth(), m.innerHeight()
+	m.textarea.SetWidth(max(innerW-textareaBoxStyle.GetHorizontalFrameSize(), 1))
 
-	maxTaRows := max(m.height/2, minTextareaRows)
+	maxTaRows := max(innerH/2, minTextareaRows)
 	taRows := estimatedTextareaRows(m.textarea.Value(), m.textarea.Width())
 	taRows = min(max(taRows, minTextareaRows), maxTaRows)
 	m.textarea.SetHeight(taRows)
@@ -437,8 +451,8 @@ func (m *tutorModel) recomputeLayout() {
 		}
 	}
 
-	m.viewport.Width = m.width
-	m.viewport.Height = max(m.height-taRows-textareaBoxStyle.GetVerticalFrameSize()-activityRows, minViewportRows)
+	m.viewport.Width = innerW
+	m.viewport.Height = max(innerH-taRows-textareaBoxStyle.GetVerticalFrameSize()-activityRows, minViewportRows)
 }
 
 // activityContentWidth is the actual text width available inside the
@@ -450,7 +464,7 @@ func (m *tutorModel) recomputeLayout() {
 // own padding width (the same class of bug refreshViewport's word-wrap
 // fixes for the main conversation).
 func (m tutorModel) activityContentWidth() int {
-	return max(m.width-viewportContentStyle.GetHorizontalFrameSize(), 0)
+	return max(m.innerWidth()-viewportContentStyle.GetHorizontalFrameSize(), 0)
 }
 
 // estimatedTextareaRows estimates how many visual rows value will wrap
@@ -752,5 +766,9 @@ func (m tutorModel) View() string {
 		parts = append(parts, av)
 	}
 	parts = append(parts, textareaBoxStyle.Render(m.textarea.View()))
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	if m.borderInset() == 0 {
+		return content
+	}
+	return renderThinkingBorder(content, m.width, m.height, m.pulsePhase, m.thinkingBorderFade())
 }

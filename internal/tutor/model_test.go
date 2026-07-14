@@ -77,11 +77,14 @@ func TestTutorModel_WindowSizeMsg_SetsViewportAndTextareaWidth(t *testing.T) {
 	if got.width != 100 || got.height != 30 {
 		t.Errorf("width,height = %d,%d, want 100,30", got.width, got.height)
 	}
-	if got.viewport.Width != 100 {
-		t.Errorf("viewport.Width = %d, want 100", got.viewport.Width)
+	// The thinking border's ring permanently reserves the outermost
+	// cell on each side (see borderInset), so content sizes against
+	// width-2, not the raw terminal width.
+	if got.viewport.Width != 98 {
+		t.Errorf("viewport.Width = %d, want 98 (terminal width minus the border ring)", got.viewport.Width)
 	}
-	if got.textarea.Width() <= 0 || got.textarea.Width() >= 100 {
-		t.Errorf("textarea.Width() = %d, want less than 100 (room left for the border)", got.textarea.Width())
+	if got.textarea.Width() <= 0 || got.textarea.Width() >= 98 {
+		t.Errorf("textarea.Width() = %d, want less than 98 (room left for the input box border inside the ring)", got.textarea.Width())
 	}
 }
 
