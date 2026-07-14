@@ -338,7 +338,7 @@ func setModelCmd(tag string) error {
 		return nil
 	}
 
-	supported, err := checkToolCallingFn(hostOllamaAddr, tag, cfg.OpenRouterAPIKey)
+	supported, err := checkToolCallingFn(context.Background(), hostOllamaAddr, tag, cfg.OpenRouterAPIKey)
 	switch {
 	case err != nil:
 		fmt.Printf("warning: checking whether %s supports real tool calling failed: %v\n", tag, err)

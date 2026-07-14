@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -118,7 +119,7 @@ func TestReturnCmd_ErrorsOutsideSession(t *testing.T) {
 // reason.
 func fakeCheckToolCallingCLI(supported bool, err error) func() {
 	orig := checkToolCallingFn
-	checkToolCallingFn = func(string, string, string) (bool, error) { return supported, err }
+	checkToolCallingFn = func(context.Context, string, string, string) (bool, error) { return supported, err }
 	return func() { checkToolCallingFn = orig }
 }
 
@@ -213,7 +214,7 @@ func TestSetModelCmd_PreservesExistingOpenRouterAPIKey(t *testing.T) {
 func TestSetModelCmd_OpenRouterModelWithNoKeyWarnsWithoutCallingCheck(t *testing.T) {
 	checkCalled := false
 	orig := checkToolCallingFn
-	checkToolCallingFn = func(string, string, string) (bool, error) {
+	checkToolCallingFn = func(context.Context, string, string, string) (bool, error) {
 		checkCalled = true
 		return true, nil
 	}

@@ -9,6 +9,8 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
+	agentopt "github.com/cloudwego/eino/flow/agent"
+	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -329,4 +331,18 @@ func runFallbackToolLoop(ctx context.Context, cm model.ToolCallingChatModel, too
 	}
 
 	return schema.AssistantMessage(fallbackLoopExhaustedReply, nil), nil
+}
+
+// callRole dispatches one Generate call for a session role by its
+// detected strategy -- through the real react.Agent
+// (generateWithLeakRetry, tutor.go, unchanged) for nativeToolCalling, or
+// runFallbackToolLoop directly against the role's raw chat model for
+// jsonFallbackToolCalling. Called identically from startTurn's
+// checkComprehension and real-turn branches (model.go), so a role's
+// strategy is honored everywhere it can answer, not just the main turn.
+func callRole(ctx context.Context, strategy toolCallingStrategy, agent *react.Agent, cm model.ToolCallingChatModel, tools []tool.BaseTool, messages []*schema.Message, feed *activityFeed, activityCh chan<- []activityCall, activityOpt agentopt.AgentOption) (*schema.Message, error) {
+	if strategy == jsonFallbackToolCalling {
+		return runFallbackToolLoop(ctx, cm, tools, messages, feed, activityCh)
+	}
+	return generateWithLeakRetry(ctx, agent, messages, activityOpt)
 }

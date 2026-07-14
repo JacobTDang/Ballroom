@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -43,7 +44,7 @@ func fakeCheckModel(result preflight.Check) func() {
 // Returns a restore func to defer.
 func fakeCheckToolCalling(supported bool, err error) func() {
 	orig := checkToolCallingFn
-	checkToolCallingFn = func(string, string, string) (bool, error) { return supported, err }
+	checkToolCallingFn = func(context.Context, string, string, string) (bool, error) { return supported, err }
 	return func() { checkToolCallingFn = orig }
 }
 

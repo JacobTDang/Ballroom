@@ -424,6 +424,162 @@ func TestNewTutorModel_RoutingEnabledBannerNamesBothModels(t *testing.T) {
 	}
 }
 
+// withFakeCheckToolCallingForSession overrides checkToolCallingForSession
+// for the duration of one test (TestMain already defaults it to "always
+// native"), restoring it on cleanup -- same save/restore pattern
+// internal/tui/app_test.go's fakeCheckToolCalling uses.
+func withFakeCheckToolCallingForSession(t *testing.T, fn func(ctx context.Context, ollamaHost, model, apiKey string) (bool, error)) {
+	t.Helper()
+	orig := checkToolCallingForSession
+	checkToolCallingForSession = fn
+	t.Cleanup(func() { checkToolCallingForSession = orig })
+}
+
+func TestNewTutorModel_DetectsFallbackStrategyWhenCheckReportsUnsupported(t *testing.T) {
+	withFakeCheckToolCallingForSession(t, func(context.Context, string, string, string) (bool, error) {
+		return false, nil
+	})
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	if m.workerStrategy != jsonFallbackToolCalling {
+		t.Errorf("workerStrategy = %v, want jsonFallbackToolCalling", m.workerStrategy)
+	}
+}
+
+func TestNewTutorModel_DetectsNativeStrategyWhenCheckReportsSupported(t *testing.T) {
+	withFakeCheckToolCallingForSession(t, func(context.Context, string, string, string) (bool, error) {
+		return true, nil
+	})
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	if m.workerStrategy != nativeToolCalling {
+		t.Errorf("workerStrategy = %v, want nativeToolCalling", m.workerStrategy)
+	}
+}
+
+// TestNewTutorModel_DetectsNativeStrategyOnCheckError locks in the
+// fail-open default: a check that can't even run (unreachable host,
+// timeout) must not silently switch a previously-working native session
+// to the fallback loop -- only a definitive "no" from a real answer
+// should do that.
+func TestNewTutorModel_DetectsNativeStrategyOnCheckError(t *testing.T) {
+	withFakeCheckToolCallingForSession(t, func(context.Context, string, string, string) (bool, error) {
+		return false, fmt.Errorf("simulated check failure")
+	})
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	if m.workerStrategy != nativeToolCalling {
+		t.Errorf("workerStrategy = %v, want nativeToolCalling (fail open on a check error)", m.workerStrategy)
+	}
+}
+
+func TestNewTutorModel_DetectsOrchestratorStrategyIndependentlyFromWorker(t *testing.T) {
+	withFakeCheckToolCallingForSession(t, func(_ context.Context, _, model, _ string) (bool, error) {
+		return model == "orchestrator-model", nil
+	})
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+	cfg.Model = "worker-model"
+	cfg.OrchestratorModel = "orchestrator-model"
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	if m.workerStrategy != jsonFallbackToolCalling {
+		t.Errorf("workerStrategy = %v, want jsonFallbackToolCalling", m.workerStrategy)
+	}
+	if m.orchestratorStrategy != nativeToolCalling {
+		t.Errorf("orchestratorStrategy = %v, want nativeToolCalling", m.orchestratorStrategy)
+	}
+}
+
+// TestTutorModel_ComprehensionCheckAndRoutedTurnUseOrchestratorFallbackStrategy
+// is the gap a naive per-turn-only fix would silently miss: worker is
+// native, orchestrator is jsonFallbackToolCalling, and BOTH the
+// comprehension check (first message) and a routed-to real turn
+// (second message) must each honor the orchestrator's own strategy, not
+// the worker's. Proven by scripting the orchestrator's real-turn reply
+// as a tool-call-shaped {"name": ..., "arguments": ...} blob: dispatched
+// to the native path, that text would only ever be caught by
+// leakedToolCallPattern and produce the honest "couldn't get a grounded
+// answer" fallback after a failed retry -- it would never actually
+// invoke the tool. Dispatched correctly to runFallbackToolLoop, it's
+// parsed as a real call, actually executes read_solution_file, and the
+// conversation reaches the real final answer scripted after it.
+func TestTutorModel_ComprehensionCheckAndRoutedTurnUseOrchestratorFallbackStrategy(t *testing.T) {
+	withFakeCheckToolCallingForSession(t, func(_ context.Context, _, model, _ string) (bool, error) {
+		return model != "orchestrator-model", nil
+	})
+	mock := newSequencedOllama(t,
+		"restated problem, clarifying questions", // comprehension check (orchestrator)
+		"NO",                                     // routing decision -> orchestrator handles the real turn
+		`{"name": "read_solution_file", "arguments": {}}`,  // orchestrator's real-turn reply: a tool call
+		"orchestrator final answer after reading the file", // final answer once the tool result is fed back
+	)
+	cfg := testConfig(mock.URL)
+	cfg.Model = "worker-model"
+	cfg.OrchestratorModel = "orchestrator-model"
+	cfg.Mode = exercise.TutorModeFullAssist
+	cfg.WorkDir = t.TempDir()
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	if m.workerStrategy != nativeToolCalling {
+		t.Fatalf("workerStrategy = %v, want nativeToolCalling", m.workerStrategy)
+	}
+	if m.orchestratorStrategy != jsonFallbackToolCalling {
+		t.Fatalf("orchestratorStrategy = %v, want jsonFallbackToolCalling", m.orchestratorStrategy)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "hi, first message")
+	if !strings.Contains(got.viewport.View(), "restated problem") {
+		t.Fatalf("viewport after comprehension check = %q, want the comprehension check reply", got.viewport.View())
+	}
+
+	got = submitAndRun(t, got, "please look at my code")
+	view := got.viewport.View()
+	if !strings.Contains(view, "orchestrator final answer after reading the file") {
+		t.Errorf("viewport = %q, want the real final answer -- the orchestrator's tool call should have been executed via the fallback loop, not treated as a native leak", view)
+	}
+	if strings.Contains(view, leakedToolCallFallbackReply) {
+		t.Error("viewport contains the native leak-retry's honest-fallback message -- the routed turn was dispatched through generateWithLeakRetry instead of runFallbackToolLoop")
+	}
+
+	reqs := mock.allRequests()
+	if len(reqs) != 4 {
+		t.Fatalf("got %d requests, want 4 (comprehension check, routing decision, tool-call round, final-answer round): %+v", len(reqs), reqs)
+	}
+	foundToolResult := false
+	for _, m := range reqs[3].Messages {
+		if strings.Contains(m.Content, "Tool result:") {
+			foundToolResult = true
+		}
+	}
+	if !foundToolResult {
+		t.Errorf("final request's messages = %+v, want one containing the real tool result", reqs[3].Messages)
+	}
+}
+
 func TestNewTutorModel_ComprehensionCheckPendingMatchesMode(t *testing.T) {
 	mock := newSequencedOllama(t, "reply")
 
@@ -1127,22 +1283,26 @@ func TestTutorModel_ComprehensionCheckHistoryPersistsBothTurns(t *testing.T) {
 	// Second request's history should include the check's exchange --
 	// persisted using the real first question as the user turn -- followed
 	// by the ephemeral hint-count note (hints-first mode, see
-	// turnMessages) and the second line.
+	// turnMessages) and the second line. Leading with an extra
+	// tools-instruction system message (prependToolsPrompt, prompts.go)
+	// ahead of the persona system message that used to be history[0]
+	// alone -- the tools instruction is strategy-dependent now, so it's
+	// prepended fresh per call instead of baked into history itself.
 	second := reqs[1].Messages
-	if len(second) != 5 {
-		t.Fatalf("second request: expected [system, user1, assistant1, hint-note, user2] = 5 messages, got %d: %+v", len(second), second)
+	if len(second) != 6 {
+		t.Fatalf("second request: expected [tools, persona, user1, assistant1, hint-note, user2] = 6 messages, got %d: %+v", len(second), second)
 	}
-	if second[1].Content != "real question" {
-		t.Errorf("second request messages[1] = %q, want the real first question %q", second[1].Content, "real question")
+	if second[2].Content != "real question" {
+		t.Errorf("second request messages[2] = %q, want the real first question %q", second[2].Content, "real question")
 	}
-	if second[2].Content != "restated + questions" {
-		t.Errorf("second request messages[2] = %q, want the check's reply", second[2].Content)
+	if second[3].Content != "restated + questions" {
+		t.Errorf("second request messages[3] = %q, want the check's reply", second[3].Content)
 	}
-	if second[3].Role != "system" || !strings.Contains(second[3].Content, "1st help request") {
-		t.Errorf("second request messages[3] = %+v, want an ephemeral system note about the 1st help request", second[3])
+	if second[4].Role != "system" || !strings.Contains(second[4].Content, "1st help request") {
+		t.Errorf("second request messages[4] = %+v, want an ephemeral system note about the 1st help request", second[4])
 	}
-	if second[4].Content != "follow up" {
-		t.Errorf("second request messages[4] = %q, want %q", second[4].Content, "follow up")
+	if second[5].Content != "follow up" {
+		t.Errorf("second request messages[5] = %q, want %q", second[5].Content, "follow up")
 	}
 }
 
@@ -1240,20 +1400,25 @@ func TestTutorModel_RetainsConversationHistoryAcrossTurns(t *testing.T) {
 	if len(reqs) != 2 {
 		t.Fatalf("expected 2 requests (one per input line), got %d", len(reqs))
 	}
-	if len(reqs[0].Messages) != 2 {
-		t.Errorf("first request: expected [system, user1] = 2 messages, got %d: %+v", len(reqs[0].Messages), reqs[0].Messages)
+	// [tools, persona, user1] = 3: an extra leading tools-instruction
+	// system message (prependToolsPrompt) ahead of the persona system
+	// message that used to be the sole history[0] -- see
+	// TestTutorModel_ComprehensionCheckHistoryPersistsBothTurns' own
+	// comment for why.
+	if len(reqs[0].Messages) != 3 {
+		t.Errorf("first request: expected [tools, persona, user1] = 3 messages, got %d: %+v", len(reqs[0].Messages), reqs[0].Messages)
 	}
 	second := reqs[1].Messages
-	if len(second) != 4 {
-		t.Fatalf("second request: expected [system, user1, assistant1, user2] = 4 messages, got %d: %+v", len(second), second)
+	if len(second) != 5 {
+		t.Fatalf("second request: expected [tools, persona, user1, assistant1, user2] = 5 messages, got %d: %+v", len(second), second)
 	}
-	if second[1].Content != "first line" {
-		t.Errorf("second request messages[1] (user1) = %q, want %q", second[1].Content, "first line")
+	if second[2].Content != "first line" {
+		t.Errorf("second request messages[2] (user1) = %q, want %q", second[2].Content, "first line")
 	}
-	if second[2].Role != "assistant" || second[2].Content != "assistant-reply-1" {
-		t.Errorf("second request messages[2] (assistant1) = %+v, want role=assistant content=%q", second[2], "assistant-reply-1")
+	if second[3].Role != "assistant" || second[3].Content != "assistant-reply-1" {
+		t.Errorf("second request messages[3] (assistant1) = %+v, want role=assistant content=%q", second[3], "assistant-reply-1")
 	}
-	if second[3].Content != "second line" {
-		t.Errorf("second request messages[3] (user2) = %q, want %q", second[3].Content, "second line")
+	if second[4].Content != "second line" {
+		t.Errorf("second request messages[4] (user2) = %q, want %q", second[4].Content, "second line")
 	}
 }
