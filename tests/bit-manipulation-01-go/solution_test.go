@@ -29,3 +29,17 @@ func TestSingleNumber_NegativeNumbers(t *testing.T) {
 		t.Errorf("SingleNumber(%v) = %d, want -2", nums, got)
 	}
 }
+
+func TestSingleNumber_BoundaryValues(t *testing.T) {
+	nums := []int{1000, 1000, -1000}
+	if got := SingleNumber(nums); got != -1000 {
+		t.Errorf("SingleNumber(%v) = %d, want -1000", nums, got)
+	}
+}
+
+func TestSingleNumber_LargerMixedSet(t *testing.T) {
+	nums := []int{5, 3, 5, 4, 3}
+	if got := SingleNumber(nums); got != 4 {
+		t.Errorf("SingleNumber(%v) = %d, want 4", nums, got)
+	}
+}

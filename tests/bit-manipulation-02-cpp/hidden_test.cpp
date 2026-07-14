@@ -20,11 +20,16 @@ void testPowerOfTwo() {
     assert(HammingWeight(1u << 31) == 1);
 }
 
+void testAlternatingBits() {
+    assert(HammingWeight(0xAAAAAAAAu) == 16);
+}
+
 int main() {
     testClassic();
     testZero();
     testAllOnes();
     testPowerOfTwo();
+    testAlternatingBits();
     std::printf("all tests passed\n");
     return 0;
 }

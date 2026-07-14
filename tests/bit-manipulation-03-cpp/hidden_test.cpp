@@ -19,6 +19,11 @@ void testZero() {
     assert(CountBits(0) == want);
 }
 
+void testOne() {
+    std::vector<int> want = {0, 1};
+    assert(CountBits(1) == want);
+}
+
 void testLarger() {
     std::vector<int> want = {0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4};
     assert(CountBits(15) == want);
@@ -28,6 +33,7 @@ int main() {
     testClassic();
     testSmall();
     testZero();
+    testOne();
     testLarger();
     std::printf("all tests passed\n");
     return 0;

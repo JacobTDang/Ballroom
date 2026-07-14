@@ -24,11 +24,23 @@ void testNegativeNumbers() {
     assert(SingleNumber(nums) == -2);
 }
 
+void testBoundaryValues() {
+    std::vector<int> nums = {1000, 1000, -1000};
+    assert(SingleNumber(nums) == -1000);
+}
+
+void testLargerMixedSet() {
+    std::vector<int> nums = {5, 3, 5, 4, 3};
+    assert(SingleNumber(nums) == 4);
+}
+
 int main() {
     testClassic();
     testLongerMix();
     testSingleElement();
     testNegativeNumbers();
+    testBoundaryValues();
+    testLargerMixedSet();
     std::printf("all tests passed\n");
     return 0;
 }
