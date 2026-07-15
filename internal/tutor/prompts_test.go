@@ -162,11 +162,40 @@ func TestWantsComprehensionCheck(t *testing.T) {
 		{exercise.TutorModeSyntaxOnly, false},
 		{exercise.TutorModeHintsFirst, true},
 		{exercise.TutorModeFullAssist, true},
+		// The interviewer must NOT restate the problem or ask the
+		// clarifying questions -- that's the candidate's own step 1 of
+		// the design method, and doing it for them defeats the drill.
+		{exercise.TutorModeInterviewer, false},
+		{exercise.TutorModeDesignCoach, true},
 		{"unrecognized-mode", true},
 	}
 	for _, c := range cases {
 		if got := wantsComprehensionCheck(c.mode); got != c.want {
 			t.Errorf("wantsComprehensionCheck(%q) = %v, want %v", c.mode, got, c.want)
 		}
+	}
+}
+
+func TestModePrompts_DesignModesHaveDistinctPersonas(t *testing.T) {
+	interviewer, ok := modePrompts[exercise.TutorModeInterviewer]
+	if !ok {
+		t.Fatal("modePrompts has no interviewer entry")
+	}
+	coach, ok := modePrompts[exercise.TutorModeDesignCoach]
+	if !ok {
+		t.Fatal("modePrompts has no design-coach entry")
+	}
+	if interviewer == coach {
+		t.Error("interviewer and design-coach personas are identical")
+	}
+	// The interviewer persona's defining constraints: candidate drives
+	// step 1, and no solutions are volunteered.
+	for _, want := range []string{"restate", "rubric"} {
+		if !strings.Contains(strings.ToLower(interviewer), want) {
+			t.Errorf("interviewer persona doesn't mention %q:\n%s", want, interviewer)
+		}
+	}
+	if !strings.Contains(strings.ToLower(coach), "solution.md") {
+		t.Errorf("design-coach persona should direct writing into solution.md:\n%s", coach)
 	}
 }

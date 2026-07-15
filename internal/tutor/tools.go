@@ -56,6 +56,28 @@ func newReadProblemStatementTool(cfg Config) (tool.InvokableTool, error) {
 	return t, nil
 }
 
+// newReadGradingRubricTool lets the model read a design session's
+// grading rubric -- hidden until the user's M-q submit reveals it into
+// the workspace (the same reveal mechanic that delivers hidden tests
+// for coding exercises). Present in every session's tool set: for
+// coding exercises there is simply never a rubric.md, so it stays
+// inert, and keeping buildTools kind-agnostic means no plumbing of the
+// exercise kind into the tutor.
+func newReadGradingRubricTool(cfg Config) (tool.InvokableTool, error) {
+	fn := func(_ context.Context, _ noInput) (readFileOutput, error) {
+		content := readRubric(cfg.WorkDir)
+		if content == "" {
+			return readFileOutput{Content: "(no rubric available yet -- it is revealed after the user submits with M-q)"}, nil
+		}
+		return readFileOutput{Content: content}, nil
+	}
+	t, err := utils.InferTool("read_grading_rubric", "Read the design session's grading rubric, if the user has submitted and revealed it yet.", fn)
+	if err != nil {
+		return nil, fmt.Errorf("tutor: infer read_grading_rubric tool: %w", err)
+	}
+	return t, nil
+}
+
 type readTestOutputOutput struct {
 	Available   bool   `json:"available" jsonschema:"description=whether a test result exists yet"`
 	Result      string `json:"result,omitempty" jsonschema:"description=pass or fail"`
@@ -228,13 +250,17 @@ func buildTools(cfg Config) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
+	readGradingRubric, err := newReadGradingRubricTool(cfg)
+	if err != nil {
+		return nil, err
+	}
 
 	// Wrap every tool so a failure (malformed model-generated arguments,
 	// an out-of-bounds highlight range, an unreachable nvim socket that
 	// somehow still errors, ...) becomes a string result fed back to the
 	// model instead of aborting the whole turn — replaces
 	// tutor/chat.sh's process_highlights bash-level fallthrough case.
-	raw := []tool.BaseTool{readSolution, readProblem, readTestOutput, highlightLines, readCursorPosition}
+	raw := []tool.BaseTool{readSolution, readProblem, readTestOutput, highlightLines, readCursorPosition, readGradingRubric}
 	wrapped := make([]tool.BaseTool, len(raw))
 	for i, t := range raw {
 		wrapped[i] = utils.WrapToolWithErrorHandler(t, toolErrorHandler)
