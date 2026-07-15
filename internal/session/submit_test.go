@@ -3,6 +3,7 @@ package session
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,6 +69,72 @@ func designConfig(t *testing.T) Config {
 	cfg.Category = "system-design"
 	cfg.Language = "interviewer"
 	return cfg
+}
+
+func TestSubmit_DesignUsesGraderVerdict(t *testing.T) {
+	cfg := designConfig(t)
+	cfg.Grade = func() (string, string, error) {
+		return tracker.ResultFail, "Estimates: missing. Sharding: adequate.", nil
+	}
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	var out bytes.Buffer
+	attempt, err := Submit(cfg, strings.NewReader("tough one\n"), &out)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if attempt.Result != tracker.ResultFail {
+		t.Errorf("Result = %q, want the grader's fail verdict", attempt.Result)
+	}
+	if attempt.Notes != "tough one" {
+		t.Errorf("Notes = %q, want the user's own note", attempt.Notes)
+	}
+	if !strings.Contains(out.String(), "Estimates: missing") {
+		t.Errorf("output %q should show the grader's summary", out.String())
+	}
+	if strings.Contains(out.String(), "Self-assessment") {
+		t.Errorf("output %q ran the self-assessment prompt despite a successful grade", out.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(cfg.WorkspaceDir, lastTestResultFile))
+	if err != nil {
+		t.Fatalf("read last-test-result file: %v", err)
+	}
+	var got lastTestResult
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Result != tracker.ResultFail {
+		t.Errorf("file Result = %q, want fail", got.Result)
+	}
+	if !strings.Contains(got.Output, "Estimates: missing") {
+		t.Errorf("file Output = %q, want the grading summary so read_test_output can show it", got.Output)
+	}
+}
+
+func TestSubmit_DesignGraderErrorFallsBackToSelfAssessment(t *testing.T) {
+	cfg := designConfig(t)
+	cfg.Grade = func() (string, string, error) {
+		return "", "", fmt.Errorf("empty choices from provider")
+	}
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	var out bytes.Buffer
+	attempt, err := Submit(cfg, strings.NewReader("p\n\n"), &out)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if attempt.Result != tracker.ResultPass {
+		t.Errorf("Result = %q, want the self-assessed pass after fallback", attempt.Result)
+	}
+	if !strings.Contains(out.String(), "empty choices from provider") {
+		t.Errorf("output %q should surface the grading failure, not swallow it", out.String())
+	}
+	if !strings.Contains(out.String(), "Self-assessment") {
+		t.Errorf("output %q should have fallen back to the self-assessment prompt", out.String())
+	}
 }
 
 func TestSubmit_DesignSelfAssessedPass(t *testing.T) {

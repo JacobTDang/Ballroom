@@ -215,12 +215,47 @@ func submitCmd() error {
 		RevealTimeout: 30 * time.Second,
 	}
 
+	if cfg.Kind == exercise.KindDesign {
+		cfg.Grade = designGraderFromEnv(cfg.WorkspaceDir)
+	}
+
 	attempt, err := session.Submit(cfg, os.Stdin, os.Stdout)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("logged attempt #%d\n", attempt.ID)
 	return nil
+}
+
+// designGraderFromEnv wires session.Config.Grade to tutor.GradeDesign
+// using the same env vars the tutor pane runs on. Grading deliberately
+// uses the WORKER model, not the orchestrator: live-tested 2026-07-15
+// against the real configured models, the large free-tier orchestrator
+// timed out on the grading call while the worker produced a correct,
+// well-evidenced per-dimension grade -- and a submit-blocking call
+// values finishing over marginal judgment quality (failures fall back
+// to self-assessment either way).
+func designGraderFromEnv(workDir string) func() (string, string, error) {
+	ollamaHost := os.Getenv("OLLAMA_HOST")
+	if ollamaHost == "" {
+		ollamaHost = "http://host.docker.internal:11434"
+	}
+	model := os.Getenv("TUTOR_MODEL")
+	if model == "" {
+		model = config.DefaultTutorModel
+	}
+	cfg := tutor.Config{
+		OllamaHost:      ollamaHost,
+		Model:           model,
+		APIKey:          os.Getenv("OPENROUTER_API_KEY"),
+		WorkDir:         workDir,
+		MaxContextBytes: 8000,
+	}
+	return func() (string, string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		return tutor.GradeDesign(ctx, cfg)
+	}
 }
 
 // tutorCmd is `ballroom tutor`, launched in the tutor pane by
