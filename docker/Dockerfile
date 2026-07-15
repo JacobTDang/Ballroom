@@ -51,6 +51,8 @@ RUN useradd -m -s /bin/bash practice \
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/tmux.conf /etc/practice/tmux.conf
 COPY docker/nvim/ /home/practice/.config/nvim/
+# Estimation reference for system-design sessions -- `less ~/back-of-envelope.md`
+COPY docs/back-of-envelope.md /home/practice/back-of-envelope.md
 COPY --from=ballroom-builder /ballroom /usr/local/bin/ballroom
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/ballroom \
     && chown -R practice:practice /home/practice/.config
