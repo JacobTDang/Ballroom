@@ -95,7 +95,11 @@ func providerEndpoint(model, ollamaHost string) string {
 // question with the orchestrator on a routing bug is a much worse
 // failure than one unnecessary specialist call.
 func decideHandoff(ctx context.Context, orchestratorCM model.ToolCallingChatModel, userMessage string) (bool, error) {
-	reply, err := orchestratorCM.Generate(ctx, []*schema.Message{
+	// Routed through the empty-choices retry (fallback.go): the
+	// routing call fires immediately before the worker's own calls,
+	// exactly the burst pattern that trips a free-tier OpenRouter
+	// model's rate limit into returning an empty 200.
+	reply, err := generateWithEmptyChoicesRetry(ctx, orchestratorCM, []*schema.Message{
 		schema.SystemMessage(routingInstruction),
 		schema.UserMessage(userMessage),
 	})
@@ -177,7 +181,11 @@ func Run(ctx context.Context, cfg Config, stdin io.Reader, stdout io.Writer) err
 var leakedToolCallPattern = regexp.MustCompile(`\{"name"\s*:\s*"[a-zA-Z_]+"`)
 
 func looksLikeLeakedToolCall(content string) bool {
-	return leakedToolCallPattern.MatchString(content)
+	// The <tool_call> tag dialect (see fallback.go's
+	// fallbackToolCallTagPattern for the live observation) is just as
+	// much a leak as JSON-shaped narration when it appears in a final
+	// answer.
+	return leakedToolCallPattern.MatchString(content) || strings.Contains(content, "<tool_call")
 }
 
 // leakedToolCallRetryNote is appended as an ephemeral system message

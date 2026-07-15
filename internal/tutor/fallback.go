@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
@@ -29,6 +30,22 @@ type fallbackToolCall struct {
 // leakedToolCallPattern's doc comment and agent_test.go's own fixture)
 // as aliases.
 var fallbackToolCallHint = regexp.MustCompile(`\{"name"\s*:\s*"[a-zA-Z_][a-zA-Z0-9_]*"\s*,\s*"(arguments|parameters)"\s*:`)
+
+// fallbackToolCallTagPattern matches the <tool_call> tag dialect some
+// chat templates bake into their models regardless of what the prompt
+// asks for. Observed live from openrouter:poolside/laguna-xs-2.1:free
+// (6/6 probe samples, 2026-07-14): every tool-call attempt was prose
+// followed by `<tool_call>tool_name</tool_call>` -- no JSON anywhere,
+// so both the JSON parse and fallbackToolCallHint missed it and the
+// raw tag leaked to the user as a "final answer" with the tool never
+// executed. The closing tag is optional (a truncated reply can cut it
+// off), and the inner content may be either a bare tool name or a full
+// JSON call object (Qwen's template puts JSON inside the tag).
+var fallbackToolCallTagPattern = regexp.MustCompile(`(?s)<tool_call>\s*(.*?)\s*(?:</tool_call>|\z)`)
+
+// bareToolNamePattern is a <tool_call> tag's inner content when it's
+// just a tool name rather than a JSON object.
+var bareToolNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 // rawFallbackCall is the wire shape parseFallbackToolCall decodes into
 // before folding the arguments/parameters alias down to a single field.
@@ -66,6 +83,21 @@ func parseFallbackToolCall(content string) (fallbackToolCall, bool, error) {
 	unfenced := stripJSONFence(strings.TrimSpace(content))
 	if call, err := decodeFallbackCall(unfenced); err == nil {
 		return call, true, nil
+	}
+
+	// The <tool_call> tag dialect, checked before the JSON hint: a
+	// tag reply usually contains no JSON at all (see
+	// fallbackToolCallTagPattern's doc comment), so the hint would
+	// wave it through as a final answer and leak the raw tag.
+	if tag := fallbackToolCallTagPattern.FindStringSubmatch(content); tag != nil {
+		inner := strings.TrimSpace(tag[1])
+		if call, err := decodeFallbackCall(inner); err == nil {
+			return call, true, nil
+		}
+		if bareToolNamePattern.MatchString(inner) {
+			return fallbackToolCall{Name: inner, Arguments: json.RawMessage("{}")}, true, nil
+		}
+		return fallbackToolCall{}, true, fmt.Errorf("tutor: <tool_call> tag contains neither a tool name nor a valid call object")
 	}
 
 	if !fallbackToolCallHint.MatchString(content) {
@@ -159,6 +191,57 @@ func extractFirstJSONObject(s string) (json.RawMessage, bool) {
 		}
 	}
 	return nil, false
+}
+
+// emptyChoicesRetryBackoff is the base delay between retries of an
+// empty-choices failure (attempt n waits n * this). A var so tests can
+// shrink it, same pattern as activityPulseInterval.
+var emptyChoicesRetryBackoff = 1500 * time.Millisecond
+
+// emptyChoicesMaxRetries bounds how many times an empty-choices
+// failure is retried before it's surfaced. Small on purpose: this
+// handles a transient provider hiccup, not a persistent outage --
+// masking the latter with endless retries would hide a real problem.
+const emptyChoicesMaxRetries = 2
+
+// isEmptyChoicesErr matches eino-ext's "received empty choices from
+// OpenAI API response" -- the shape OpenRouter's free tier produces
+// when rate-limited or when the upstream provider fails: the HTTP
+// request itself succeeds (200), but the body carries no completions.
+// Observed live killing a turn between a tool execution and the
+// follow-up model call (2026-07-14) -- the requests inside one turn
+// fire back-to-back, which is exactly the burst pattern free-tier
+// rate limits punish.
+func isEmptyChoicesErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "received empty choices")
+}
+
+// generateWithEmptyChoicesRetry calls cm.Generate, retrying only the
+// empty-choices failure with a growing backoff. Any other error
+// propagates immediately and unchanged -- retrying unknown failures
+// would mask real bugs. If every attempt comes back empty, the final
+// error explains the likely rate-limit cause instead of leaving the
+// user with a bare "empty choices".
+func generateWithEmptyChoicesRetry(ctx context.Context, cm model.ToolCallingChatModel, messages []*schema.Message) (*schema.Message, error) {
+	var lastErr error
+	for attempt := 0; attempt <= emptyChoicesMaxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt) * emptyChoicesRetryBackoff):
+			}
+		}
+		reply, err := cm.Generate(ctx, messages)
+		if err == nil {
+			return reply, nil
+		}
+		if !isEmptyChoicesErr(err) {
+			return nil, err
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("%w (the model returned an empty response %d times in a row -- free-tier models rate-limit quickly, wait a few seconds and try again)", lastErr, emptyChoicesMaxRetries+1)
 }
 
 // fallbackRoundCap mirrors reactMaxStep (agent.go): react.Agent's
@@ -277,7 +360,7 @@ func runFallbackToolLoop(ctx context.Context, cm model.ToolCallingChatModel, too
 	haveLastCall := false
 
 	for round := 0; round < fallbackRoundCap; round++ {
-		reply, err := cm.Generate(ctx, convo)
+		reply, err := generateWithEmptyChoicesRetry(ctx, cm, convo)
 		if err != nil {
 			return nil, err
 		}

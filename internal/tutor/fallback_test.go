@@ -192,3 +192,66 @@ func TestExtractFirstJSONObject_UnbalancedReturnsFalse(t *testing.T) {
 		t.Error("ok = true, want false for an object that never closes")
 	}
 }
+
+// --- <tool_call> tag dialect -- observed live from
+// openrouter:poolside/laguna-xs-2.1:free (6/6 probe samples on
+// 2026-07-14): the model ignores the JSON-only instruction entirely and
+// always emits prose followed by its chat template's own tag syntax,
+// e.g. `Let me read it.<tool_call>read_solution_file</tool_call>`.
+
+func TestParseFallbackToolCall_TagWithBareName(t *testing.T) {
+	content := "Let me first read your current solution to understand what you're working with.<tool_call>read_solution_file</tool_call>"
+	call, matched, err := parseFallbackToolCall(content)
+	if !matched || err != nil {
+		t.Fatalf("parseFallbackToolCall(...) matched=%v err=%v, want a clean match", matched, err)
+	}
+	if call.Name != "read_solution_file" {
+		t.Errorf("Name = %q, want read_solution_file", call.Name)
+	}
+	if string(call.Arguments) != "{}" {
+		t.Errorf("Arguments = %s, want {} (bare-name tag takes no arguments)", call.Arguments)
+	}
+}
+
+func TestParseFallbackToolCall_TagWithJSONInside(t *testing.T) {
+	content := "<tool_call>\n{\"name\": \"read_solution_file\", \"arguments\": {\"section\": \"all\"}}\n</tool_call>"
+	call, matched, err := parseFallbackToolCall(content)
+	if !matched || err != nil {
+		t.Fatalf("parseFallbackToolCall(...) matched=%v err=%v, want a clean match", matched, err)
+	}
+	if call.Name != "read_solution_file" {
+		t.Errorf("Name = %q, want read_solution_file", call.Name)
+	}
+	if string(call.Arguments) != "{\"section\": \"all\"}" {
+		t.Errorf("Arguments = %s, want the tag's inner arguments object", call.Arguments)
+	}
+}
+
+func TestParseFallbackToolCall_UnclosedTagStillParses(t *testing.T) {
+	content := "I'll check that now.<tool_call>read_problem_statement"
+	call, matched, err := parseFallbackToolCall(content)
+	if !matched || err != nil {
+		t.Fatalf("parseFallbackToolCall(...) matched=%v err=%v, want a clean match despite the missing closing tag", matched, err)
+	}
+	if call.Name != "read_problem_statement" {
+		t.Errorf("Name = %q, want read_problem_statement", call.Name)
+	}
+}
+
+func TestParseFallbackToolCall_EmptyTagIsAFailedAttempt(t *testing.T) {
+	_, matched, err := parseFallbackToolCall("<tool_call></tool_call>")
+	if !matched {
+		t.Fatal("parseFallbackToolCall(empty tag) matched=false, want true -- an empty tag is a broken call attempt, not a final answer to show the user")
+	}
+	if err == nil {
+		t.Error("parseFallbackToolCall(empty tag) err=nil, want an error so the loop sends a corrective retry")
+	}
+}
+
+func TestParseFallbackToolCall_ProseMentioningToolCallWordIsNotACall(t *testing.T) {
+	content := "In some APIs you'd wrap this in a tool_call structure, but here just use a set."
+	_, matched, _ := parseFallbackToolCall(content)
+	if matched {
+		t.Error("plain prose containing the words tool_call (no tag, no JSON) must remain a final answer")
+	}
+}

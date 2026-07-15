@@ -461,3 +461,87 @@ func TestRunFallbackToolLoop_RealToolsAndMockOllamaRoundTrip(t *testing.T) {
 		t.Errorf("second request's messages = %+v, want one containing \"Tool result:\" and the real file content", second.Messages)
 	}
 }
+
+// --- generateWithEmptyChoicesRetry -- OpenRouter free-tier models
+// return HTTP 200 with an empty choices array when rate-limited or when
+// the upstream provider hiccups; eino-ext surfaces that as "received
+// empty choices from OpenAI API response". Observed live killing a turn
+// mid-tool-loop on 2026-07-14. Transient by nature, so it gets a small
+// bounded retry -- and stays loud if it persists.
+
+func TestGenerateWithEmptyChoicesRetry_RetriesThenSucceeds(t *testing.T) {
+	restore := emptyChoicesRetryBackoff
+	emptyChoicesRetryBackoff = time.Millisecond
+	defer func() { emptyChoicesRetryBackoff = restore }()
+
+	cm := &fakeToolCallingChatModel{replyFn: func(round int) (string, error) {
+		if round < 2 {
+			return "", fmt.Errorf("[NodeRunError] received empty choices from OpenAI API response")
+		}
+		return "final answer", nil
+	}}
+	reply, err := generateWithEmptyChoicesRetry(context.Background(), cm, nil)
+	if err != nil {
+		t.Fatalf("generateWithEmptyChoicesRetry = %v, want success after retries", err)
+	}
+	if reply.Content != "final answer" {
+		t.Errorf("reply = %q, want the eventual successful content", reply.Content)
+	}
+	if cm.callCount() != 3 {
+		t.Errorf("callCount = %d, want 3 (initial + 2 retries)", cm.callCount())
+	}
+}
+
+func TestGenerateWithEmptyChoicesRetry_GivesUpLoudly(t *testing.T) {
+	restore := emptyChoicesRetryBackoff
+	emptyChoicesRetryBackoff = time.Millisecond
+	defer func() { emptyChoicesRetryBackoff = restore }()
+
+	cm := &fakeToolCallingChatModel{replyFn: func(int) (string, error) {
+		return "", fmt.Errorf("received empty choices from OpenAI API response")
+	}}
+	_, err := generateWithEmptyChoicesRetry(context.Background(), cm, nil)
+	if err == nil {
+		t.Fatal("generateWithEmptyChoicesRetry = nil error after every attempt failed, want the failure surfaced")
+	}
+	if !strings.Contains(err.Error(), "rate-limit") {
+		t.Errorf("err = %v, want the message to explain the likely rate-limit cause", err)
+	}
+	if cm.callCount() != 1+emptyChoicesMaxRetries {
+		t.Errorf("callCount = %d, want %d (initial + max retries)", cm.callCount(), 1+emptyChoicesMaxRetries)
+	}
+}
+
+func TestGenerateWithEmptyChoicesRetry_OtherErrorsAreNotRetried(t *testing.T) {
+	cm := &fakeToolCallingChatModel{replyFn: func(int) (string, error) {
+		return "", fmt.Errorf("connection refused")
+	}}
+	_, err := generateWithEmptyChoicesRetry(context.Background(), cm, nil)
+	if err == nil || !strings.Contains(err.Error(), "connection refused") {
+		t.Fatalf("err = %v, want the original error propagated unchanged", err)
+	}
+	if cm.callCount() != 1 {
+		t.Errorf("callCount = %d, want 1 -- a non-transient error must not be retried (masking real bugs)", cm.callCount())
+	}
+}
+
+func TestRunFallbackToolLoop_ExecutesTagDialectCall(t *testing.T) {
+	// End-to-end through the loop: the observed live failure was the
+	// tag reply being returned to the user as a final answer with the
+	// tool never invoked.
+	cm := sequencedFakeModel(
+		"Let me read it.<tool_call>echo</tool_call>",
+		"done: all good",
+	)
+	echo, invoked := newCountingEchoTool(t)
+	reply, err := runFallbackToolLoop(context.Background(), cm, []tool.BaseTool{echo}, nil, &activityFeed{}, make(chan []activityCall, 8))
+	if err != nil {
+		t.Fatalf("runFallbackToolLoop error: %v", err)
+	}
+	if *invoked != 1 {
+		t.Fatalf("tool invoked %d times, want exactly 1 -- the tag dialect call must actually execute", *invoked)
+	}
+	if reply.Content != "done: all good" {
+		t.Errorf("final reply = %q, want the post-tool answer, never the raw tag reply", reply.Content)
+	}
+}
