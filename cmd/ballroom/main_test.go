@@ -74,6 +74,20 @@ func clearSessionEnv(t *testing.T) {
 	t.Setenv("PRACTICE_WORKSPACE_DIR", "")
 	t.Setenv("PRACTICE_CONTROL_DIR", "")
 	t.Setenv("PRACTICE_STARTED_AT", "")
+	t.Setenv("PRACTICE_SANDBOX", "")
+}
+
+func TestIsSessionContext_TrueInSandbox(t *testing.T) {
+	// A sandbox session sets none of the exercise PRACTICE_* vars (no
+	// workspace copy, no control dir, no timer), so before the sandbox
+	// marker existed, `ballroom return` refused to work there -- the
+	// real bug this test locks in (issue #87).
+	clearSessionEnv(t)
+	t.Setenv("PRACTICE_SANDBOX", "1")
+
+	if !isSessionContext() {
+		t.Error("isSessionContext() = false, want true inside a sandbox session")
+	}
 }
 
 func TestIsSessionContext_TrueWhenAllSessionVarsSet(t *testing.T) {

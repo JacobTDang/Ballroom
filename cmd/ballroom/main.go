@@ -111,13 +111,20 @@ func homeCmd() error {
 }
 
 // isSessionContext reports whether this process is running inside an
-// active practice session's container, as opposed to on the host. It
-// checks all three session-scoped env vars orchestrator.RunExercise sets
-// via `docker run -e` (PRACTICE_WORKSPACE_DIR, PRACTICE_CONTROL_DIR,
-// PRACTICE_STARTED_AT) rather than any single one, so a host shell that
-// happens to have one of these set for unrelated reasons isn't
-// misdetected as a session.
+// active practice session's container, as opposed to on the host. For
+// exercise sessions it checks all three session-scoped env vars
+// orchestrator.RunExercise sets via `docker run -e`
+// (PRACTICE_WORKSPACE_DIR, PRACTICE_CONTROL_DIR, PRACTICE_STARTED_AT)
+// rather than any single one, so a host shell that happens to have one
+// of these set for unrelated reasons isn't misdetected as a session.
+// Sandbox sessions set none of those (no workspace copy, no control
+// dir, no timer), so they carry their own marker, PRACTICE_SANDBOX --
+// without it, `ballroom return` refused to end a sandbox even though
+// the action itself (tmux kill-server) works there identically.
 func isSessionContext() bool {
+	if os.Getenv("PRACTICE_SANDBOX") != "" {
+		return true
+	}
 	return os.Getenv("PRACTICE_WORKSPACE_DIR") != "" &&
 		os.Getenv("PRACTICE_CONTROL_DIR") != "" &&
 		os.Getenv("PRACTICE_STARTED_AT") != ""
