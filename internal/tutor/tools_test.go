@@ -11,6 +11,71 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 )
 
+func TestReadGradingRubricTool_ReturnsRubricContents(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "rubric.md"), []byte("- estimates: did they size QPS?"), 0o644); err != nil {
+		t.Fatalf("write rubric: %v", err)
+	}
+
+	tl, err := newReadGradingRubricTool(Config{WorkDir: dir})
+	if err != nil {
+		t.Fatalf("newReadGradingRubricTool: %v", err)
+	}
+
+	out, err := tl.InvokableRun(context.Background(), "{}")
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	var result readFileOutput
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("unmarshal tool output %q: %v", out, err)
+	}
+	if !strings.Contains(result.Content, "did they size QPS?") {
+		t.Errorf("Content = %q, want the rubric text", result.Content)
+	}
+}
+
+func TestReadGradingRubricTool_BeforeRevealReturnsFriendlyNote(t *testing.T) {
+	// Before M-q submit the rubric hasn't been revealed into the
+	// workspace yet -- the tool must say so rather than erroring, so
+	// the model can tell the user to submit first.
+	dir := t.TempDir()
+
+	tl, err := newReadGradingRubricTool(Config{WorkDir: dir})
+	if err != nil {
+		t.Fatalf("newReadGradingRubricTool: %v", err)
+	}
+
+	out, err := tl.InvokableRun(context.Background(), "{}")
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	var result readFileOutput
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("unmarshal tool output %q: %v", out, err)
+	}
+	if !strings.Contains(result.Content, "no rubric available yet") {
+		t.Errorf("Content = %q, want the not-yet-revealed note", result.Content)
+	}
+}
+
+func TestBuildTools_IncludesGradingRubricTool(t *testing.T) {
+	tools, err := buildTools(Config{WorkDir: t.TempDir(), MaxContextBytes: 8000})
+	if err != nil {
+		t.Fatalf("buildTools: %v", err)
+	}
+	for _, tl := range tools {
+		info, err := tl.Info(context.Background())
+		if err != nil {
+			t.Fatalf("Info: %v", err)
+		}
+		if info.Name == "read_grading_rubric" {
+			return
+		}
+	}
+	t.Error("buildTools result has no read_grading_rubric tool")
+}
+
 func TestReadSolutionFileTool_ReturnsFileContents(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "solution.py"), []byte("def solve(): pass"), 0o644); err != nil {
@@ -290,13 +355,13 @@ func TestReadCursorPositionTool_NoEditorReturnsUnavailable(t *testing.T) {
 	}
 }
 
-func TestBuildTools_ReturnsAllFiveTools(t *testing.T) {
+func TestBuildTools_ReturnsAllSixTools(t *testing.T) {
 	tools, err := buildTools(Config{WorkDir: t.TempDir(), MaxContextBytes: 8000})
 	if err != nil {
 		t.Fatalf("buildTools: %v", err)
 	}
-	if len(tools) != 5 {
-		t.Fatalf("buildTools returned %d tools, want 5", len(tools))
+	if len(tools) != 6 {
+		t.Fatalf("buildTools returned %d tools, want 6", len(tools))
 	}
 
 	names := make(map[string]bool)
@@ -309,7 +374,7 @@ func TestBuildTools_ReturnsAllFiveTools(t *testing.T) {
 	}
 	for _, want := range []string{
 		"read_solution_file", "read_problem_statement", "read_test_output",
-		"highlight_lines", "read_cursor_position",
+		"highlight_lines", "read_cursor_position", "read_grading_rubric",
 	} {
 		if !names[want] {
 			t.Errorf("buildTools missing tool %q, got names %v", want, names)

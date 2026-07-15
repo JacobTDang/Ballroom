@@ -118,3 +118,16 @@ func readProblemStatement(workDir string) string {
 	}
 	return string(data)
 }
+
+// readRubric returns rubric.md's contents from workDir, or "" if it
+// doesn't exist -- which is the normal state for a design session's
+// whole working phase: the rubric is hidden content (tests/<id>/) that
+// only lands in the workspace after M-q submit reveals it. Same
+// graceful-degradation contract as readProblemStatement.
+func readRubric(workDir string) string {
+	data, err := os.ReadFile(filepath.Join(workDir, "rubric.md"))
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}

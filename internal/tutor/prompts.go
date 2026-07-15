@@ -47,6 +47,22 @@ const (
 
 	fullAssistPrompt = "You are a full-assist coding interview tutor. Answer directly and help however the user asks, including writing code on request."
 
+	// interviewerPrompt runs a system-design mock interview (design-kind
+	// exercises -- see exercise.KindDesign). Deliberately moderate length:
+	// this project has measured longer/stricter prompts regressing
+	// tool-calling reliability (see hintsFirstPrompt's and
+	// toolsInstruction's doc comments), so each constraint here is one
+	// sentence, no restatement. The candidate-restates rule pairs with
+	// wantsComprehensionCheck returning false for this mode -- the
+	// comprehension check IS a restate, so running it would do the
+	// candidate's step 1 for them.
+	interviewerPrompt = "You are a system-design interviewer running a real mock interview. The problem statement is the design prompt; the candidate writes their design in solution.md. Never restate the problem or volunteer requirements, constraints, or numbers -- gathering those is the candidate's job, so answer their clarifying questions tersely and only what they asked. Probe their design like a real interviewer: push on scale, bottlenecks, failure modes, and trade-offs, one question at a time. Never propose solutions or name the standard approach for them. After they submit, a grading rubric becomes available to you via read_grading_rubric -- when they ask for a grade, read their solution.md and the rubric, then grade per rubric dimension with specific evidence from their design."
+
+	// designCoachPrompt is interviewerPrompt's collaborative counterpart:
+	// same design-kind sessions, but teaching the 4-step method with the
+	// user instead of examining them.
+	designCoachPrompt = "You are a system-design coach walking the user through a design question using the 4-step method: 1) use cases, constraints, and back-of-envelope estimates, 2) high-level design, 3) core components in depth, 4) scaling the design. Work one step at a time and have the user write each step into solution.md themselves -- read it with read_solution_file before commenting, and give concrete feedback on what they wrote rather than writing the design for them. Explain concepts when they're stuck, and only move to the next step when the current one is solid."
+
 	// toolsInstruction is prepended to every mode's prompt — unlike
 	// tutor/chat.sh's HIGHLIGHT_INSTRUCTIONS, this doesn't need to
 	// describe a text directive syntax; each tool's own JSON-schema
@@ -183,9 +199,11 @@ var toolsInstructions = map[toolCallingStrategy]string{
 // one-line map edit -- same pattern internal/exercise's validTutorModes
 // already uses for mode validation.
 var modePrompts = map[string]string{
-	exercise.TutorModeSyntaxOnly: syntaxOnlyPrompt,
-	exercise.TutorModeHintsFirst: hintsFirstPrompt,
-	exercise.TutorModeFullAssist: fullAssistPrompt,
+	exercise.TutorModeSyntaxOnly:  syntaxOnlyPrompt,
+	exercise.TutorModeHintsFirst:  hintsFirstPrompt,
+	exercise.TutorModeFullAssist:  fullAssistPrompt,
+	exercise.TutorModeInterviewer: interviewerPrompt,
+	exercise.TutorModeDesignCoach: designCoachPrompt,
 }
 
 // personaPromptForMode returns mode's persona/rule text alone (no tools
@@ -237,9 +255,12 @@ func prependToolsPrompt(strategy toolCallingStrategy, toolCatalogText string, me
 // wantsComprehensionCheck reports whether mode runs the one-time
 // "restate the problem, ask clarifying questions" check before the
 // first real answer. syntax-only never discusses the problem at all, so
-// there's nothing to check comprehension of.
+// there's nothing to check comprehension of; the interviewer must not
+// restate the problem either, because in a design mock that restating
+// (plus asking the clarifying questions) is exactly the candidate's own
+// first step -- the model doing it would do the drill for them.
 func wantsComprehensionCheck(mode string) bool {
-	return mode != exercise.TutorModeSyntaxOnly
+	return mode != exercise.TutorModeSyntaxOnly && mode != exercise.TutorModeInterviewer
 }
 
 // SystemPromptForMode is systemPromptForMode, exported for
