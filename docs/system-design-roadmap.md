@@ -9,6 +9,38 @@ remaining NeetCode categories. A study block is reading + notes on one topic
 cluster; a practice session is a Ballroom design session (coach or
 interviewer).
 
+## How to practice (start here)
+
+You never need anything beyond this repo and `ballroom`. One session,
+end to end:
+
+1. **Launch**: run `ballroom` → Enter past the boot checks → `1` Practice
+   → **System Design** → pick a question (start with *Design Pastebin /
+   Bit.ly*).
+2. **Pick the session style** — this is the "language" choice: **coach**
+   (guided, 90 min — your first pass on every question) or
+   **interviewer** (a timed 45-minute mock — your second pass, 1–2 weeks
+   later; the picker marks questions ready for it with `mock due`).
+3. **In the session**, three panes: the problem statement (top left,
+   `M-1`), the tutor (`M-2`), and a terminal (`M-3`). Write your design
+   into `solution.md` in the editor, working the 4 steps below. Talk to
+   the tutor as you go — the coach teaches, the interviewer probes and
+   watches the clock. Estimation help: `less ~/back-of-envelope.md` in
+   the terminal pane.
+4. **Submit with `M-q`** when done. Three things happen: the hidden
+   grading rubric appears in your workspace, the tutor grades your
+   `solution.md` against it dimension by dimension (recording the
+   pass/fail — expect a strict grader; a fail with specific evidence is
+   the useful outcome), and on the 8 solved questions a `reference.md`
+   appears too — read it against your design before moving on.
+5. **Between sessions**, check `ballroom` → Stats: **Rubric weak spots**
+   ranks the dimensions you keep losing points on — when one keeps
+   showing up, that's your next study block from Phase 1's list.
+
+That loop — session → graded → weak spots → targeted study → next
+session — is the whole roadmap in miniature. The phases below just
+order the material.
+
 **The method** — every practice session follows the primer's 4-step approach.
 Internalize it until it's automatic:
 
