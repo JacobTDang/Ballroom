@@ -142,6 +142,11 @@ func sandboxRunArgs(cfg config.Config) []string {
 	return []string{
 		"run", "-it", "--rm",
 		"-v", sandboxVolume + ":/workspace",
+		// Sandbox sessions set none of the exercise PRACTICE_* vars, so
+		// they carry their own marker -- isSessionContext
+		// (cmd/ballroom/main.go) needs it for `ballroom return` to work
+		// inside a sandbox.
+		"-e", "PRACTICE_SANDBOX=1",
 		"-e", "TUTOR_MODEL=" + cfg.TutorModel,
 		"-e", "OPENROUTER_API_KEY=" + cfg.OpenRouterAPIKey,
 		"-e", "TUTOR_ORCHESTRATOR_MODEL=" + cfg.OrchestratorModel,
