@@ -43,6 +43,7 @@ var categoryOrder = map[string]int{
 	exercise.CategoryBitManipulation: 22,
 
 	exercise.CategorySystemDesign: 23,
+	exercise.CategoryOODesign:     24,
 }
 
 // languageOrder ranks language variants of the same problem so Python
@@ -80,6 +81,8 @@ var categoryDisplayNames = map[string]string{
 	exercise.CategoryDP2D:            "2-D Dynamic Programming",
 	exercise.CategoryMathGeometry:    "Math & Geometry",
 	exercise.CategoryBitManipulation: "Bit Manipulation",
+
+	exercise.CategoryOODesign: "OO Design",
 }
 
 // DisplayCategory maps a raw category id to how it's shown in the UI.

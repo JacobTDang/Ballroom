@@ -59,6 +59,12 @@ const (
 // it's its own top-level practice-picker entry.
 const CategorySystemDesign = "system-design"
 
+// CategoryOODesign holds the object-oriented design problems from the
+// same roadmap (hash map, parking lot, call center, ...). These are
+// ordinary coding exercises with real hidden tests -- KindCoding, not
+// KindDesign -- grouped as their own top-level category.
+const CategoryOODesign = "oo-design"
+
 const (
 	LanguageGo     = "go"
 	LanguageCpp    = "cpp"
@@ -117,6 +123,7 @@ var validCategories = map[string]bool{
 	CategoryBitManipulation: true,
 
 	CategorySystemDesign: true,
+	CategoryOODesign:     true,
 }
 
 // The language and tutor-mode vocabularies are kind-gated: a coding
