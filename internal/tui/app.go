@@ -1356,6 +1356,11 @@ func (m appModel) renderProblems() string {
 				statusStyle = passStyle
 			}
 		}
+		if catalog.MockDue(p) {
+			// The roadmap's second pass: coach passed, interviewer mock
+			// still untouched -- nudge without nagging.
+			status += "  · mock due"
+		}
 		if i == m.problemCursor {
 			b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s %s", label, status)))
 		} else {
