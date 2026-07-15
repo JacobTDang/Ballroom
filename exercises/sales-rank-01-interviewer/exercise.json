@@ -1,0 +1,11 @@
+{
+  "id": "sales-rank-01-interviewer",
+  "problem_id": "sales-rank-01",
+  "title": "Design Amazon's Sales Rank by Category",
+  "kind": "design",
+  "category": "system-design",
+  "language": "interviewer",
+  "time_limit_min": 45,
+  "tutor_mode": "interviewer",
+  "repo_path": "./repo"
+}

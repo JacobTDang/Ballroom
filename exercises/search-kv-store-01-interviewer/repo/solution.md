@@ -1,0 +1,9 @@
+# My Design: Search Key-Value Cache
+
+## Step 1 — Use cases, constraints, estimates
+
+## Step 2 — High-level design
+
+## Step 3 — Core components
+
+## Step 4 — Scale it

@@ -1,0 +1,11 @@
+{
+  "id": "aws-scaling-01-coach",
+  "problem_id": "aws-scaling-01",
+  "title": "Scale a System to Millions of Users on AWS",
+  "kind": "design",
+  "category": "system-design",
+  "language": "coach",
+  "time_limit_min": 90,
+  "tutor_mode": "design-coach",
+  "repo_path": "./repo"
+}

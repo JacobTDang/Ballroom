@@ -1,0 +1,11 @@
+{
+  "id": "search-kv-store-01-coach",
+  "problem_id": "search-kv-store-01",
+  "title": "Design a Key-Value Cache for a Search Engine",
+  "kind": "design",
+  "category": "system-design",
+  "language": "coach",
+  "time_limit_min": 90,
+  "tutor_mode": "design-coach",
+  "repo_path": "./repo"
+}

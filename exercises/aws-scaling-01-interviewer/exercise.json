@@ -1,0 +1,11 @@
+{
+  "id": "aws-scaling-01-interviewer",
+  "problem_id": "aws-scaling-01",
+  "title": "Scale a System to Millions of Users on AWS",
+  "kind": "design",
+  "category": "system-design",
+  "language": "interviewer",
+  "time_limit_min": 45,
+  "tutor_mode": "interviewer",
+  "repo_path": "./repo"
+}

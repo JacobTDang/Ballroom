@@ -1,0 +1,11 @@
+{
+  "id": "social-graph-01-interviewer",
+  "problem_id": "social-graph-01",
+  "title": "Design Data Structures for a Social Network",
+  "kind": "design",
+  "category": "system-design",
+  "language": "interviewer",
+  "time_limit_min": 45,
+  "tutor_mode": "interviewer",
+  "repo_path": "./repo"
+}
