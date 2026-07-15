@@ -3,6 +3,11 @@ package tutor
 import (
 	"regexp"
 	"strings"
+
+	"github.com/alecthomas/chroma/v2"
+	"github.com/alecthomas/chroma/v2/formatters"
+	"github.com/alecthomas/chroma/v2/lexers"
+	"github.com/alecthomas/chroma/v2/styles"
 )
 
 // Display-only markdown styling for the chat pane. The tutor's replies
@@ -42,6 +47,12 @@ const (
 	mdColorReset = "\x1b[39m"
 	// Fence labels ("python") render dim -- metadata, not content.
 	mdDimColor = "\x1b[38;2;150;145;135m"
+
+	// userEchoPrefix marks the user's own submitted lines in the
+	// transcript (display-only; history keeps the raw text). Dim, so the
+	// eye separates who said what without the prefix competing with the
+	// message itself.
+	userEchoPrefix = mdDimColor + "you › " + mdColorReset
 )
 
 // styleMarkdown renders the tutor's markdown constructs as terminal
@@ -53,24 +64,29 @@ func styleMarkdown(content string) string {
 	lines := strings.Split(content, "\n")
 	out := make([]string, 0, len(lines))
 	inFence := false
+	var fenceLabel string
+	var fenceLines []string
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "```") {
 			if !inFence {
 				inFence = true
-				label := strings.TrimSpace(strings.TrimPrefix(trimmed, "```"))
+				fenceLabel = strings.TrimSpace(strings.TrimPrefix(trimmed, "```"))
+				fenceLines = fenceLines[:0]
+				label := fenceLabel
 				if label == "" {
 					label = "code"
 				}
 				out = append(out, mdDimColor+"── "+label+" ──"+mdColorReset)
 			} else {
 				inFence = false
+				out = append(out, highlightCode(fenceLabel, fenceLines)...)
 				out = append(out, mdDimColor+"──"+mdColorReset)
 			}
 			continue
 		}
 		if inFence {
-			out = append(out, mdCodeColor+line+mdColorReset)
+			fenceLines = append(fenceLines, line)
 			continue
 		}
 		if m := mdHeaderPattern.FindStringSubmatch(line); m != nil {
@@ -81,5 +97,50 @@ func styleMarkdown(content string) string {
 		line = mdInlineCodePattern.ReplaceAllString(line, mdCodeColor+"$1"+mdColorReset)
 		out = append(out, line)
 	}
+	if inFence {
+		// Unterminated fence (a truncated reply): still render what
+		// arrived rather than dropping it.
+		out = append(out, highlightCode(fenceLabel, fenceLines)...)
+	}
 	return strings.Join(out, "\n")
+}
+
+// chromaStyle renders well on this pane's dark background; the
+// formatter emits the same 24-bit truecolor escapes the rest of the
+// chat styling uses (tmux.conf already enables RGB passthrough).
+var (
+	chromaStyle     = styles.Get("monokai")
+	chromaFormatter = formatters.Get("terminal16m")
+)
+
+// highlightCode renders a fenced block's lines: real per-token syntax
+// highlighting when chroma knows the language label, the flat accent
+// color otherwise (including unlabeled fences). Highlighting the whole
+// block at once -- not line by line -- keeps multi-line constructs
+// (strings, comments) tokenized correctly.
+func highlightCode(label string, lines []string) []string {
+	lexer := lexers.Get(label)
+	if label == "" || lexer == nil {
+		return flatCode(lines)
+	}
+	it, err := chroma.Coalesce(lexer).Tokenise(nil, strings.Join(lines, "\n"))
+	if err != nil {
+		return flatCode(lines)
+	}
+	var buf strings.Builder
+	if err := chromaFormatter.Format(&buf, chromaStyle, it); err != nil {
+		return flatCode(lines)
+	}
+	return strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+}
+
+// flatCode is the pre-chroma rendering -- every line in the shared
+// accent color -- kept as the fallback for unlabeled fences, unknown
+// languages, and highlighter errors.
+func flatCode(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		out[i] = mdCodeColor + line + mdColorReset
+	}
+	return out
 }

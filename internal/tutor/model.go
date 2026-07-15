@@ -610,7 +610,7 @@ func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 	m.turnInFlight = true
 	m.turnStartedAt = time.Now().Add(-auroraFadeInLead(glowLevel))
 	m.recomputeLayout()
-	m.displayLines = append(m.displayLines, "> "+line)
+	m.displayLines = append(m.displayLines, userEchoPrefix+line)
 	m.refreshViewport()
 
 	// Strategy detection still in flight (a submit typed faster than the
