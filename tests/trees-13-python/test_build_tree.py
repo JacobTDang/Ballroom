@@ -19,7 +19,7 @@ def to_level_order(root):
     return out
 
 
-def test_build_tree():
+def test_build_tree_case_1():
     assert to_level_order(build_tree([3, 9, 20, 15, 7], [9, 3, 15, 20, 7])) == [
         3,
         9,
@@ -29,8 +29,17 @@ def test_build_tree():
         15,
         7,
     ]
+
+
+def test_build_tree_case_2():
     assert to_level_order(build_tree([-1], [-1])) == [-1]
+
+
+def test_build_tree_case_3():
     assert to_level_order(build_tree([1, 2, 3], [3, 2, 1])) == [1, 2, None, 3]
+
+
+def test_build_tree_case_4():
     assert to_level_order(build_tree([1, 2, 4, 5, 3, 6, 7], [4, 2, 5, 1, 6, 3, 7])) == [
         1,
         2,
@@ -40,4 +49,7 @@ def test_build_tree():
         6,
         7,
     ]
+
+
+def test_build_tree_case_5():
     assert to_level_order(build_tree([1, 2], [1, 2])) == [1, None, 2]

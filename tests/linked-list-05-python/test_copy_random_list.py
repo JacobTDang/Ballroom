@@ -37,9 +37,21 @@ def check(vals, random_idx):
         assert copy_index[n.random] == random_idx[i]
 
 
-def test_copy_random_list():
+def test_copy_random_list_case_1():
     check([7, 13, 11, 10, 1], [-1, 0, 4, 2, 0])
+
+
+def test_copy_random_list_case_2():
     check([1, 2], [1, 1])
+
+
+def test_copy_random_list_case_3():
     check([3, 3, 3], [-1, -1, -1])
+
+
+def test_copy_random_list_case_4():
     check([], [])
+
+
+def test_copy_random_list_case_5():
     check([5], [0])

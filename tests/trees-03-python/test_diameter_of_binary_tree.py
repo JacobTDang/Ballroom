@@ -22,10 +22,25 @@ def build_tree(vals):
     return root
 
 
-def test_diameter_of_binary_tree():
+def test_diameter_of_binary_tree_case_1():
     assert diameter_of_binary_tree(build_tree([1, 2, 3, 4, 5])) == 3
+
+
+def test_diameter_of_binary_tree_case_2():
     assert diameter_of_binary_tree(build_tree([1, 2])) == 1
+
+
+def test_diameter_of_binary_tree_case_3():
     assert diameter_of_binary_tree(build_tree([1])) == 0
+
+
+def test_diameter_of_binary_tree_case_4():
     assert diameter_of_binary_tree(build_tree([1, 2, 3])) == 2
+
+
+def test_diameter_of_binary_tree_case_5():
     assert diameter_of_binary_tree(build_tree([1, 2, 3, 4, 5, 6, 7])) == 4
+
+
+def test_diameter_of_binary_tree_case_6():
     assert diameter_of_binary_tree(build_tree([0])) == 0

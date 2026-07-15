@@ -46,11 +46,29 @@ def check(vals):
     assert to_level_order(round_tripped) == to_level_order(original)
 
 
-def test_serialize_deserialize_round_trip():
+def test_serialize_deserialize_round_trip_case_1():
     check([1, 2, 3, None, None, 4, 5])
+
+
+def test_serialize_deserialize_round_trip_case_2():
     check([])
+
+
+def test_serialize_deserialize_round_trip_case_3():
     check([1])
+
+
+def test_serialize_deserialize_round_trip_case_4():
     check([-1, -2, -3])
+
+
+def test_serialize_deserialize_round_trip_case_5():
     check([5, 4, 7, 3, None, 2, None, -1, None, 9])
+
+
+def test_serialize_deserialize_round_trip_case_6():
     check([0])
+
+
+def test_serialize_deserialize_round_trip_case_7():
     check([100, None, 200, None, None, None, 300])

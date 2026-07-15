@@ -1,3 +1,5 @@
+import pytest
+
 from solution import decode, encode
 
 CASES = [
@@ -15,7 +17,7 @@ CASES = [
 ]
 
 
-def test_encode_decode_round_trip():
-    for strs in CASES:
-        encoded = encode(strs)
-        assert decode(encoded) == strs
+@pytest.mark.parametrize("strs", CASES)
+def test_encode_decode_round_trip(strs):
+    encoded = encode(strs)
+    assert decode(encoded) == strs
