@@ -33,3 +33,7 @@ frontier), a concrete dedup answer for both URLs and content, a
 politeness mechanism that actually serializes per-domain requests,
 crawler-trap defenses, and a scaling story for distributing the
 frontier across machines.
+
+After you submit with M-q, a distilled reference design
+(`reference.md`) appears alongside the rubric — compare your design
+against it before moving on.

@@ -32,3 +32,7 @@ the read path (timeline fetch), a concrete answer to the celebrity
 fanout problem, the timeline storage choice (and why it's in memory),
 how search is indexed and queried, and a scaling story for the
 read-heavy load.
+
+After you submit with M-q, a distilled reference design
+(`reference.md`) appears alongside the rubric — compare your design
+against it before moving on.

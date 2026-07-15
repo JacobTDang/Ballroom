@@ -35,3 +35,7 @@ service mapping user → shard, an adjacency-list data model, a BFS that
 works when every hop may live on a different machine (and what that
 does to latency), and a scaling story covering caching, replication,
 and the heavy-tailed degree distribution.
+
+After you submit with M-q, a distilled reference design
+(`reference.md`) appears alongside the rubric — compare your design
+against it before moving on.

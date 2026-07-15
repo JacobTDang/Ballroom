@@ -34,3 +34,7 @@ concrete MapReduce-style formulation with the key/value shapes at each
 stage, a serving data model that answers both "rank of product X" and
 "top N in category Y" cheaply, and a scaling story for hot categories
 and incremental refresh.
+
+After you submit with M-q, a distilled reference design
+(`reference.md`) appears alongside the rubric — compare your design
+against it before moving on.
