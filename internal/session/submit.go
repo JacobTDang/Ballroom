@@ -39,13 +39,20 @@ type lastTestResult struct {
 // Config describes one submit invocation. All paths are as seen from
 // inside the container.
 type Config struct {
-	ControlDir    string
-	WorkspaceDir  string
-	TestCommand   string
-	ExerciseID    string
-	Category      string
-	Language      string // programming language, or session style for design kind
-	Kind          string // exercise.KindCoding (default "" means coding) or exercise.KindDesign
+	ControlDir   string
+	WorkspaceDir string
+	TestCommand  string
+	ExerciseID   string
+	Category     string
+	Language     string // programming language, or session style for design kind
+	Kind         string // exercise.KindCoding (default "" means coding) or exercise.KindDesign
+	// Grade, when set on a design submit, produces the pass/fail verdict
+	// and a per-dimension summary by grading the design against the
+	// revealed rubric (see tutor.GradeDesign, wired by cmd/ballroom).
+	// Injected as a function rather than imported so this package stays
+	// decoupled from the tutor's model plumbing and tests can fake it.
+	// Nil, or any error from it, falls back to explicit self-assessment.
+	Grade         func() (verdict, summary string, err error)
 	StartedAt     time.Time
 	DBPath        string
 	PollInterval  time.Duration
@@ -75,9 +82,8 @@ func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, err
 
 	var result, output string
 	if cfg.Kind == exercise.KindDesign {
-		fmt.Fprintln(stdout, "\nrubric.md has been revealed in your workspace -- open it in the editor (M-1) or ask the tutor for a graded assessment (M-2) before you assess yourself.")
-		result = promptSelfAssessment(scanner, stdout)
-		output = "(design session: self-assessed)"
+		fmt.Fprintln(stdout, "\nrubric.md has been revealed in your workspace.")
+		result, output = gradeOrSelfAssess(cfg, scanner, stdout)
 	} else {
 		result, output = runTestCommand(cfg)
 		fmt.Fprintf(stdout, "\nresult: %s\n%s\n", result, output)
@@ -168,6 +174,26 @@ func writeLastTestResult(cfg Config, result, output string) error {
 		return fmt.Errorf("session: write last test result: %w", err)
 	}
 	return nil
+}
+
+// gradeOrSelfAssess produces a design submit's result: the injected
+// grader's verdict when it succeeds (summary shown to the user and
+// persisted for read_test_output), or the explicit self-assessment
+// prompt when no grader is wired or grading fails. Grading failures are
+// printed, never swallowed -- a free-tier model hiccup must be visible,
+// and must degrade to the human answering, not to a silent guess.
+func gradeOrSelfAssess(cfg Config, scanner *bufio.Scanner, stdout io.Writer) (result, output string) {
+	if cfg.Grade != nil {
+		verdict, summary, err := cfg.Grade()
+		if err == nil {
+			fmt.Fprintf(stdout, "\ntutor grade:\n%s\n\n", summary)
+			return verdict, "(design session: model-graded)\n\n" + summary
+		}
+		fmt.Fprintf(stdout, "\ngrading failed (%v); falling back to self-assessment\n", err)
+	} else {
+		fmt.Fprintln(stdout, "open it in the editor (M-1) or ask the tutor for a graded assessment (M-2) before you assess yourself.")
+	}
+	return promptSelfAssessment(scanner, stdout), "(design session: self-assessed)"
 }
 
 // promptSelfAssessment asks for an explicit pass/fail verdict on a
