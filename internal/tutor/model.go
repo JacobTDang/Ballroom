@@ -755,7 +755,11 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 		// own placement of helpRequestCount++ (unconditional, right
 		// before this same call).
 		newHelpRequestCount := m.helpRequestCount + 1
-		requestMessages := prependToolsPrompt(turnStrategy, m.toolCatalogText, append(append([]*schema.Message{}, m.history...), turnMessages(m.cfg.Mode, newHelpRequestCount, line)...))
+		turn := turnMessages(m.cfg.Mode, newHelpRequestCount, line)
+		if note := interviewClockNote(m.cfg.Mode, m.cfg.StartedAt, m.cfg.TimeLimitMin, time.Now()); note != nil {
+			turn = append([]*schema.Message{note}, turn...)
+		}
+		requestMessages := prependToolsPrompt(turnStrategy, m.toolCatalogText, append(append([]*schema.Message{}, m.history...), turn...))
 		reply, err := callRole(m.ctx, turnStrategy, turnAgent, turnCM, m.tools, requestMessages, feed, activityCh, activityOpt)
 		if err != nil {
 			doneCh <- turnCompleteMsg{err: err, endpoint: turnEndpoint, userMessage: line, helpRequestCount: newHelpRequestCount, routingWarning: routingWarning}

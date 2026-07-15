@@ -300,10 +300,27 @@ func tutorCmd() error {
 			maxContextBytes = n
 		}
 	}
+	// Interview clock: both parse failures degrade to zero values, which
+	// interviewClockNote treats as "no clock" -- sandbox sessions set
+	// neither var.
+	var startedAt time.Time
+	if raw := os.Getenv("PRACTICE_STARTED_AT"); raw != "" {
+		if t, err := time.Parse(time.RFC3339, raw); err == nil {
+			startedAt = t
+		}
+	}
+	timeLimitMin := 0
+	if raw := os.Getenv("PRACTICE_TIME_LIMIT_MIN"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			timeLimitMin = n
+		}
+	}
 
 	cfg := tutor.Config{
-		OllamaHost: ollamaHost,
-		Model:      model,
+		OllamaHost:   ollamaHost,
+		Model:        model,
+		StartedAt:    startedAt,
+		TimeLimitMin: timeLimitMin,
 		// OrchestratorModel is optional -- an empty value (the default
 		// when TUTOR_ORCHESTRATOR_MODEL isn't set) means no routing at
 		// all, matching this project's single-model behavior before
