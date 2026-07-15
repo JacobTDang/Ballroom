@@ -950,6 +950,27 @@ func TestTutorModel_TurnCompleteClearsActiveCallsAndTurnInFlight(t *testing.T) {
 	}
 }
 
+func TestTutorModel_TurnCompleteStylesReplyForDisplayButKeepsHistoryRaw(t *testing.T) {
+	m := newTutorLayoutOnly()
+	m.turnInFlight = true
+	raw := "use a **hash set** and call `add()`"
+
+	newM, _ := m.Update(turnCompleteMsg{reply: schema.AssistantMessage(raw, nil), userMessage: "how?"})
+	got := newM.(tutorModel)
+
+	display := strings.Join(got.displayLines, "\n")
+	if strings.Contains(display, "**") || strings.Contains(display, "`") {
+		t.Errorf("displayLines still carry raw markdown markers:\n%s", display)
+	}
+	if !strings.Contains(display, "\x1b[1m") {
+		t.Error("displayLines have no bold escape -- reply wasn't styled for display")
+	}
+	last := got.history[len(got.history)-1]
+	if last.Content != raw {
+		t.Errorf("history got %q, want the raw unstyled reply %q -- escape codes must never enter model context", last.Content, raw)
+	}
+}
+
 func TestTutorModel_SubmitShowsLiveToolCallActivity(t *testing.T) {
 	// newToolCallOllama (toolcheck_test.go) simulates a real tool_calls
 	// response for its first request, then a plain-text reply for its

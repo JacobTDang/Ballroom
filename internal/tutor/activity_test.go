@@ -283,11 +283,54 @@ func TestActivitySettledDotColor_NegativeElapsedClampsToGlow(t *testing.T) {
 
 func TestPulsedStatusLine_ContainsThePlainStatusText(t *testing.T) {
 	got := pulsedStatusLine(0, 80)
-	if !strings.Contains(got, "Thinking...") {
+	if !strings.Contains(got, "Thinking") {
 		t.Errorf("pulsedStatusLine(0, 80) = %q, want it to contain the plain status text", got)
 	}
 	if !strings.Contains(got, "\033[38;2;") {
 		t.Errorf("pulsedStatusLine(0, 80) = %q, want a truecolor escape for the dot", got)
+	}
+}
+
+// --- thinkingWaveDots -- the animated ellipsis after "Thinking" ---
+
+func TestThinkingWaveDots_UsesWaveGlyphs(t *testing.T) {
+	got := thinkingWaveDots(0)
+	found := false
+	for _, g := range thinkingWaveGlyphs {
+		if strings.Contains(got, g) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("thinkingWaveDots(0) = %q, want at least one wave glyph from %v", got, thinkingWaveGlyphs)
+	}
+}
+
+func TestThinkingWaveDots_AnimatesOverPhase(t *testing.T) {
+	if thinkingWaveDots(0) == thinkingWaveDots(9) {
+		t.Error("thinkingWaveDots identical at phase 0 and 9 -- the dots aren't animating")
+	}
+}
+
+func TestThinkingWaveDots_WaveTravelsAcrossDots(t *testing.T) {
+	// The defining property of a traveling wave: each dot repeats its
+	// neighbor's motion a fixed phase later. Dot i at phase p must show
+	// the same height dot i+1 shows at phase p + spread.
+	for p := 0; p < activityPulsePeriodTicks; p += 5 {
+		for i := 0; i < thinkingWaveDotCount-1; i++ {
+			a := thinkingWaveLevel(p, i)
+			b := thinkingWaveLevel(p+thinkingWaveSpreadTicks, i+1)
+			if a != b {
+				t.Fatalf("wave not traveling: dot %d at phase %d has level %d, dot %d at phase %d has level %d -- want equal", i, p, a, i+1, p+thinkingWaveSpreadTicks, b)
+			}
+		}
+	}
+}
+
+func TestPulsedStatusLine_NarrowWidthDropsWaveNotEscapes(t *testing.T) {
+	got := pulsedStatusLine(0, 6)
+	if strings.Count(got, "\033[38;2;") > 0 && !strings.Contains(got, "\033[0m") {
+		t.Errorf("pulsedStatusLine(0, 6) = %q, want any emitted escape properly closed", got)
 	}
 }
 
