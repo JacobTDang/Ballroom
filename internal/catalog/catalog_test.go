@@ -76,6 +76,18 @@ func TestSystemDesign_IsItsOwnTopLevelCategory(t *testing.T) {
 	}
 }
 
+func TestOODesign_IsItsOwnTopLevelCategory(t *testing.T) {
+	if got := TopLevelGroup(exercise.CategoryOODesign); got != exercise.CategoryOODesign {
+		t.Errorf("TopLevelGroup(oo-design) = %q, want itself", got)
+	}
+	if got := DisplayCategory(exercise.CategoryOODesign); got != "OO Design" {
+		t.Errorf("DisplayCategory(oo-design) = %q, want %q -- the humanizer would render \"Oo Design\"", got, "OO Design")
+	}
+	if CategoryRank(exercise.CategoryOODesign) <= CategoryRank(exercise.CategorySystemDesign) {
+		t.Error("oo-design must rank after system-design so the two design tracks sit together at the end")
+	}
+}
+
 func TestLanguageOrder_CoachSortsBeforeInterviewer(t *testing.T) {
 	// Coach must be the session-style picker's default (top) choice --
 	// the curriculum does each question coach-first, interviewer later.

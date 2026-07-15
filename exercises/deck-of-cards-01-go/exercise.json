@@ -1,0 +1,11 @@
+{
+  "id": "deck-of-cards-01-go",
+  "problem_id": "deck-of-cards-01",
+  "title": "Design a Deck of Cards",
+  "category": "oo-design",
+  "language": "go",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}

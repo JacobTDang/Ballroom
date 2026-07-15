@@ -88,7 +88,7 @@ Goal: the "design a class" round. These are code-shaped, so they live as
 normal Ballroom coding exercises (real hidden tests) under the OO Design
 category:
 
-- [ ] LRU cache
+- [ ] LRU cache (already in Ballroom as the AI-assisted `lru-cache-01`)
 - [ ] Hash map
 - [ ] Call center
 - [ ] Deck of cards
