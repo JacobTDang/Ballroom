@@ -67,6 +67,17 @@ func TestExerciseRunArgs_ForwardsKind(t *testing.T) {
 	}
 }
 
+func TestExerciseRunArgs_ForwardsGraderModel(t *testing.T) {
+	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "llama3:8b", GraderModel: "openrouter:tencent/hy3:free"}
+	ex := exercise.Exercise{ID: "url-shortener-01-coach", Kind: exercise.KindDesign, Category: "system-design", Language: "coach", TutorMode: "design-coach"}
+
+	args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now())
+
+	if !containsFlag(args, "TUTOR_GRADER_MODEL=openrouter:tencent/hy3:free") {
+		t.Errorf("expected TUTOR_GRADER_MODEL forwarded for design grading, got %v", args)
+	}
+}
+
 func TestSandboxRunArgs_MarksTheSandboxSessionContext(t *testing.T) {
 	cfg := config.Config{DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
 

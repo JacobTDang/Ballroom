@@ -77,6 +77,26 @@ func clearSessionEnv(t *testing.T) {
 	t.Setenv("PRACTICE_SANDBOX", "")
 }
 
+func TestGraderModelFromEnv_PrefersDedicatedGraderModel(t *testing.T) {
+	t.Setenv("TUTOR_GRADER_MODEL", "openrouter:tencent/hy3:free")
+	t.Setenv("TUTOR_MODEL", "openrouter:poolside/laguna-xs-2.1:free")
+	if got := graderModelFromEnv(); got != "openrouter:tencent/hy3:free" {
+		t.Errorf("graderModelFromEnv() = %q, want the dedicated grader model", got)
+	}
+}
+
+func TestGraderModelFromEnv_FallsBackToWorkerThenDefault(t *testing.T) {
+	t.Setenv("TUTOR_GRADER_MODEL", "")
+	t.Setenv("TUTOR_MODEL", "llama3.1:8b")
+	if got := graderModelFromEnv(); got != "llama3.1:8b" {
+		t.Errorf("graderModelFromEnv() = %q, want the worker model fallback", got)
+	}
+	t.Setenv("TUTOR_MODEL", "")
+	if got := graderModelFromEnv(); got != config.DefaultTutorModel {
+		t.Errorf("graderModelFromEnv() = %q, want the default model", got)
+	}
+}
+
 func TestIsSessionContext_TrueInSandbox(t *testing.T) {
 	// A sandbox session sets none of the exercise PRACTICE_* vars (no
 	// workspace copy, no control dir, no timer), so before the sandbox
