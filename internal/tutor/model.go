@@ -125,10 +125,14 @@ type tutorModel struct {
 	activeCalls []activityCall
 	pulsePhase  int
 
-	// turnSettledAt is when turnInFlight last flipped from true to
-	// false -- the origin point for the thinking aurora's fade-out
-	// (aurora.go). Zero means no turn has ever completed, so the
+	// turnStartedAt/turnSettledAt anchor the thinking aurora's two
+	// ramps (aurora.go): the bloom-in measures from turnStartedAt, the
+	// fade-out from turnSettledAt. Both may be backdated at the
+	// transition (see submit and the turnCompleteMsg case) so the glow
+	// always continues from its current level rather than jumping.
+	// Zero turnSettledAt means no turn has ever completed, so the
 	// aurora has never had a reason to exist.
+	turnStartedAt time.Time
 	turnSettledAt time.Time
 }
 
@@ -358,8 +362,13 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, pulseTickCmd()
 
 	case turnCompleteMsg:
+		// Read the glow's level before flipping turnInFlight, then
+		// backdate the settle time so the fade-out resumes from that
+		// level -- a reply landing mid-bloom must not flash the glow
+		// up to full brightness before it dies.
+		glowLevel := m.auroraFade()
 		m.turnInFlight = false
-		m.turnSettledAt = time.Now()
+		m.turnSettledAt = time.Now().Add(-auroraFadeOutLead(glowLevel))
 		calls := m.activeCalls
 		m.activeCalls = nil
 		m.helpRequestCount = msg.helpRequestCount
@@ -542,7 +551,13 @@ func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 	m.comprehensionCheckPending = false
 
 	m.textarea.Reset()
+	// Read any still-fading glow before flipping turnInFlight, then
+	// backdate the start time so the bloom resumes from that level --
+	// resubmitting during a fade-out must not blink the glow down to
+	// zero before it gathers again.
+	glowLevel := m.auroraFade()
 	m.turnInFlight = true
+	m.turnStartedAt = time.Now().Add(-auroraFadeInLead(glowLevel))
 	m.recomputeLayout()
 	m.displayLines = append(m.displayLines, "> "+line)
 	m.refreshViewport()
