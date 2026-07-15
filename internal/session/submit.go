@@ -80,10 +80,10 @@ func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, err
 	// its line.
 	scanner := bufio.NewScanner(stdin)
 
-	var result, output string
+	var result, output, gradeSummary string
 	if cfg.Kind == exercise.KindDesign {
 		fmt.Fprintln(stdout, "\nrubric.md has been revealed in your workspace.")
-		result, output = gradeOrSelfAssess(cfg, scanner, stdout)
+		result, output, gradeSummary = gradeOrSelfAssess(cfg, scanner, stdout)
 	} else {
 		result, output = runTestCommand(cfg)
 		fmt.Fprintf(stdout, "\nresult: %s\n%s\n", result, output)
@@ -106,6 +106,7 @@ func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, err
 		TimeSpentMin: time.Since(cfg.StartedAt).Minutes(),
 		Result:       result,
 		Notes:        notes,
+		GradeSummary: gradeSummary,
 	}
 
 	tr, err := tracker.Open(cfg.DBPath)
@@ -182,18 +183,18 @@ func writeLastTestResult(cfg Config, result, output string) error {
 // prompt when no grader is wired or grading fails. Grading failures are
 // printed, never swallowed -- a free-tier model hiccup must be visible,
 // and must degrade to the human answering, not to a silent guess.
-func gradeOrSelfAssess(cfg Config, scanner *bufio.Scanner, stdout io.Writer) (result, output string) {
+func gradeOrSelfAssess(cfg Config, scanner *bufio.Scanner, stdout io.Writer) (result, output, gradeSummary string) {
 	if cfg.Grade != nil {
 		verdict, summary, err := cfg.Grade()
 		if err == nil {
 			fmt.Fprintf(stdout, "\ntutor grade:\n%s\n\n", summary)
-			return verdict, "(design session: model-graded)\n\n" + summary
+			return verdict, "(design session: model-graded)\n\n" + summary, summary
 		}
 		fmt.Fprintf(stdout, "\ngrading failed (%v); falling back to self-assessment\n", err)
 	} else {
 		fmt.Fprintln(stdout, "open it in the editor (M-1) or ask the tutor for a graded assessment (M-2) before you assess yourself.")
 	}
-	return promptSelfAssessment(scanner, stdout), "(design session: self-assessed)"
+	return promptSelfAssessment(scanner, stdout), "(design session: self-assessed)", ""
 }
 
 // promptSelfAssessment asks for an explicit pass/fail verdict on a

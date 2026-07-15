@@ -233,6 +233,7 @@ const (
 // db — same indirection pattern as listModelsFn/checkModelFn/buildImageFn.
 var catalogListFn = catalog.List
 var recentAttemptsFn = recentAttempts
+var allAttemptsFn = allAttempts
 
 // recentAttemptsLimit caps how many recent attempts Stats shows.
 const recentAttemptsLimit = 10
@@ -324,6 +325,7 @@ type appModel struct {
 	// stageStats
 	statsStatuses []catalog.ExerciseStatus
 	statsRecent   []tracker.Attempt
+	statsWeakDims []catalog.DimensionWeakness
 
 	// stageSettings: settingsCursor is 0 = Worker model, 1 = Orchestrator
 	// model there; reused by stageProviderChoice as 0 = Local (Ollama),
@@ -563,6 +565,12 @@ func (m appModel) loadStats() appModel {
 		m.err = err
 		return m
 	}
+	all, err := allAttemptsFn(m.cfg)
+	if err != nil {
+		m.err = err
+		return m
+	}
+	m.statsWeakDims = catalog.WeakDimensions(all)
 	m.err = nil
 	m.statsStatuses = statuses
 	m.statsRecent = recent
@@ -1421,6 +1429,25 @@ func (m appModel) renderStats() string {
 		total)
 
 	b.WriteString(catalog.FormatSummary(m.statsStatuses) + "\n\n")
+
+	if len(m.statsWeakDims) > 0 {
+		b.WriteString(hintStyle.Render("Rubric weak spots (design grading)"))
+		b.WriteString("\n")
+		shown := m.statsWeakDims
+		if len(shown) > 5 {
+			shown = shown[:5]
+		}
+		for _, d := range shown {
+			line := fmt.Sprintf("  %-32s missing %d/%d · adequate %d/%d", d.Name, d.Missing, d.Total(), d.Adequate, d.Total())
+			style := checkDimStyle
+			if d.Missing > 0 {
+				style = failStyle
+			}
+			b.WriteString(style.Render(line))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
 
 	if len(m.statsRecent) == 0 {
 		b.WriteString(checkDimStyle.Render("No attempts yet — go practice something!"))
