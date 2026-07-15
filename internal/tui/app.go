@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -30,6 +31,10 @@ var checkModelFn = preflight.CheckModel
 // a background tea.Cmd (checkToolCallingCmd) after a pick completes
 // rather than blocking selection on it.
 var checkToolCallingFn = tutor.CheckToolCalling
+
+// claimsToolSupportFn is the cheap metadata counterpart to
+// checkToolCallingFn -- a var for the same test-substitution reason.
+var claimsToolSupportFn = tutor.ClaimsToolSupport
 
 // suggestedModels are known-good tutor model tags surfaced in the picker
 // even before they're pulled locally, so they're discoverable without
@@ -109,6 +114,35 @@ func checkToolCallingCmd(model, apiKey string) tea.Cmd {
 	return func() tea.Msg {
 		supported, err := checkToolCallingFn(context.Background(), ollamaHost, model, apiKey)
 		return toolCallingCheckMsg{model: model, supported: supported, err: err}
+	}
+}
+
+// toolSupportMsg carries the metadata pre-check for the picker's rows:
+// the set of models whose provider metadata explicitly DENIES tool
+// support. Models the metadata couldn't be fetched for (or doesn't
+// list) are simply absent -- no signal is never rendered as a denial.
+// Advisory only: metadata can rule a model out but not in (a model has
+// claimed tools in metadata while failing 6/6 live probes), so
+// checkToolCallingFn's live probe on selection stays the ground truth.
+type toolSupportMsg struct {
+	noTools map[string]bool
+}
+
+// toolSupportCmd checks each listed model's metadata in the background.
+// All local Ollama calls (the picker lists /api/tags results), so a
+// short overall deadline keeps a wedged daemon from stalling the badge
+// forever -- on timeout the remaining models just carry no marker.
+func toolSupportCmd(models []string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		noTools := map[string]bool{}
+		for _, name := range models {
+			if claims, known := claimsToolSupportFn(ctx, ollamaHost, name, ""); known && !claims {
+				noTools[name] = true
+			}
+		}
+		return toolSupportMsg{noTools: noTools}
 	}
 }
 
@@ -310,8 +344,9 @@ type appModel struct {
 	// stageModelPicker
 	modelLoading  bool
 	modelLoadErr  error
-	localModels   []string // exactly what Ollama reports pulled, for isLocalModel
-	models        []string // localModels + suggestedModels, deduplicated
+	localModels   []string        // exactly what Ollama reports pulled, for isLocalModel
+	models        []string        // localModels + suggestedModels, deduplicated
+	modelNoTools  map[string]bool // metadata explicitly denies tools (toolSupportMsg)
 	modelFilter   string
 	modelFiltered []string
 	modelCursor   int
@@ -376,6 +411,15 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.localModels = msg.models
 		m.models = browsableModels(msg.models)
 		m.modelFiltered = filterModels(m.models, m.modelFilter)
+		if msg.err != nil || len(msg.models) == 0 {
+			return m, nil
+		}
+		// Only the locally pulled models are worth a metadata call --
+		// suggested-but-not-pulled entries have no /api/show record.
+		return m, toolSupportCmd(msg.models)
+
+	case toolSupportMsg:
+		m.modelNoTools = msg.noTools
 		return m, nil
 
 	case pullLineMsg:
@@ -1549,6 +1593,9 @@ func (m appModel) renderModelPicker() string {
 				label += "  " + hintStyle.Render("(current)")
 			} else if !m.isLocalModel(name) {
 				label += "  " + checkDimStyle.Render("(not pulled)")
+			}
+			if m.modelNoTools[name] {
+				label += "  " + failStyle.Render("(no tools)")
 			}
 			if i == m.modelCursor {
 				b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s", label)))
