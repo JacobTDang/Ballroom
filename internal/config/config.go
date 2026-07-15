@@ -97,6 +97,11 @@ type Config struct {
 	// handles every turn by itself, identical to this project's
 	// single-model behavior before routing existed.
 	OrchestratorModel string
+	// GraderModel, when non-empty, is the model design-submit grading
+	// runs on (see tutor.GradeDesign) -- a role separate from worker and
+	// orchestrator so grading judgment quality can be chosen
+	// independently. Empty means grade with TutorModel.
+	GraderModel string
 	// OpenRouterAPIKey authenticates OpenRouter requests when TutorModel
 	// or OrchestratorModel is openrouter:-prefixed; unused otherwise.
 	// Resolved in Load: the persisted settings.json value if present,
@@ -116,6 +121,9 @@ type Settings struct {
 	// a secret, and routing being on/off should be an explicit, durable
 	// choice rather than something that flips based on ambient env vars.
 	OrchestratorModel string `json:"orchestrator_model"`
+	// GraderModel mirrors Config.GraderModel -- the design-submit
+	// grading role. Same no-env-fallback rationale as OrchestratorModel.
+	GraderModel string `json:"grader_model"`
 	// OpenRouterAPIKey is saved here so the TUI's model picker only ever
 	// needs to ask for it once (see internal/tui/app.go's key-entry
 	// stage) instead of requiring OPENROUTER_API_KEY to be exported in
@@ -205,6 +213,7 @@ func Load() (Config, error) {
 		cfg.TutorModel = DefaultTutorModel
 	}
 	cfg.OrchestratorModel = settings.OrchestratorModel
+	cfg.GraderModel = settings.GraderModel
 	cfg.OpenRouterAPIKey = settings.OpenRouterAPIKey
 	if cfg.OpenRouterAPIKey == "" {
 		cfg.OpenRouterAPIKey = os.Getenv("OPENROUTER_API_KEY")

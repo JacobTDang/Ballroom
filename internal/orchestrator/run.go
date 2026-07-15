@@ -131,6 +131,9 @@ func exerciseRunArgs(cfg config.Config, ex exercise.Exercise, controlDir, worksp
 		// internal/tutor.Config.OrchestratorModel), same rationale as
 		// OPENROUTER_API_KEY above.
 		"-e", "TUTOR_ORCHESTRATOR_MODEL=" + cfg.OrchestratorModel,
+		// Same always-forwarded contract -- empty means design grading
+		// uses the worker model (cmd/ballroom's graderModelFromEnv).
+		"-e", "TUTOR_GRADER_MODEL=" + cfg.GraderModel,
 		cfg.DockerImage,
 	}
 }

@@ -318,6 +318,23 @@ func TestLoad_OpenRouterAPIKeyEmptyWhenNeitherSourceHasIt(t *testing.T) {
 	}
 }
 
+func TestSaveSettings_ThenLoadRoundTripsGraderModel(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.json")
+
+	want := Settings{TutorModel: "llama3:8b", GraderModel: "openrouter:tencent/hy3:free"}
+	if err := SaveSettings(settingsPath, want); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	got, err := LoadSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if got.GraderModel != want.GraderModel {
+		t.Errorf("GraderModel = %q, want %q", got.GraderModel, want.GraderModel)
+	}
+}
+
 func TestSaveSettings_ThenLoadRoundTripsOrchestratorModel(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
