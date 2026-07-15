@@ -286,19 +286,70 @@ func activitySettledDotColor(elapsed time.Duration) (r, g, b int) {
 // can never inherit stray state from whatever rendered immediately
 // before it, regardless of the cause.
 func coloredDot(r, g, b int) string {
-	return fmt.Sprintf("\033[0m\033[38;2;%d;%d;%dm%s\033[0m", r, g, b, activityDotGlyph)
+	return coloredGlyph(r, g, b, activityDotGlyph)
+}
+
+// coloredGlyph is coloredDot generalized to any glyph — same defensive
+// reset-open-content-close span (see coloredDot's comment for why the
+// leading plain reset is load-bearing).
+func coloredGlyph(r, g, b int, glyph string) string {
+	return fmt.Sprintf("\033[0m\033[38;2;%d;%d;%dm%s\033[0m", r, g, b, glyph)
+}
+
+// The thinking indicator's trailing dots are a traveling wave rather
+// than a static "...": each dot cycles through glyphs of increasing
+// visual height, offset from its neighbor by thinkingWaveSpreadTicks,
+// so the ripple visibly rolls left-to-right while a turn is in flight.
+// Rides the same free-running pulse phase as the dot color, so no new
+// tick plumbing.
+var thinkingWaveGlyphs = []string{".", "·", "˙"}
+
+const (
+	thinkingWaveDotCount    = 3
+	thinkingWaveSpreadTicks = 6
+)
+
+// thinkingWaveLevel returns dot i's height (an index into
+// thinkingWaveGlyphs) at the given pulse phase. Pure function of
+// phase - i*spread only — that's exactly what makes the wave *travel*:
+// dot i+1 replays dot i's motion thinkingWaveSpreadTicks later.
+func thinkingWaveLevel(phase, i int) int {
+	x := float64(phase-i*thinkingWaveSpreadTicks) / float64(activityPulsePeriodTicks)
+	s := math.Sin(2 * math.Pi * x)
+	level := int(math.Round((s + 1) / 2 * float64(len(thinkingWaveGlyphs)-1)))
+	return min(max(level, 0), len(thinkingWaveGlyphs)-1)
+}
+
+// thinkingWaveDots renders the wave for one pulse frame: each dot gets
+// its level's glyph, colored by blending base→glow with height, so a
+// crest both rises and brightens.
+func thinkingWaveDots(phase int) string {
+	var b strings.Builder
+	for i := 0; i < thinkingWaveDotCount; i++ {
+		lvl := thinkingWaveLevel(phase, i)
+		frac := float64(lvl) / float64(len(thinkingWaveGlyphs)-1)
+		blended := activityPulseBaseColor.BlendLuv(activityPulseGlowColor, frac)
+		r8, g8, b8 := blended.RGB255()
+		b.WriteString(coloredGlyph(int(r8), int(g8), int(b8), thinkingWaveGlyphs[lvl]))
+	}
+	return b.String()
 }
 
 // pulsedStatusLine builds the activity region's status line for one
 // pulse frame: a color-wrapped dot (always animating, driven by
 // model.go's free-running pulseTickCmd for as long as a turn is in
-// flight) followed by the plain "Thinking..." text. Truncation happens
-// on the plain text *before* the color escape is added, so width-limiting
-// can never slice a truecolor sequence in half.
+// flight), the plain "Thinking" text, then the traveling wave dots.
+// Truncation happens on the plain text *before* any color escape is
+// added, and the wave is dropped whole when the width can't fit it —
+// width-limiting can never slice a truecolor sequence in half.
 func pulsedStatusLine(phase, cols int) string {
-	const plain = "Thinking..."
+	const plain = "Thinking"
 	r, g, b := activityDotColor("running", phase)
-	return coloredDot(r, g, b) + " " + truncateLine(plain, max(cols-2, 0))
+	line := coloredDot(r, g, b) + " " + truncateLine(plain, max(cols-2, 0))
+	if cols-2-len(plain) >= thinkingWaveDotCount {
+		line += thinkingWaveDots(phase)
+	}
+	return line
 }
 
 // activityCallHeader renders one call's header line body (everything

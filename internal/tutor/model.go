@@ -403,7 +403,10 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.history = append(m.history, schema.UserMessage(msg.userMessage), schema.AssistantMessage(msg.reply.Content, nil))
-		m.displayLines = append(m.displayLines, msg.reply.Content)
+		// styleMarkdown is display-only: history above keeps the raw
+		// reply, because that text goes back to the model as context and
+		// escape codes there would pollute every later turn's prompt.
+		m.displayLines = append(m.displayLines, styleMarkdown(msg.reply.Content))
 		m.refreshViewport()
 		return m, nil
 	}
