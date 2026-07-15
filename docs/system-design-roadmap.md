@@ -39,7 +39,9 @@ Goal: speak the vocabulary and estimate confidently.
       99.99%)
 - [ ] Back-of-envelope drills: memorize powers of two + latency numbers every
       programmer should know; do 3–4 estimation exercises (e.g. storage for
-      Twitter, QPS for a URL shortener, bandwidth for video streaming)
+      Twitter, QPS for a URL shortener, bandwidth for video streaming).
+      Cheat sheet: `docs/back-of-envelope.md` here, or
+      `less ~/back-of-envelope.md` in any session's terminal pane.
 
 ## Phase 1 — Core building blocks (weeks 3–6)
 
