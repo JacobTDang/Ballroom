@@ -273,3 +273,15 @@ func TestDecideHandoff_RequestErrorDefaultsToHandoffAndReturnsError(t *testing.T
 		t.Error("handoff = false, want true -- a routing failure must default to handoff, not silently leave the turn unanswered")
 	}
 }
+
+func TestLooksLikeLeakedToolCall_DetectsToolCallTag(t *testing.T) {
+	// The XML-style tag dialect (observed live from
+	// poolside/laguna-xs-2.1) must never reach the user from the native
+	// path's final answers either.
+	if !looksLikeLeakedToolCall("Let me look.<tool_call>read_solution_file</tool_call>") {
+		t.Error("looksLikeLeakedToolCall missed a <tool_call> tag")
+	}
+	if looksLikeLeakedToolCall("use a set instead of a list here") {
+		t.Error("looksLikeLeakedToolCall false positive on plain prose")
+	}
+}
