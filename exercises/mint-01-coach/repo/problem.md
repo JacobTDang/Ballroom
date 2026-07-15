@@ -36,3 +36,7 @@ categorization approach (rules first, with overrides), a budget/alert
 mechanism that doesn't recompute everything on every read, and a
 scaling story built on async processing and precomputed monthly
 analyses.
+
+After you submit with M-q, a distilled reference design
+(`reference.md`) appears alongside the rubric — compare your design
+against it before moving on.

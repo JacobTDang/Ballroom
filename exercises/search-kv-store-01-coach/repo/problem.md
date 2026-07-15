@@ -34,3 +34,7 @@ count, an LRU design you can explain at the data-structure level (hash
 map + doubly-linked list and why both), a consistent-hashing scheme for
 spreading queries across cache nodes, an expiry/invalidation answer for
 index freshness, and a scaling story for hot keys and node failures.
+
+After you submit with M-q, a distilled reference design
+(`reference.md`) appears alongside the rubric — compare your design
+against it before moving on.
