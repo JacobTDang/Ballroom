@@ -42,12 +42,40 @@ func (r Result) OK() bool {
 // Exercise verifies one exercise directory (containing exercise.json).
 // testsDir is the sibling hidden-tests directory (tests/<id>/), copied in
 // exactly as orchestrator.WaitAndReveal does at real submit time.
+//
+// A design-kind exercise has nothing to run, so its bar is structural:
+// repo/problem.md (the design prompt), repo/solution.md (the template
+// the user fills in), and tests/<id>/rubric.md (the hidden rubric the
+// reveal delivers) must all exist. Each missing piece is an error, not
+// a Result flag -- catalog.List silently skips broken exercises and a
+// missing rubric would otherwise only surface live as a 30-second
+// submit timeout, so this is the loud backstop.
 func Exercise(exerciseDir, testsDir string) (Result, error) {
 	ex, err := exercise.Load(filepath.Join(exerciseDir, "exercise.json"))
 	if err != nil {
 		return Result{}, err
 	}
 	result := Result{ExerciseID: ex.ID}
+
+	if ex.Kind == exercise.KindDesign {
+		for _, required := range []string{
+			filepath.Join(ex.RepoPath, "problem.md"),
+			filepath.Join(ex.RepoPath, "solution.md"),
+			filepath.Join(testsDir, "rubric.md"),
+		} {
+			if info, err := os.Stat(required); err != nil || info.IsDir() {
+				return Result{}, fmt.Errorf("verify: %s: design exercise missing %s", ex.ID, required)
+			}
+		}
+		// Both flags true so OK() reports success through the same
+		// Result shape coding exercises use -- the outputs say what was
+		// actually checked.
+		result.StarterFailed = true
+		result.ReferencePassed = true
+		result.StarterOutput = "(design exercise: structural check)"
+		result.ReferenceOutput = "(design exercise: structural check)"
+		return result, nil
+	}
 
 	refDir := filepath.Join(exerciseDir, referenceDirName)
 	if info, err := os.Stat(refDir); err != nil || !info.IsDir() {

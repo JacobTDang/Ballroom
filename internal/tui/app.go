@@ -1319,7 +1319,15 @@ func (m appModel) renderLanguage() string {
 	var b strings.Builder
 	b.WriteString(hintStyle.Render(m.selectedProblem.Title))
 	b.WriteString("\n")
-	b.WriteString(checkDimStyle.Render("choose a language"))
+	// A design problem's variants are session styles (coach/interviewer
+	// riding the language slot -- see exercise.LanguageCoach's doc
+	// comment), not languages; say so. Kind is uniform across a
+	// problem's variants, so checking the first is enough.
+	subtitle := "choose a language"
+	if len(m.selectedProblem.Variants) > 0 && m.selectedProblem.Variants[0].Exercise.Kind == exercise.KindDesign {
+		subtitle = "choose a session style"
+	}
+	b.WriteString(checkDimStyle.Render(subtitle))
 	b.WriteString("\n\n")
 
 	for i, v := range m.selectedProblem.Variants {
