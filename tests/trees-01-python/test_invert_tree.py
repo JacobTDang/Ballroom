@@ -45,7 +45,7 @@ def to_level_order(root):
     return out
 
 
-def test_invert_tree():
+def test_invert_tree_case_1():
     assert to_level_order(invert_tree(build_tree([4, 2, 7, 1, 3, 6, 9]))) == [
         4,
         7,
@@ -55,7 +55,19 @@ def test_invert_tree():
         3,
         1,
     ]
+
+
+def test_invert_tree_case_2():
     assert to_level_order(invert_tree(build_tree([2, 1, 3]))) == [2, 3, 1]
+
+
+def test_invert_tree_case_3():
     assert to_level_order(invert_tree(build_tree([]))) == []
+
+
+def test_invert_tree_case_4():
     assert to_level_order(invert_tree(build_tree([1]))) == [1]
+
+
+def test_invert_tree_case_5():
     assert to_level_order(invert_tree(build_tree([1, 2, None]))) == [1, None, 2]

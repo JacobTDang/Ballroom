@@ -22,10 +22,25 @@ def build_tree(vals):
     return root
 
 
-def test_max_depth():
+def test_max_depth_case_1():
     assert max_depth(build_tree([3, 9, 20, None, None, 15, 7])) == 3
+
+
+def test_max_depth_case_2():
     assert max_depth(build_tree([1, None, 2])) == 2
+
+
+def test_max_depth_case_3():
     assert max_depth(build_tree([])) == 0
+
+
+def test_max_depth_case_4():
     assert max_depth(build_tree([1])) == 1
+
+
+def test_max_depth_case_5():
     assert max_depth(build_tree([1, 2, None, 3])) == 3
+
+
+def test_max_depth_case_6():
     assert max_depth(build_tree([1, 2, 3, 4, 5, 6, 7])) == 3

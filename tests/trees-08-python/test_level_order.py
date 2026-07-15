@@ -22,9 +22,21 @@ def build_tree(vals):
     return root
 
 
-def test_level_order():
+def test_level_order_case_1():
     assert level_order(build_tree([3, 9, 20, None, None, 15, 7])) == [[3], [9, 20], [15, 7]]
+
+
+def test_level_order_case_2():
     assert level_order(build_tree([1])) == [[1]]
+
+
+def test_level_order_case_3():
     assert level_order(build_tree([])) == []
+
+
+def test_level_order_case_4():
     assert level_order(build_tree([1, 2, 3, 4, 5, 6, 7])) == [[1], [2, 3], [4, 5, 6, 7]]
+
+
+def test_level_order_case_5():
     assert level_order(build_tree([1, 2])) == [[1], [2]]

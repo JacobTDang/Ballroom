@@ -22,10 +22,25 @@ def build_tree(vals):
     return root
 
 
-def test_right_side_view():
+def test_right_side_view_case_1():
     assert right_side_view(build_tree([1, 2, 3, None, 5, None, 4])) == [1, 3, 4]
+
+
+def test_right_side_view_case_2():
     assert right_side_view(build_tree([1, None, 3])) == [1, 3]
+
+
+def test_right_side_view_case_3():
     assert right_side_view(build_tree([])) == []
+
+
+def test_right_side_view_case_4():
     assert right_side_view(build_tree([1, 2, 3, 4])) == [1, 3, 4]
+
+
+def test_right_side_view_case_5():
     assert right_side_view(build_tree([1, 2, 3, 4, 5, 6, 7])) == [1, 3, 7]
+
+
+def test_right_side_view_case_6():
     assert right_side_view(build_tree([1, 2, None, 3])) == [1, 2, 3]

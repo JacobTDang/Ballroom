@@ -22,9 +22,21 @@ def build_tree(vals):
     return root
 
 
-def test_good_nodes():
+def test_good_nodes_case_1():
     assert good_nodes(build_tree([3, 1, 4, 3, None, 1, 5])) == 4
+
+
+def test_good_nodes_case_2():
     assert good_nodes(build_tree([3, 3, None, 4, 2])) == 3
+
+
+def test_good_nodes_case_3():
     assert good_nodes(build_tree([1])) == 1
+
+
+def test_good_nodes_case_4():
     assert good_nodes(build_tree([1, 2, None, 3])) == 3
+
+
+def test_good_nodes_case_5():
     assert good_nodes(build_tree([5, 3, 3])) == 1

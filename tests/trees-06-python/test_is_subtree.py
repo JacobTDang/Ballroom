@@ -22,8 +22,11 @@ def build_tree(vals):
     return root
 
 
-def test_is_subtree():
+def test_is_subtree_case_1():
     assert is_subtree(build_tree([3, 4, 5, 1, 2]), build_tree([4, 1, 2])) is True
+
+
+def test_is_subtree_case_2():
     assert (
         is_subtree(
             build_tree([3, 4, 5, 1, 2, None, None, None, None, 0]),
@@ -31,7 +34,19 @@ def test_is_subtree():
         )
         is False
     )
+
+
+def test_is_subtree_case_3():
     assert is_subtree(build_tree([1, 1]), build_tree([1])) is True
+
+
+def test_is_subtree_case_4():
     assert is_subtree(build_tree([1]), build_tree([1])) is True
+
+
+def test_is_subtree_case_5():
     assert is_subtree(build_tree([3, 4, 5]), build_tree([3, 4, 5])) is True
+
+
+def test_is_subtree_case_6():
     assert is_subtree(build_tree([3, 4, 5]), build_tree([6])) is False

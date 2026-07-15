@@ -5,11 +5,13 @@ def normalize(groups):
     return sorted(sorted(g) for g in groups)
 
 
-def test_group_anagrams():
+def test_group_anagrams_case_1():
     got = normalize(group_anagrams(["eat", "tea", "tan", "ate", "nat", "bat"]))
     want = normalize([["bat"], ["nat", "tan"], ["ate", "eat", "tea"]])
     assert got == want
 
+
+def test_group_anagrams_case_2():
     assert normalize(group_anagrams([""])) == normalize([[""]])
     assert normalize(group_anagrams(["a"])) == normalize([["a"]])
     assert normalize(group_anagrams(["abc", "bca", "cab", "xyz"])) == normalize(
