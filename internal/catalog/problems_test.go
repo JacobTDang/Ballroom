@@ -105,3 +105,56 @@ func TestGroupByProblem_MultipleProblemsPreserveInputOrder(t *testing.T) {
 			len(problems[0].Variants))
 	}
 }
+
+func TestMockDue_CoachPassedInterviewerUnattempted(t *testing.T) {
+	p := ProblemStatus{
+		ProblemID: "url-shortener-01",
+		Category:  exercise.CategorySystemDesign,
+		Variants: []ExerciseStatus{
+			{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageCoach}, Attempts: 1, LastResult: tracker.ResultPass},
+			{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageInterviewer}, Attempts: 0},
+		},
+	}
+	if !MockDue(p) {
+		t.Error("MockDue = false, want true: coach passed, interviewer never attempted")
+	}
+}
+
+func TestMockDue_FalseCases(t *testing.T) {
+	base := func() ProblemStatus {
+		return ProblemStatus{
+			ProblemID: "url-shortener-01",
+			Category:  exercise.CategorySystemDesign,
+			Variants: []ExerciseStatus{
+				{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageCoach}, Attempts: 1, LastResult: tracker.ResultPass},
+				{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageInterviewer}, Attempts: 0},
+			},
+		}
+	}
+
+	p := base() // coach never passed
+	p.Variants[0].LastResult = tracker.ResultFail
+	if MockDue(p) {
+		t.Error("MockDue = true with coach failed, want false")
+	}
+
+	p = base() // interviewer already attempted
+	p.Variants[1].Attempts = 2
+	if MockDue(p) {
+		t.Error("MockDue = true with interviewer attempted, want false")
+	}
+
+	p = base() // interviewer-only mock: no coach variant at all
+	p.Variants = p.Variants[1:]
+	if MockDue(p) {
+		t.Error("MockDue = true for an interviewer-only problem, want false")
+	}
+
+	p = base() // coding problem shape never qualifies
+	for i := range p.Variants {
+		p.Variants[i].Exercise.Kind = exercise.KindCoding
+	}
+	if MockDue(p) {
+		t.Error("MockDue = true for a coding problem, want false")
+	}
+}

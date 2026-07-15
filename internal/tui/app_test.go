@@ -744,6 +744,30 @@ func TestAppModel_Language_EnterSetsOutcomeAndQuits(t *testing.T) {
 	}
 }
 
+func TestAppModel_Problems_MockDueMarker(t *testing.T) {
+	m := appModel{stage: stageProblems, category: exercise.CategorySystemDesign, categoryProblems: []catalog.ProblemStatus{
+		{
+			ProblemID: "url-shortener-01", Title: "Design Pastebin / Bit.ly", Category: exercise.CategorySystemDesign,
+			Solved: true, Attempts: 1,
+			Variants: []catalog.ExerciseStatus{
+				{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageCoach}, Attempts: 1, LastResult: tracker.ResultPass},
+				{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageInterviewer}},
+			},
+		},
+		{
+			ProblemID: "web-crawler-01", Title: "Design a Web Crawler", Category: exercise.CategorySystemDesign,
+			Variants: []catalog.ExerciseStatus{
+				{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageCoach}},
+				{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageInterviewer}},
+			},
+		},
+	}}
+	view := m.View()
+	if strings.Count(view, "mock due") != 1 {
+		t.Errorf("want exactly one (mock due) marker (coach passed + interviewer untouched), view:\n%s", view)
+	}
+}
+
 func TestAppModel_Language_DesignProblemSaysSessionStyle(t *testing.T) {
 	// A design problem's "language" variants are session styles
 	// (coach/interviewer) -- calling them a language on screen would be
