@@ -14,6 +14,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/cloudwego/eino/components/model"
@@ -45,6 +46,12 @@ type Config struct {
 	// no routing at all — Model handles every turn by itself, identical
 	// to this project's behavior before routing existed.
 	OrchestratorModel string
+	// StartedAt/TimeLimitMin are the interview clock: when both are set
+	// and Mode is interviewer, each turn carries an ephemeral elapsed-
+	// over-limit note (interviewClockNote). Zero values mean no clock --
+	// sandbox sessions and non-interview modes.
+	StartedAt    time.Time
+	TimeLimitMin int
 	// APIKey authenticates OpenRouter requests when Model or
 	// OrchestratorModel is OpenRouterModelPrefix-prefixed; unused
 	// otherwise. One key authenticates every model on an OpenRouter
@@ -282,6 +289,28 @@ func turnMessages(mode string, helpRequestCount int, line string) []*schema.Mess
 		note = fmt.Sprintf("(This is help request #%d in this session. If the user is asking again about a point you already nudged them on, give a full, direct answer now, including names — use your own judgment, don't ask them to confirm.)", helpRequestCount)
 	}
 	return []*schema.Message{schema.SystemMessage(note), schema.UserMessage(line)}
+}
+
+// interviewClockNote is the interviewer-mode counterpart of
+// turnMessages' hint-count note: an ephemeral per-turn system message
+// telling the model where the interview clock stands, so it paces the
+// mock like a real interviewer -- moving on mid-interview, pushing
+// wrap-up near the end -- instead of having no sense of time. Nil for
+// every other mode (coaching is deliberately untimed) and whenever the
+// clock is unknown (zero startedAt or limit: sandbox runs, tests),
+// matching this package's degrade-to-nothing contract.
+func interviewClockNote(mode string, startedAt time.Time, limitMin int, now time.Time) *schema.Message {
+	if mode != exercise.TutorModeInterviewer || startedAt.IsZero() || limitMin <= 0 {
+		return nil
+	}
+	elapsed := int(now.Sub(startedAt).Minutes())
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	if elapsed >= limitMin {
+		return schema.SystemMessage(fmt.Sprintf("(interview clock: %d of %d minutes elapsed -- time is up, have the candidate wrap up and summarize their design)", limitMin, limitMin))
+	}
+	return schema.SystemMessage(fmt.Sprintf("(interview clock: %d of %d minutes elapsed -- pace the interview accordingly)", elapsed, limitMin))
 }
 
 // TurnMessages is turnMessages, exported for cmd/tutor-eval — a real
