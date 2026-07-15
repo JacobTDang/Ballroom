@@ -842,6 +842,52 @@ func TestAppModel_ModelPicker_TypingArbitraryTagNotPulledShowsWarningWithoutSele
 	}
 }
 
+func TestAppModel_ModelPicker_MetadataDenialShowsNoToolsMarker(t *testing.T) {
+	orig := claimsToolSupportFn
+	claimsToolSupportFn = func(_ context.Context, _, model, _ string) (bool, bool) {
+		return model != "gemma:2b", true // gemma denies tools, others claim them
+	}
+	t.Cleanup(func() { claimsToolSupportFn = orig })
+
+	m := modelPickerFixture(t, nil)
+	newM, cmd := m.Update(modelsLoadedMsg{models: []string{"llama3.1:8b", "gemma:2b"}})
+	m = newM.(appModel)
+	if cmd == nil {
+		t.Fatal("modelsLoadedMsg produced no command, want the metadata check to fire")
+	}
+	newM, _ = m.Update(cmd())
+	m = newM.(appModel)
+
+	view := m.View()
+	if !strings.Contains(view, "gemma:2b") || !strings.Contains(view, "(no tools)") {
+		t.Errorf("view should mark gemma:2b with (no tools):\n%s", view)
+	}
+	if strings.Count(view, "(no tools)") != 1 {
+		t.Errorf("exactly one row should carry the marker, view:\n%s", view)
+	}
+}
+
+func TestAppModel_ModelPicker_MetadataFailureShowsNoMarker(t *testing.T) {
+	orig := claimsToolSupportFn
+	claimsToolSupportFn = func(_ context.Context, _, _, _ string) (bool, bool) {
+		return false, false // fetch failed: no signal
+	}
+	t.Cleanup(func() { claimsToolSupportFn = orig })
+
+	m := modelPickerFixture(t, nil)
+	newM, cmd := m.Update(modelsLoadedMsg{models: []string{"llama3.1:8b"}})
+	m = newM.(appModel)
+	if cmd == nil {
+		t.Fatal("modelsLoadedMsg produced no command")
+	}
+	newM, _ = m.Update(cmd())
+	m = newM.(appModel)
+
+	if strings.Contains(m.View(), "(no tools)") {
+		t.Errorf("metadata failure must degrade to no marker, view:\n%s", m.View())
+	}
+}
+
 func TestAppModel_ModelPicker_SuggestedModelsAppearEvenWhenNotPulledLocally(t *testing.T) {
 	m := modelPickerFixture(t, []string{"qwen2.5-coder:7b"})
 
