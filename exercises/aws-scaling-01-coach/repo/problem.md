@@ -35,3 +35,7 @@ load balancer + horizontal web tier, static assets to object storage +
 CDN, DB read replicas then caching, autoscaling, async workers via
 queues, and finally sharding/federation or NoSQL for write scale —
 plus monitoring as the thing that tells you which bottleneck is next.
+
+After you submit with M-q, a distilled reference design
+(`reference.md`) appears alongside the rubric — compare your design
+against it before moving on.

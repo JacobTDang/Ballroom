@@ -32,3 +32,7 @@ high-level diagram, the short-code generation scheme (and why it
 doesn't collide), your data model and database choice with reasoning,
 the redirect flow (including the HTTP status code choice), and a
 scaling story for the read-heavy load.
+
+After you submit with M-q, a distilled reference design
+(`reference.md`) appears alongside the rubric — compare your design
+against it before moving on.
