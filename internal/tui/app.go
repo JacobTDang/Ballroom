@@ -900,6 +900,7 @@ func (m appModel) clearOrchestratorModel() (tea.Model, tea.Cmd) {
 		TutorModel:        m.cfg.TutorModel,
 		OpenRouterAPIKey:  m.cfg.OpenRouterAPIKey,
 		OrchestratorModel: "",
+		GraderModel:       m.cfg.GraderModel,
 	}); err != nil {
 		m.err = err
 		return m, nil
@@ -1150,6 +1151,7 @@ func (m appModel) selectModel(name string) (tea.Model, tea.Cmd) {
 		TutorModel:        m.cfg.TutorModel,
 		OpenRouterAPIKey:  m.cfg.OpenRouterAPIKey,
 		OrchestratorModel: m.cfg.OrchestratorModel,
+		GraderModel:       m.cfg.GraderModel,
 	}
 	if m.settingsEditing == settingsTargetOrchestrator {
 		m.cfg.OrchestratorModel = name

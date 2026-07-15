@@ -72,6 +72,9 @@ Usage:
   ballroom config set-orchestrator-model <tag|none>
                                      Set the orchestrator model that routes turns to the
                                      worker model, or "none" to disable routing
+  ballroom config set-grader-model <tag|none>
+                                     Set the model that grades design submits, or "none"
+                                     to grade with the worker model
   ballroom config set-key <key>     Set the OpenRouter API key used by openrouter: models
   ballroom help | -h | --help  Show this help
 
@@ -227,26 +230,36 @@ func submitCmd() error {
 	return nil
 }
 
+// graderModelFromEnv picks the model design grading runs on: the
+// dedicated TUTOR_GRADER_MODEL when configured (ballroom config
+// set-grader-model), else the worker model, else the default.
+func graderModelFromEnv() string {
+	if m := os.Getenv("TUTOR_GRADER_MODEL"); m != "" {
+		return m
+	}
+	if m := os.Getenv("TUTOR_MODEL"); m != "" {
+		return m
+	}
+	return config.DefaultTutorModel
+}
+
 // designGraderFromEnv wires session.Config.Grade to tutor.GradeDesign
-// using the same env vars the tutor pane runs on. Grading deliberately
-// uses the WORKER model, not the orchestrator: live-tested 2026-07-15
-// against the real configured models, the large free-tier orchestrator
-// timed out on the grading call while the worker produced a correct,
-// well-evidenced per-dimension grade -- and a submit-blocking call
-// values finishing over marginal judgment quality (failures fall back
-// to self-assessment either way).
+// using the same env vars the tutor pane runs on, on the model
+// graderModelFromEnv picks. The orchestrator is deliberately NOT in
+// that fallback chain: live-tested 2026-07-15 against the real
+// configured models, the large free-tier orchestrator timed out on the
+// grading call while the worker graded correctly -- a submit-blocking
+// call values finishing over marginal judgment quality. Anyone who
+// wants a specific grading model sets it explicitly
+// (`ballroom config set-grader-model`).
 func designGraderFromEnv(workDir string) func() (string, string, error) {
 	ollamaHost := os.Getenv("OLLAMA_HOST")
 	if ollamaHost == "" {
 		ollamaHost = "http://host.docker.internal:11434"
 	}
-	model := os.Getenv("TUTOR_MODEL")
-	if model == "" {
-		model = config.DefaultTutorModel
-	}
 	cfg := tutor.Config{
 		OllamaHost:      ollamaHost,
-		Model:           model,
+		Model:           graderModelFromEnv(),
 		APIKey:          os.Getenv("OPENROUTER_API_KEY"),
 		WorkDir:         workDir,
 		MaxContextBytes: 8000,
@@ -330,7 +343,7 @@ const hostOllamaAddr = "http://localhost:11434"
 // you want to set.
 func configCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: ballroom config set-model <tag> | ballroom config set-orchestrator-model <tag|none> | ballroom config set-key <key>")
+		return fmt.Errorf("usage: ballroom config set-model <tag> | ballroom config set-orchestrator-model <tag|none> | ballroom config set-grader-model <tag|none> | ballroom config set-key <key>")
 	}
 	switch args[0] {
 	case "set-model":
@@ -343,6 +356,11 @@ func configCmd(args []string) error {
 			return fmt.Errorf("usage: ballroom config set-orchestrator-model <tag|none>")
 		}
 		return setOrchestratorModelCmd(args[1])
+	case "set-grader-model":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: ballroom config set-grader-model <tag|none>")
+		}
+		return setGraderModelCmd(args[1])
 	case "set-key":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: ballroom config set-key <key>")
@@ -371,6 +389,7 @@ func setModelCmd(tag string) error {
 		TutorModel:        tag,
 		OpenRouterAPIKey:  cfg.OpenRouterAPIKey,
 		OrchestratorModel: cfg.OrchestratorModel,
+		GraderModel:       cfg.GraderModel,
 	}); err != nil {
 		return err
 	}
@@ -395,6 +414,34 @@ func setModelCmd(tag string) error {
 // existing TutorModel (same round-trip concern as setModelCmd, in the
 // other direction). Never prompts interactively for anything and never
 // echoes the key back -- it's a secret.
+// setGraderModelCmd persists the design-submit grading model, "none"
+// to clear it (grading then uses the worker model). Same
+// preserve-everything-else round trip as the other set-* commands.
+func setGraderModelCmd(tag string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	graderModel := tag
+	if tag == "none" {
+		graderModel = ""
+	}
+	if err := config.SaveSettings(cfg.SettingsPath(), config.Settings{
+		TutorModel:        cfg.TutorModel,
+		OpenRouterAPIKey:  cfg.OpenRouterAPIKey,
+		OrchestratorModel: cfg.OrchestratorModel,
+		GraderModel:       graderModel,
+	}); err != nil {
+		return err
+	}
+	if graderModel == "" {
+		fmt.Println("grader model cleared -- design grading uses the worker model")
+	} else {
+		fmt.Printf("grader model set to %s\n", graderModel)
+	}
+	return nil
+}
+
 func setKeyCmd(key string) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -404,6 +451,7 @@ func setKeyCmd(key string) error {
 		TutorModel:        cfg.TutorModel,
 		OpenRouterAPIKey:  key,
 		OrchestratorModel: cfg.OrchestratorModel,
+		GraderModel:       cfg.GraderModel,
 	}); err != nil {
 		return err
 	}
@@ -429,6 +477,7 @@ func setOrchestratorModelCmd(tag string) error {
 		TutorModel:        cfg.TutorModel,
 		OpenRouterAPIKey:  cfg.OpenRouterAPIKey,
 		OrchestratorModel: orchestratorModel,
+		GraderModel:       cfg.GraderModel,
 	}); err != nil {
 		return err
 	}
