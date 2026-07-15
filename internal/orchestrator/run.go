@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 
 	"github.com/JacobTDang/Ballroom/internal/config"
@@ -118,6 +119,7 @@ func exerciseRunArgs(cfg config.Config, ex exercise.Exercise, controlDir, worksp
 		"-e", "PRACTICE_LANGUAGE=" + ex.Language,
 		"-e", "PRACTICE_KIND=" + ex.Kind,
 		"-e", "PRACTICE_TUTOR_MODE=" + ex.TutorMode,
+		"-e", "PRACTICE_TIME_LIMIT_MIN=" + strconv.Itoa(ex.TimeLimitMin),
 		"-e", "PRACTICE_STARTED_AT=" + startedAt.Format(time.RFC3339),
 		"-e", "PRACTICE_DB_PATH=/data/tracker.db",
 		"-e", "TUTOR_MODEL=" + cfg.TutorModel,

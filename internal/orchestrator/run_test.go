@@ -78,6 +78,17 @@ func TestExerciseRunArgs_ForwardsGraderModel(t *testing.T) {
 	}
 }
 
+func TestExerciseRunArgs_ForwardsTimeLimit(t *testing.T) {
+	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
+	ex := exercise.Exercise{ID: "url-shortener-01-interviewer", Kind: exercise.KindDesign, Category: "system-design", Language: "interviewer", TutorMode: "interviewer", TimeLimitMin: 45}
+
+	args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now())
+
+	if !containsFlag(args, "PRACTICE_TIME_LIMIT_MIN=45") {
+		t.Errorf("expected PRACTICE_TIME_LIMIT_MIN forwarded for the interview clock, got %v", args)
+	}
+}
+
 func TestSandboxRunArgs_MarksTheSandboxSessionContext(t *testing.T) {
 	cfg := config.Config{DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
 

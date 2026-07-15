@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 )
@@ -283,5 +284,46 @@ func TestLooksLikeLeakedToolCall_DetectsToolCallTag(t *testing.T) {
 	}
 	if looksLikeLeakedToolCall("use a set instead of a list here") {
 		t.Error("looksLikeLeakedToolCall false positive on plain prose")
+	}
+}
+
+func TestInterviewClockNote_InterviewerGetsElapsedOverLimit(t *testing.T) {
+	started := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
+	now := started.Add(23 * time.Minute)
+	note := interviewClockNote(exercise.TutorModeInterviewer, started, 45, now)
+	if note == nil {
+		t.Fatal("interviewClockNote = nil for an interviewer session with a live clock")
+	}
+	if !strings.Contains(note.Content, "23 of 45 minutes") {
+		t.Errorf("note = %q, want elapsed-over-limit minutes", note.Content)
+	}
+}
+
+func TestInterviewClockNote_TimeUpMessageWhenPastLimit(t *testing.T) {
+	started := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
+	now := started.Add(50 * time.Minute)
+	note := interviewClockNote(exercise.TutorModeInterviewer, started, 45, now)
+	if note == nil {
+		t.Fatal("interviewClockNote = nil past the limit, want a wrap-up note")
+	}
+	if !strings.Contains(note.Content, "45 of 45 minutes") || !strings.Contains(note.Content, "wrap up") {
+		t.Errorf("note = %q, want clamped time and a wrap-up push", note.Content)
+	}
+}
+
+func TestInterviewClockNote_OtherModesAndUnknownClockGetNothing(t *testing.T) {
+	started := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
+	now := started.Add(10 * time.Minute)
+	if note := interviewClockNote(exercise.TutorModeDesignCoach, started, 90, now); note != nil {
+		t.Errorf("design-coach got a clock note %q, want nil -- coaching is untimed", note.Content)
+	}
+	if note := interviewClockNote(exercise.TutorModeHintsFirst, started, 25, now); note != nil {
+		t.Errorf("hints-first got a clock note %q, want nil", note.Content)
+	}
+	if note := interviewClockNote(exercise.TutorModeInterviewer, time.Time{}, 45, now); note != nil {
+		t.Errorf("zero StartedAt got a clock note %q, want nil (sandbox/tests have no clock)", note.Content)
+	}
+	if note := interviewClockNote(exercise.TutorModeInterviewer, started, 0, now); note != nil {
+		t.Errorf("zero TimeLimitMin got a clock note %q, want nil", note.Content)
 	}
 }
