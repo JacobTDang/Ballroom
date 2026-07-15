@@ -542,7 +542,7 @@ func TestTutorModel_SubmitBeforeDetectionQueuesTurnUntilStrategiesArrive(t *test
 	if !m.turnInFlight {
 		t.Error("turnInFlight = false after a queued submit, want true -- the thinking indicator must engage immediately")
 	}
-	if !strings.Contains(ansi.Strip(m.View()), "> early question") {
+	if !strings.Contains(ansi.Strip(m.View()), "you › early question") {
 		t.Error("queued submit's echo missing from the view")
 	}
 
@@ -1082,6 +1082,21 @@ func TestTutorModel_TurnCompleteClearsActiveCallsAndTurnInFlight(t *testing.T) {
 	}
 	if len(got.activeCalls) != 0 {
 		t.Errorf("activeCalls = %+v, want cleared", got.activeCalls)
+	}
+}
+
+func TestTutorModel_SubmitEchoCarriesStyledYouPrefix(t *testing.T) {
+	m := newTutorLayoutOnly()
+	m.textarea.SetValue("what about sharding?")
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := newM.(tutorModel)
+
+	display := strings.Join(got.displayLines, "\n")
+	if !strings.Contains(ansi.Strip(display), "you › what about sharding?") {
+		t.Errorf("echo missing the you › prefix:\n%s", ansi.Strip(display))
+	}
+	if !strings.Contains(display, "\x1b[") {
+		t.Error("the you › prefix should carry styling escapes")
 	}
 }
 

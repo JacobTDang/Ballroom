@@ -1,6 +1,7 @@
 package tutor
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -82,6 +83,46 @@ func TestStyleMarkdown_StrayAsteriskNotMangled(t *testing.T) {
 	if got := styleMarkdown(in); got != in {
 		t.Errorf("styleMarkdown(%q) = %q, want unchanged -- lone asterisks aren't bold markers", in, got)
 	}
+}
+
+func TestStyleMarkdown_KnownLanguageFenceGetsTokenColors(t *testing.T) {
+	in := "```python\ndef add(a, b):\n    return a + b\n```"
+	got := styleMarkdown(in)
+	if strings.Contains(got, "```") {
+		t.Errorf("fence markers leaked:\n%s", got)
+	}
+	stripped := stripAnsiTest(got)
+	if !strings.Contains(stripped, "def add(a, b):") || !strings.Contains(stripped, "return a + b") {
+		t.Errorf("code content lost:\n%s", stripped)
+	}
+	// Real token coloring means the keyword and the identifier carry
+	// DIFFERENT colors -- a flat single-color block has exactly one
+	// distinct foreground sequence.
+	colors := distinctForegrounds(got)
+	if len(colors) < 2 {
+		t.Errorf("highlighted python block has %d distinct foreground colors, want >= 2 (token-level highlighting)", len(colors))
+	}
+}
+
+func TestStyleMarkdown_UnknownLanguageFenceFallsBackToFlatColor(t *testing.T) {
+	in := "```notareallang\nblorp blip 42\n```"
+	got := styleMarkdown(in)
+	if !strings.Contains(got, mdCodeColor) {
+		t.Errorf("unknown-language fence should keep the flat accent color:\n%q", got)
+	}
+	if !strings.Contains(stripAnsiTest(got), "blorp blip 42") {
+		t.Errorf("code content lost:\n%s", stripAnsiTest(got))
+	}
+}
+
+// distinctForegrounds collects the unique truecolor foreground
+// sequences in s.
+func distinctForegrounds(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, m := range regexp.MustCompile(`\x1b\[38;2;\d+;\d+;\d+m`).FindAllString(s, -1) {
+		out[m] = true
+	}
+	return out
 }
 
 // stripAnsiTest removes ANSI escapes for content assertions.
