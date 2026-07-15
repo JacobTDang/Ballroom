@@ -192,14 +192,69 @@ func TestOverlayAurora_KeepsContentTallerThanPane(t *testing.T) {
 	}
 }
 
-// --- auroraFade -- lifecycle (was the border's fade, same semantics) ---
+// --- auroraFade -- lifecycle ---
 
-func TestAuroraFade_FullWhileTurnInFlight(t *testing.T) {
+func TestAuroraFade_FullOnceRampCompletes(t *testing.T) {
 	m := newTutorLayoutOnly()
 	m.turnInFlight = true
-	m.turnSettledAt = time.Now().Add(-10 * time.Second)
+	m.turnStartedAt = time.Now().Add(-10 * time.Second)
+	m.turnSettledAt = time.Now().Add(-10 * time.Second) // stale, must not matter
 	if got := m.auroraFade(); got != 1.0 {
-		t.Errorf("auroraFade() = %v while turnInFlight, want 1.0", got)
+		t.Errorf("auroraFade() = %v long after the turn started, want 1.0", got)
+	}
+}
+
+func TestAuroraFade_RampsInGentlyAtTurnStart(t *testing.T) {
+	// The glow must bloom in, not pop to full strength the instant the
+	// user hits enter (real feedback: "it should[n't] start so strong
+	// ... come in slowly and more naturally").
+	m := newTutorLayoutOnly()
+	m.turnInFlight = true
+
+	m.turnStartedAt = time.Now()
+	if got := m.auroraFade(); got >= 0.1 {
+		t.Errorf("auroraFade() = %v at the instant a turn starts, want near 0 -- the glow pops instead of blooming", got)
+	}
+
+	m.turnStartedAt = time.Now().Add(-auroraFadeInDuration / 2)
+	mid := m.auroraFade()
+	if mid <= 0.3 || mid >= 0.7 {
+		t.Errorf("auroraFade() = %v at half the ramp, want around 0.5 (smoothstep midpoint)", mid)
+	}
+
+	m.turnStartedAt = time.Now().Add(-auroraFadeInDuration)
+	if got := m.auroraFade(); got != 1.0 {
+		t.Errorf("auroraFade() = %v at exactly the ramp duration, want 1.0", got)
+	}
+}
+
+func TestAuroraFadeInLead_ResumesTheRampFromAGivenLevel(t *testing.T) {
+	// When a new turn starts while the previous glow is still fading
+	// out, turnStartedAt is backdated by auroraFadeInLead(level) so the
+	// bloom continues smoothly from the current level instead of
+	// blinking down to zero. The lead must therefore invert the ramp.
+	for _, level := range []float64{0.1, 0.25, 0.5, 0.75, 0.9} {
+		m := newTutorLayoutOnly()
+		m.turnInFlight = true
+		m.turnStartedAt = time.Now().Add(-auroraFadeInLead(level))
+		got := m.auroraFade()
+		if got < level-0.05 || got > level+0.05 {
+			t.Errorf("auroraFade() = %v with turnStartedAt backdated for level %v, want within 0.05", got, level)
+		}
+	}
+}
+
+func TestAuroraFadeOutLead_ResumesTheDecayFromAGivenLevel(t *testing.T) {
+	// Mirror of the fade-in lead: if the reply lands mid-bloom, the
+	// fade-out must start from the bloom's current level, not jump up
+	// to full brightness first.
+	for _, level := range []float64{0.1, 0.25, 0.5, 0.75, 0.9} {
+		m := newTutorLayoutOnly()
+		m.turnSettledAt = time.Now().Add(-auroraFadeOutLead(level))
+		got := m.auroraFade()
+		if got < level-0.05 || got > level+0.05 {
+			t.Errorf("auroraFade() = %v with turnSettledAt backdated for level %v, want within 0.05", got, level)
+		}
 	}
 }
 
@@ -212,7 +267,7 @@ func TestAuroraFade_ZeroBeforeAnyTurnCompleted(t *testing.T) {
 
 func TestAuroraFade_ZeroAfterFadeDuration(t *testing.T) {
 	m := newTutorLayoutOnly()
-	m.turnSettledAt = time.Now().Add(-auroraFadeDuration)
+	m.turnSettledAt = time.Now().Add(-auroraFadeOutDuration)
 	if got := m.auroraFade(); got != 0.0 {
 		t.Errorf("auroraFade() = %v at exactly fadeDuration elapsed, want 0.0 -- fully gone, not asymptotically dim", got)
 	}
@@ -220,7 +275,7 @@ func TestAuroraFade_ZeroAfterFadeDuration(t *testing.T) {
 
 func TestAuroraFade_MidFadeEaseOutBelowLinear(t *testing.T) {
 	m := newTutorLayoutOnly()
-	m.turnSettledAt = time.Now().Add(-auroraFadeDuration / 2)
+	m.turnSettledAt = time.Now().Add(-auroraFadeOutDuration / 2)
 	got := m.auroraFade()
 	if got <= 0 || got >= 0.5 {
 		t.Errorf("auroraFade() = %v at half duration, want in (0, 0.5) -- ease-out sits below the linear ramp", got)

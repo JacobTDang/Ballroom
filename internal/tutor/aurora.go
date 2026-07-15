@@ -120,14 +120,67 @@ func auroraEdgeMask(col, row, w, h int, depth, t float64) float64 {
 	if d >= local {
 		return 0
 	}
-	s := 1 - d/local
-	return s * s * (3 - 2*s)
+	return smoothstep(1 - d/local)
 }
 
-// auroraFadeDuration is how long the glow takes to disappear after a
-// turn completes -- long enough to read as a deliberate fade, short
+// auroraFadeInDuration is how long the glow takes to bloom to full
+// strength after the user submits. Deliberately slower than the
+// fade-out: a glow that pops to full brightness the instant enter is
+// pressed read as jarring (real feedback: "it should[n't] start so
+// strong ... come in slowly and more naturally"), while a slow gather
+// reads as the pane starting to think.
+const auroraFadeInDuration = 1600 * time.Millisecond
+
+// auroraFadeOutDuration is how long the glow takes to disappear after
+// a turn completes -- long enough to read as a deliberate fade, short
 // enough to never linger into reading the reply.
-const auroraFadeDuration = 900 * time.Millisecond
+const auroraFadeOutDuration = 900 * time.Millisecond
+
+// smoothstep is the classic 3x^2-2x^3 ease: zero slope at both ends,
+// so anything animated with it arrives and departs gently. Shared by
+// the fade-in ramp and the edge mask's falloff.
+func smoothstep(x float64) float64 {
+	if x <= 0 {
+		return 0
+	}
+	if x >= 1 {
+		return 1
+	}
+	return x * x * (3 - 2*x)
+}
+
+// auroraFadeInLead converts a glow level back into how far along the
+// fade-in ramp it sits (the exact smoothstep inverse, via the
+// trisection identity). Used to backdate turnStartedAt when a new turn
+// begins while the previous glow is still fading out, so the bloom
+// continues smoothly from the current level instead of blinking down
+// to zero first.
+func auroraFadeInLead(level float64) time.Duration {
+	if level <= 0 {
+		return 0
+	}
+	if level >= 1 {
+		return auroraFadeInDuration
+	}
+	x := 0.5 - math.Sin(math.Asin(1-2*level)/3)
+	return time.Duration(x * float64(auroraFadeInDuration))
+}
+
+// auroraFadeOutLead is auroraFadeInLead's mirror for the ease-out
+// curve (fade = (1-x)^2): how far into the fade-out a given level
+// sits. Used to backdate turnSettledAt when a reply lands mid-bloom,
+// so the decay starts from the bloom's current level instead of
+// jumping up to full brightness first.
+func auroraFadeOutLead(level float64) time.Duration {
+	if level >= 1 {
+		return 0
+	}
+	if level <= 0 {
+		return auroraFadeOutDuration
+	}
+	x := 1 - math.Sqrt(level)
+	return time.Duration(x * float64(auroraFadeOutDuration))
+}
 
 // auroraColorAt is the field color at normalized pane coordinates
 // (u,v) and animation time t (seconds), before brightness or edge
@@ -150,25 +203,31 @@ func auroraColorAt(u, v, t float64) (r, g, b float64) {
 	return r / wsum, g / wsum, b / wsum
 }
 
-// auroraFade is the glow's opacity for the current frame: 1 for the
-// whole time a turn is in flight, an ease-out decay to 0 over
-// auroraFadeDuration once it settles, exactly 0 at rest. Wall-clock
-// based rather than tick-counted so the duration holds regardless of
-// tick jitter; the free-running pulseTickMsg guarantees a re-render
-// every 40ms to actually show the decay.
+// auroraFade is the glow's opacity for the current frame: a smoothstep
+// bloom from 0 to 1 over auroraFadeInDuration while a turn is in
+// flight, an ease-out decay to 0 over auroraFadeOutDuration once it
+// settles, exactly 0 at rest. Wall-clock based rather than
+// tick-counted so the durations hold regardless of tick jitter; the
+// free-running pulseTickMsg guarantees a re-render every 40ms to
+// actually show both ramps.
 func (m tutorModel) auroraFade() float64 {
 	if m.turnInFlight {
-		return 1.0
+		if m.turnStartedAt.IsZero() {
+			// No recorded start (layout-only tests flip turnInFlight
+			// directly) -- treat as fully risen.
+			return 1.0
+		}
+		return smoothstep(float64(time.Since(m.turnStartedAt)) / float64(auroraFadeInDuration))
 	}
 	if m.turnSettledAt.IsZero() {
 		return 0.0
 	}
 	elapsed := time.Since(m.turnSettledAt)
-	if elapsed >= auroraFadeDuration {
+	if elapsed >= auroraFadeOutDuration {
 		return 0.0
 	}
 	// t*t ease-out: drops quickly at first, tapers at the end.
-	t := 1.0 - float64(elapsed)/float64(auroraFadeDuration)
+	t := 1.0 - float64(elapsed)/float64(auroraFadeOutDuration)
 	return t * t
 }
 
