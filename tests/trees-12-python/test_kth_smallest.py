@@ -22,10 +22,25 @@ def build_tree(vals):
     return root
 
 
-def test_kth_smallest():
+def test_kth_smallest_case_1():
     assert kth_smallest(build_tree([3, 1, 4, None, 2]), 1) == 1
+
+
+def test_kth_smallest_case_2():
     assert kth_smallest(build_tree([3, 1, 4, None, 2]), 2) == 2
+
+
+def test_kth_smallest_case_3():
     assert kth_smallest(build_tree([3, 1, 4, None, 2]), 4) == 4
+
+
+def test_kth_smallest_case_4():
     assert kth_smallest(build_tree([5, 3, 6, 2, 4, None, None, 1]), 3) == 3
+
+
+def test_kth_smallest_case_5():
     assert kth_smallest(build_tree([5, 3, 6, 2, 4, None, None, 1]), 5) == 5
+
+
+def test_kth_smallest_case_6():
     assert kth_smallest(build_tree([1]), 1) == 1

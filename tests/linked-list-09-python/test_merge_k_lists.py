@@ -23,10 +23,25 @@ def check(lists_vals, want):
     assert to_list(merge_k_lists(lists)) == want
 
 
-def test_merge_k_lists():
+def test_merge_k_lists_case_1():
     check([[1, 4, 5], [1, 3, 4], [2, 6]], [1, 1, 2, 3, 4, 4, 5, 6])
+
+
+def test_merge_k_lists_case_2():
     check([], [])
+
+
+def test_merge_k_lists_case_3():
     check([[]], [])
+
+
+def test_merge_k_lists_case_4():
     check([[1], [], [2]], [1, 2])
+
+
+def test_merge_k_lists_case_5():
     check([[-5, -2, 0], [-3, -1], []], [-5, -3, -2, -1, 0])
+
+
+def test_merge_k_lists_case_6():
     check([[1], [2], [3], [4], [5]], [1, 2, 3, 4, 5])

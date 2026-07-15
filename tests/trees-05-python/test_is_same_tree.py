@@ -22,11 +22,29 @@ def build_tree(vals):
     return root
 
 
-def test_is_same_tree():
+def test_is_same_tree_case_1():
     assert is_same_tree(build_tree([1, 2, 3]), build_tree([1, 2, 3])) is True
+
+
+def test_is_same_tree_case_2():
     assert is_same_tree(build_tree([1, 2]), build_tree([1, None, 2])) is False
+
+
+def test_is_same_tree_case_3():
     assert is_same_tree(build_tree([1, 2, 1]), build_tree([1, 1, 2])) is False
+
+
+def test_is_same_tree_case_4():
     assert is_same_tree(build_tree([]), build_tree([])) is True
+
+
+def test_is_same_tree_case_5():
     assert is_same_tree(build_tree([1]), build_tree([])) is False
+
+
+def test_is_same_tree_case_6():
     assert is_same_tree(build_tree([-5]), build_tree([-5])) is True
+
+
+def test_is_same_tree_case_7():
     assert is_same_tree(build_tree([1]), build_tree([2])) is False

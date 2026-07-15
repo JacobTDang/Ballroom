@@ -18,13 +18,31 @@ def to_list(head):
     return out
 
 
-def test_reverse_k_group():
+def test_reverse_k_group_case_1():
     assert to_list(reverse_k_group(build_list([1, 2, 3, 4, 5]), 2)) == [2, 1, 4, 3, 5]
+
+
+def test_reverse_k_group_case_2():
     assert to_list(reverse_k_group(build_list([1, 2, 3, 4, 5]), 3)) == [3, 2, 1, 4, 5]
+
+
+def test_reverse_k_group_case_3():
     assert to_list(reverse_k_group(build_list([1, 2, 3, 4, 5]), 1)) == [1, 2, 3, 4, 5]
+
+
+def test_reverse_k_group_case_4():
     assert to_list(reverse_k_group(build_list([1, 2, 3, 4, 5, 6]), 6)) == [6, 5, 4, 3, 2, 1]
+
+
+def test_reverse_k_group_case_5():
     assert to_list(reverse_k_group(build_list([1]), 1)) == [1]
+
+
+def test_reverse_k_group_case_6():
     assert to_list(reverse_k_group(build_list([1, 2, 3, 4, 5]), 4)) == [4, 3, 2, 1, 5]
+
+
+def test_reverse_k_group_case_7():
     assert to_list(reverse_k_group(build_list([1, 2, 3, 4, 5, 6, 7, 8]), 2)) == [
         2,
         1,

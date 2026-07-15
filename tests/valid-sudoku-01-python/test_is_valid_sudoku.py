@@ -40,12 +40,33 @@ SAME_DIGIT_DIFFERENT_UNITS_BOARD = ["5........"] + ["........."] * 3 + ["....5..
 SINGLE_CELL_BOARD = ["5........"] + ["........."] * 8
 
 
-def test_is_valid_sudoku():
+def test_is_valid_sudoku_case_1():
     assert is_valid_sudoku(VALID_BOARD) is True
+
+
+def test_is_valid_sudoku_case_2():
     assert is_valid_sudoku(INVALID_COLUMN_BOARD) is False
+
+
+def test_is_valid_sudoku_case_3():
     assert is_valid_sudoku(INVALID_ROW_BOARD) is False
+
+
+def test_is_valid_sudoku_case_4():
     assert is_valid_sudoku(INVALID_BOX_BOARD) is False
+
+
+def test_is_valid_sudoku_case_5():
     assert is_valid_sudoku(EMPTY_BOARD) is True
+
+
+def test_is_valid_sudoku_case_6():
     assert is_valid_sudoku(SOLVED_BOARD) is True
+
+
+def test_is_valid_sudoku_case_7():
     assert is_valid_sudoku(SAME_DIGIT_DIFFERENT_UNITS_BOARD) is True
+
+
+def test_is_valid_sudoku_case_8():
     assert is_valid_sudoku(SINGLE_CELL_BOARD) is True

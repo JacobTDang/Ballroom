@@ -33,24 +33,36 @@ def find_node(root, val):
 TREE = [6, 2, 8, 0, 4, 7, 9, None, None, 3, 5]
 
 
-def test_lowest_common_ancestor():
+def test_lowest_common_ancestor_case_1():
     root = build_tree(TREE)
     assert lowest_common_ancestor(root, find_node(root, 2), find_node(root, 8)).val == 6
 
+
+def test_lowest_common_ancestor_case_2():
     root = build_tree(TREE)
     assert lowest_common_ancestor(root, find_node(root, 2), find_node(root, 4)).val == 2
 
+
+def test_lowest_common_ancestor_case_3():
     root = build_tree(TREE)
     assert lowest_common_ancestor(root, find_node(root, 0), find_node(root, 5)).val == 2
 
+
+def test_lowest_common_ancestor_case_4():
     root = build_tree(TREE)
     assert lowest_common_ancestor(root, find_node(root, 7), find_node(root, 9)).val == 8
 
+
+def test_lowest_common_ancestor_case_5():
     root = build_tree(TREE)
     assert lowest_common_ancestor(root, find_node(root, 6), find_node(root, 6)).val == 6
 
+
+def test_lowest_common_ancestor_case_6():
     root = build_tree(TREE)
     assert lowest_common_ancestor(root, find_node(root, 0), find_node(root, 3)).val == 2
 
+
+def test_lowest_common_ancestor_case_7():
     root = build_tree([2, 1])
     assert lowest_common_ancestor(root, find_node(root, 2), find_node(root, 1)).val == 2

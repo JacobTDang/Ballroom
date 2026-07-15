@@ -22,10 +22,25 @@ def build_tree(vals):
     return root
 
 
-def test_is_balanced():
+def test_is_balanced_case_1():
     assert is_balanced(build_tree([3, 9, 20, None, None, 15, 7])) is True
+
+
+def test_is_balanced_case_2():
     assert is_balanced(build_tree([1, 2, 2, 3, 3, None, None, 4, 4])) is False
+
+
+def test_is_balanced_case_3():
     assert is_balanced(build_tree([])) is True
+
+
+def test_is_balanced_case_4():
     assert is_balanced(build_tree([1])) is True
+
+
+def test_is_balanced_case_5():
     assert is_balanced(build_tree([1, 2, 3, 4, 5, 6, 7])) is True
+
+
+def test_is_balanced_case_6():
     assert is_balanced(build_tree([1, 2, 3, 4, None, None, None, 5])) is False
