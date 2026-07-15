@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -28,6 +29,57 @@ func TestPrepareWorkspace_CopiesRepoContents(t *testing.T) {
 	}
 	if string(got) != "package main" {
 		t.Errorf("copied content = %q, want %q", got, "package main")
+	}
+}
+
+func TestPrepareWorkspace_RendersProblemTextAlongsideProblemMd(t *testing.T) {
+	repo := t.TempDir()
+	md := "# Two Sum\n\nreturn indices of the **two numbers** that add to `target`\n"
+	if err := os.WriteFile(filepath.Join(repo, "problem.md"), []byte(md), 0o644); err != nil {
+		t.Fatalf("seed repo: %v", err)
+	}
+
+	workspace, cleanup, err := PrepareWorkspace(repo)
+	if err != nil {
+		t.Fatalf("PrepareWorkspace: %v", err)
+	}
+	defer cleanup()
+
+	got, err := os.ReadFile(filepath.Join(workspace, "problem.txt"))
+	if err != nil {
+		t.Fatalf("expected problem.txt rendered into workspace: %v", err)
+	}
+	text := string(got)
+	if strings.Contains(text, "**") || strings.Contains(text, "`") || strings.Contains(text, "#") {
+		t.Errorf("problem.txt still contains markdown markers:\n%s", text)
+	}
+	if !strings.Contains(text, "Two Sum") || !strings.Contains(text, "two numbers") {
+		t.Errorf("problem.txt lost real content:\n%s", text)
+	}
+	// The markdown source must stay in the workspace untouched -- the
+	// tutor's read_problem_statement tool reads problem.md.
+	if _, err := os.Stat(filepath.Join(workspace, "problem.md")); err != nil {
+		t.Errorf("problem.md missing from workspace: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "problem.txt")); !os.IsNotExist(err) {
+		t.Error("problem.txt leaked into the source repo -- render must go to the workspace only")
+	}
+}
+
+func TestPrepareWorkspace_NoProblemTxtWhenExerciseHasNoProblemMd(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "solution.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatalf("seed repo: %v", err)
+	}
+
+	workspace, cleanup, err := PrepareWorkspace(repo)
+	if err != nil {
+		t.Fatalf("PrepareWorkspace: %v", err)
+	}
+	defer cleanup()
+
+	if _, err := os.Stat(filepath.Join(workspace, "problem.txt")); !os.IsNotExist(err) {
+		t.Errorf("problem.txt exists for an exercise with no problem.md, stat err = %v", err)
 	}
 }
 

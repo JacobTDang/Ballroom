@@ -22,20 +22,13 @@ vim.cmd.colorscheme("habamax")
 vim.opt.laststatus = 3
 vim.opt.statusline = " %{toupper(mode())} │ %f %m%r%h%w%=%y  ln %l/%L col %c "
 
--- problem.md opens in the top-left pane every session, so make markdown
--- actually render instead of showing raw markers: conceal hides the
--- **/`/_ syntax via the bundled regex markdown syntax (the image's
--- nvim 0.9.5 has no treesitter markdown parser, so vim.treesitter.start
--- would error here -- verified against the real image), leaving bold
--- text bold and code spans highlighted. concealcursor keeps it
--- concealed in normal mode too -- the problem statement is read-only in
--- practice, and insert mode still reveals raw syntax for anyone who
--- does edit.
-vim.api.nvim_create_autocmd("FileType", {
-  pattern = "markdown",
+-- The problem statement opens as pre-rendered plain text (problem.txt,
+-- see docker/entrypoint.sh + orchestrator.PrepareWorkspace) -- no
+-- markdown conceal tricks needed here. linebreak just keeps any line
+-- wider than the pane wrapping at word boundaries instead of mid-word.
+vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
+  pattern = "problem.txt",
   callback = function()
-    vim.opt_local.conceallevel = 2
-    vim.opt_local.concealcursor = "nc"
     vim.opt_local.wrap = true
     vim.opt_local.linebreak = true
   end,
