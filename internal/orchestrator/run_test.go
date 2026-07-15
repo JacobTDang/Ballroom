@@ -67,6 +67,16 @@ func TestExerciseRunArgs_ForwardsKind(t *testing.T) {
 	}
 }
 
+func TestSandboxRunArgs_MarksTheSandboxSessionContext(t *testing.T) {
+	cfg := config.Config{DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
+
+	args := sandboxRunArgs(cfg)
+
+	if !containsFlag(args, "PRACTICE_SANDBOX=1") {
+		t.Errorf("expected PRACTICE_SANDBOX=1 so `ballroom return` works inside a sandbox, got %v", args)
+	}
+}
+
 func TestSandboxRunArgs_IncludesTutorModelEnvFromConfig(t *testing.T) {
 	cfg := config.Config{DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
 
