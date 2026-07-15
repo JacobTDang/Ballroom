@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/JacobTDang/Ballroom/internal/exercise"
 	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
 
@@ -43,15 +44,20 @@ type Config struct {
 	TestCommand   string
 	ExerciseID    string
 	Category      string
-	Language      string
+	Language      string // programming language, or session style for design kind
+	Kind          string // exercise.KindCoding (default "" means coding) or exercise.KindDesign
 	StartedAt     time.Time
 	DBPath        string
 	PollInterval  time.Duration
 	RevealTimeout time.Duration
 }
 
-// Submit requests the hidden tests, waits for them to be revealed, runs
-// test_command, logs the attempt, and returns it.
+// Submit requests the hidden content be revealed, waits for it, grades
+// the attempt, logs it, and returns it. For a coding exercise the
+// reveal is the hidden tests and grading is running test_command; for a
+// design exercise the reveal is the grading rubric (tests/<id>/rubric.md
+// lands in the workspace through the very same handshake) and grading
+// is an explicit self-assessment -- there is nothing to run.
 func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, error) {
 	if err := requestReveal(cfg); err != nil {
 		return tracker.Attempt{}, err
@@ -60,8 +66,22 @@ func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, err
 		return tracker.Attempt{}, err
 	}
 
-	result, output := runTestCommand(cfg)
-	fmt.Fprintf(stdout, "\nresult: %s\n%s\n", result, output)
+	// One scanner shared by every prompt below: a bufio.Scanner reads
+	// ahead of what it returns, so a second scanner on the same stdin
+	// would start past input the first one already buffered -- with two
+	// prompts in the design path, the notes prompt would silently lose
+	// its line.
+	scanner := bufio.NewScanner(stdin)
+
+	var result, output string
+	if cfg.Kind == exercise.KindDesign {
+		fmt.Fprintln(stdout, "\nrubric.md has been revealed in your workspace -- open it in the editor (M-1) or ask the tutor for a graded assessment (M-2) before you assess yourself.")
+		result = promptSelfAssessment(scanner, stdout)
+		output = "(design session: self-assessed)"
+	} else {
+		result, output = runTestCommand(cfg)
+		fmt.Fprintf(stdout, "\nresult: %s\n%s\n", result, output)
+	}
 
 	if err := writeLastTestResult(cfg, result, output); err != nil {
 		fmt.Fprintf(stdout, "warning: could not save test output for the tutor: %v\n", err)
@@ -70,7 +90,7 @@ func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, err
 		// to the tracker DB even if this write fails.
 	}
 
-	notes := promptNotes(stdin, stdout)
+	notes := promptNotes(scanner, stdout)
 
 	attempt := tracker.Attempt{
 		ExerciseID:   cfg.ExerciseID,
@@ -150,9 +170,29 @@ func writeLastTestResult(cfg Config, result, output string) error {
 	return nil
 }
 
-func promptNotes(stdin io.Reader, stdout io.Writer) string {
+// promptSelfAssessment asks for an explicit pass/fail verdict on a
+// design session and loops until it gets one -- no default, because the
+// answer feeds the same tracker rows and "solved" stats that real test
+// runs do, and a silently-recorded result would corrupt them. EOF
+// before an answer records a fail: the honest floor, never a free pass.
+func promptSelfAssessment(scanner *bufio.Scanner, stdout io.Writer) string {
+	for {
+		fmt.Fprint(stdout, "Self-assessment -- did your design meet the rubric? Type pass or fail (p/f): ")
+		if !scanner.Scan() {
+			fmt.Fprintln(stdout, "\nno answer before EOF; recording fail")
+			return tracker.ResultFail
+		}
+		switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
+		case "p", "pass":
+			return tracker.ResultPass
+		case "f", "fail":
+			return tracker.ResultFail
+		}
+	}
+}
+
+func promptNotes(scanner *bufio.Scanner, stdout io.Writer) string {
 	fmt.Fprint(stdout, "Notes (optional): ")
-	scanner := bufio.NewScanner(stdin)
 	if scanner.Scan() {
 		return strings.TrimSpace(scanner.Text())
 	}

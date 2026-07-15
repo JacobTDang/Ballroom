@@ -57,6 +57,102 @@ func mkdirs(t *testing.T, cfg Config) {
 	}
 }
 
+// designConfig is baseConfig shaped as a design-kind session: no test
+// command (validated empty at authoring time), session style in the
+// language slot.
+func designConfig(t *testing.T) Config {
+	cfg := baseConfig(t)
+	cfg.Kind = "design"
+	cfg.TestCommand = ""
+	cfg.ExerciseID = "url-shortener-01-interviewer"
+	cfg.Category = "system-design"
+	cfg.Language = "interviewer"
+	return cfg
+}
+
+func TestSubmit_DesignSelfAssessedPass(t *testing.T) {
+	cfg := designConfig(t)
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	var out bytes.Buffer
+	attempt, err := Submit(cfg, strings.NewReader("p\nnailed the estimates\n"), &out)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if attempt.Result != tracker.ResultPass {
+		t.Errorf("Result = %q, want pass from the self-assessment", attempt.Result)
+	}
+	if attempt.Notes != "nailed the estimates" {
+		t.Errorf("Notes = %q, want the notes line AFTER the self-assessment line", attempt.Notes)
+	}
+	if !strings.Contains(out.String(), "rubric") {
+		t.Errorf("output %q should tell the user the rubric was revealed", out.String())
+	}
+}
+
+func TestSubmit_DesignSelfAssessedFail(t *testing.T) {
+	cfg := designConfig(t)
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	attempt, err := Submit(cfg, strings.NewReader("f\n\n"), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if attempt.Result != tracker.ResultFail {
+		t.Errorf("Result = %q, want fail from the self-assessment", attempt.Result)
+	}
+}
+
+func TestSubmit_DesignRejectsNonAnswerUntilExplicit(t *testing.T) {
+	// No default: a bare Enter or noise must re-prompt, never silently
+	// record a result -- pass/fail feeds the "solved" stats.
+	cfg := designConfig(t)
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	var out bytes.Buffer
+	attempt, err := Submit(cfg, strings.NewReader("\nmaybe\npass\n\n"), &out)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if attempt.Result != tracker.ResultPass {
+		t.Errorf("Result = %q, want pass once an explicit answer finally arrives", attempt.Result)
+	}
+	if n := strings.Count(out.String(), "pass or fail"); n < 2 {
+		t.Errorf("expected at least 2 re-prompts for the 2 non-answers, saw %d in %q", n, out.String())
+	}
+}
+
+func TestSubmit_DesignDoesNotRunAnyCommandAndWritesCoherentResultFile(t *testing.T) {
+	cfg := designConfig(t)
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	if _, err := Submit(cfg, strings.NewReader("p\n\n"), &bytes.Buffer{}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(cfg.WorkspaceDir, lastTestResultFile))
+	if err != nil {
+		t.Fatalf("read last-test-result file: %v", err)
+	}
+	var got lastTestResult
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Result != tracker.ResultPass {
+		t.Errorf("file Result = %q, want pass", got.Result)
+	}
+	if !strings.Contains(got.Output, "self-assessed") {
+		t.Errorf("file Output = %q, want it to say the result was self-assessed so the tutor's read_test_output stays coherent", got.Output)
+	}
+	if got.TestCommand != "" {
+		t.Errorf("file TestCommand = %q, want empty -- nothing was run", got.TestCommand)
+	}
+}
+
 func TestSubmit_PassResult(t *testing.T) {
 	cfg := baseConfig(t)
 	cfg.TestCommand = "true"

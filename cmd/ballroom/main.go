@@ -201,6 +201,7 @@ func submitCmd() error {
 		ExerciseID:    os.Getenv("PRACTICE_EXERCISE_ID"),
 		Category:      os.Getenv("PRACTICE_CATEGORY"),
 		Language:      os.Getenv("PRACTICE_LANGUAGE"),
+		Kind:          os.Getenv("PRACTICE_KIND"),
 		StartedAt:     startedAt,
 		DBPath:        os.Getenv("PRACTICE_DB_PATH"),
 		PollInterval:  200 * time.Millisecond,
