@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -31,6 +32,131 @@ func writeExercise(t *testing.T, dir string, fields map[string]any) string {
 		t.Fatalf("write fixture: %v", err)
 	}
 	return path
+}
+
+// writeDesignExercise is writeExercise with a valid kind:"design" base --
+// design exercises use the language slot for session style, a design
+// tutor mode, and no test command (there are no tests to run).
+func writeDesignExercise(t *testing.T, dir string, fields map[string]any) string {
+	t.Helper()
+	base := map[string]any{
+		"id":             "url-shortener-01-coach",
+		"problem_id":     "url-shortener-01",
+		"title":          "Design Pastebin / Bit.ly",
+		"kind":           "design",
+		"category":       "system-design",
+		"language":       "coach",
+		"time_limit_min": 90,
+		"tutor_mode":     "design-coach",
+		"repo_path":      "./repo",
+		"test_command":   "",
+	}
+	for k, v := range fields {
+		base[k] = v
+	}
+	return writeExercise(t, dir, base)
+}
+
+func TestLoad_KindDefaultsToCodingWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "repo"), 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	path := writeExercise(t, dir, nil)
+
+	ex, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if ex.Kind != KindCoding {
+		t.Errorf("Kind = %q, want %q for an exercise.json with no kind field (all 460 existing files)", ex.Kind, KindCoding)
+	}
+}
+
+func TestLoad_ValidDesignExercise(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "repo"), 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	path := writeDesignExercise(t, dir, nil)
+
+	ex, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if ex.Kind != KindDesign {
+		t.Errorf("Kind = %q, want %q", ex.Kind, KindDesign)
+	}
+	if ex.Category != CategorySystemDesign {
+		t.Errorf("Category = %q, want %q", ex.Category, CategorySystemDesign)
+	}
+	if ex.Language != LanguageCoach {
+		t.Errorf("Language = %q, want %q", ex.Language, LanguageCoach)
+	}
+	if ex.TutorMode != TutorModeDesignCoach {
+		t.Errorf("TutorMode = %q, want %q", ex.TutorMode, TutorModeDesignCoach)
+	}
+	if ex.TestCommand != "" {
+		t.Errorf("TestCommand = %q, want empty for a design exercise", ex.TestCommand)
+	}
+}
+
+func TestLoad_DesignValidationMatrix(t *testing.T) {
+	cases := []struct {
+		name    string
+		fields  map[string]any
+		wantErr string // substring; "" = must load cleanly
+	}{
+		{"interviewer variant loads", map[string]any{
+			"id": "url-shortener-01-interviewer", "language": "interviewer",
+			"tutor_mode": "interviewer", "time_limit_min": 45,
+		}, ""},
+		{"coding language rejected for design", map[string]any{"language": "python"},
+			"invalid language"},
+		{"coding tutor mode rejected for design", map[string]any{"tutor_mode": "hints-first"},
+			"invalid tutor_mode"},
+		{"test_command must be empty for design", map[string]any{"test_command": "go test ./..."},
+			"test_command"},
+		{"unknown kind rejected", map[string]any{"kind": "essay"},
+			"invalid kind"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.Mkdir(filepath.Join(dir, "repo"), 0o755); err != nil {
+				t.Fatalf("mkdir repo: %v", err)
+			}
+			path := writeDesignExercise(t, dir, tc.fields)
+			_, err := Load(path)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Load: %v, want success", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Load err = %v, want error containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoad_DesignStylesRejectedForCodingKind(t *testing.T) {
+	// The coach/interviewer pseudo-languages and design tutor modes are
+	// kind-gated -- a coding exercise claiming them must fail loud.
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "repo"), 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	path := writeExercise(t, dir, map[string]any{"language": "coach"})
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "invalid language") {
+		t.Errorf("Load err = %v, want invalid-language error for a coding exercise with language coach", err)
+	}
+
+	path = writeExercise(t, dir, map[string]any{"tutor_mode": "interviewer"})
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "invalid tutor_mode") {
+		t.Errorf("Load err = %v, want invalid-tutor_mode error for a coding exercise with interviewer mode", err)
+	}
 }
 
 func TestLoad_ValidExercise(t *testing.T) {

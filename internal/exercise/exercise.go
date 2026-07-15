@@ -43,16 +43,51 @@ const (
 	CategoryBitManipulation = "bit-manipulation"
 )
 
+// Kind separates the two session shapes an exercise can describe:
+// coding (the default -- solution code, hidden tests, pass/fail runs)
+// and design (a system-design question -- the "solution" is a design
+// doc, the hidden tests/<id>/ tree holds a grading rubric instead of
+// tests, and submit is self-assessed). Empty kind in exercise.json
+// means coding, so none of the pre-existing exercise files change.
+const (
+	KindCoding = "coding"
+	KindDesign = "design"
+)
+
+// CategorySystemDesign holds the design-kind questions (see
+// docs/system-design-roadmap.md). Deliberately NOT a DSA subcategory --
+// it's its own top-level practice-picker entry.
+const CategorySystemDesign = "system-design"
+
 const (
 	LanguageGo     = "go"
 	LanguageCpp    = "cpp"
 	LanguagePython = "python"
 )
 
+// Design exercises have no programming language; the language slot
+// instead carries the session style, which is what actually varies
+// between sibling variants of the same design question. This reuses the
+// ProblemID variant grouping and the TUI's language picker unchanged --
+// picking "coach" vs "interviewer" IS picking the exercise variant.
+const (
+	LanguageCoach       = "coach"
+	LanguageInterviewer = "interviewer"
+)
+
 const (
 	TutorModeSyntaxOnly = "syntax-only"
 	TutorModeHintsFirst = "hints-first"
 	TutorModeFullAssist = "full-assist"
+)
+
+// Design-session tutor personas (internal/tutor/prompts.go): the
+// interviewer runs a probing mock interview and never restates the
+// problem (that's the candidate's job); the design coach walks through
+// the 4-step method with the user. Only valid on design-kind exercises.
+const (
+	TutorModeInterviewer = "interviewer"
+	TutorModeDesignCoach = "design-coach"
 )
 
 var validCategories = map[string]bool{
@@ -80,12 +115,23 @@ var validCategories = map[string]bool{
 	CategoryIntervals:       true,
 	CategoryMathGeometry:    true,
 	CategoryBitManipulation: true,
+
+	CategorySystemDesign: true,
 }
 
+// The language and tutor-mode vocabularies are kind-gated: a coding
+// exercise can't claim a session style, and a design exercise can't
+// claim a programming language or a coding tutor mode. Load picks the
+// map by kind.
 var validLanguages = map[string]bool{
 	LanguageGo:     true,
 	LanguageCpp:    true,
 	LanguagePython: true,
+}
+
+var validDesignLanguages = map[string]bool{
+	LanguageCoach:       true,
+	LanguageInterviewer: true,
 }
 
 var validTutorModes = map[string]bool{
@@ -94,17 +140,23 @@ var validTutorModes = map[string]bool{
 	TutorModeFullAssist: true,
 }
 
+var validDesignTutorModes = map[string]bool{
+	TutorModeInterviewer: true,
+	TutorModeDesignCoach: true,
+}
+
 // Exercise is a parsed, validated exercise.json.
 type Exercise struct {
 	ID           string
 	ProblemID    string // groups language variants of the same problem
 	Title        string
+	Kind         string // KindCoding (default) or KindDesign
 	Category     string
-	Language     string
+	Language     string // programming language, or session style for design kind
 	TimeLimitMin int
 	TutorMode    string
 	RepoPath     string // resolved to an absolute path
-	TestCommand  string
+	TestCommand  string // empty for design kind (nothing to run)
 }
 
 // raw mirrors the on-disk JSON shape before validation/path resolution.
@@ -112,6 +164,7 @@ type raw struct {
 	ID           string `json:"id"`
 	ProblemID    string `json:"problem_id"`
 	Title        string `json:"title"`
+	Kind         string `json:"kind"`
 	Category     string `json:"category"`
 	Language     string `json:"language"`
 	TimeLimitMin int    `json:"time_limit_min"`
@@ -133,6 +186,16 @@ func Load(path string) (Exercise, error) {
 		return Exercise{}, fmt.Errorf("exercise: parse %s: %w", path, err)
 	}
 
+	kind := r.Kind
+	if kind == "" {
+		// Every exercise.json authored before kinds existed is a coding
+		// exercise -- absence means coding, so none of them change.
+		kind = KindCoding
+	}
+	if kind != KindCoding && kind != KindDesign {
+		return Exercise{}, fmt.Errorf("exercise: %s: invalid kind %q", path, r.Kind)
+	}
+
 	if r.ID == "" {
 		return Exercise{}, fmt.Errorf("exercise: %s: id is required", path)
 	}
@@ -142,19 +205,29 @@ func Load(path string) (Exercise, error) {
 	if !validCategories[r.Category] {
 		return Exercise{}, fmt.Errorf("exercise: %s: invalid category %q", path, r.Category)
 	}
-	if !validLanguages[r.Language] {
-		return Exercise{}, fmt.Errorf("exercise: %s: invalid language %q", path, r.Language)
+	languages, tutorModes := validLanguages, validTutorModes
+	if kind == KindDesign {
+		languages, tutorModes = validDesignLanguages, validDesignTutorModes
+	}
+	if !languages[r.Language] {
+		return Exercise{}, fmt.Errorf("exercise: %s: invalid language %q for kind %q", path, r.Language, kind)
 	}
 	if r.TimeLimitMin <= 0 {
 		return Exercise{}, fmt.Errorf("exercise: %s: time_limit_min must be > 0", path)
 	}
-	if !validTutorModes[r.TutorMode] {
-		return Exercise{}, fmt.Errorf("exercise: %s: invalid tutor_mode %q", path, r.TutorMode)
+	if !tutorModes[r.TutorMode] {
+		return Exercise{}, fmt.Errorf("exercise: %s: invalid tutor_mode %q for kind %q", path, r.TutorMode, kind)
 	}
 	if r.RepoPath == "" {
 		return Exercise{}, fmt.Errorf("exercise: %s: repo_path is required", path)
 	}
-	if r.TestCommand == "" {
+	if kind == KindDesign && r.TestCommand != "" {
+		// A design session has nothing to run -- a test_command here is a
+		// contradiction that would silently change submit semantics, so
+		// fail loud at authoring time instead.
+		return Exercise{}, fmt.Errorf("exercise: %s: test_command must be empty for a design exercise, got %q", path, r.TestCommand)
+	}
+	if kind == KindCoding && r.TestCommand == "" {
 		return Exercise{}, fmt.Errorf("exercise: %s: test_command is required", path)
 	}
 
@@ -177,6 +250,7 @@ func Load(path string) (Exercise, error) {
 		ID:           r.ID,
 		ProblemID:    problemID,
 		Title:        r.Title,
+		Kind:         kind,
 		Category:     r.Category,
 		Language:     r.Language,
 		TimeLimitMin: r.TimeLimitMin,
