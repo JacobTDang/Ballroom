@@ -1,6 +1,9 @@
 package catalog
 
-import "github.com/JacobTDang/Ballroom/internal/tracker"
+import (
+	"github.com/JacobTDang/Ballroom/internal/exercise"
+	"github.com/JacobTDang/Ballroom/internal/tracker"
+)
 
 // ProblemStatus groups an exercise's language variants (same ProblemID)
 // into one problem-level view — this is what the practice picker
@@ -48,4 +51,27 @@ func GroupByProblem(statuses []ExerciseStatus) []ProblemStatus {
 		problems[i] = *byProblem[pid]
 	}
 	return problems
+}
+
+// MockDue reports whether a design problem is ready for its second
+// pass: the roadmap does each question coach-first, then as an
+// interviewer mock -- so "due" means the coach variant's latest attempt
+// passed while the interviewer variant is still unattempted. Problems
+// without both variants (interviewer-only mocks, coding problems) are
+// never due.
+func MockDue(p ProblemStatus) bool {
+	var coachPassed, hasInterviewer, interviewerUntouched bool
+	for _, v := range p.Variants {
+		if v.Exercise.Kind != exercise.KindDesign {
+			return false
+		}
+		switch v.Exercise.Language {
+		case exercise.LanguageCoach:
+			coachPassed = v.LastResult == tracker.ResultPass
+		case exercise.LanguageInterviewer:
+			hasInterviewer = true
+			interviewerUntouched = v.Attempts == 0
+		}
+	}
+	return coachPassed && hasInterviewer && interviewerUntouched
 }
