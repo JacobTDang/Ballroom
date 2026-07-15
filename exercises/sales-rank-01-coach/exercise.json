@@ -1,0 +1,11 @@
+{
+  "id": "sales-rank-01-coach",
+  "problem_id": "sales-rank-01",
+  "title": "Design Amazon's Sales Rank by Category",
+  "kind": "design",
+  "category": "system-design",
+  "language": "coach",
+  "time_limit_min": 90,
+  "tutor_mode": "design-coach",
+  "repo_path": "./repo"
+}

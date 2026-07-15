@@ -1,0 +1,11 @@
+{
+  "id": "twitter-timeline-01-coach",
+  "problem_id": "twitter-timeline-01",
+  "title": "Design the Twitter Timeline & Search",
+  "kind": "design",
+  "category": "system-design",
+  "language": "coach",
+  "time_limit_min": 90,
+  "tutor_mode": "design-coach",
+  "repo_path": "./repo"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "search-kv-store-01-interviewer",
+  "problem_id": "search-kv-store-01",
+  "title": "Design a Key-Value Cache for a Search Engine",
+  "kind": "design",
+  "category": "system-design",
+  "language": "interviewer",
+  "time_limit_min": 45,
+  "tutor_mode": "interviewer",
+  "repo_path": "./repo"
+}
