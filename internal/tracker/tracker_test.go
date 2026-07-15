@@ -1,6 +1,7 @@
 package tracker
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 )
@@ -171,5 +172,67 @@ func TestListAttempts_OrdersByIDAscending(t *testing.T) {
 		if attempts[i].ExerciseID != w {
 			t.Errorf("attempts[%d].ExerciseID = %q, want %q", i, attempts[i].ExerciseID, w)
 		}
+	}
+}
+
+func TestOpen_MigratesGradeSummaryColumnOntoExistingDB(t *testing.T) {
+	// A database created by an older binary has no grade_summary column;
+	// Open must add it rather than failing or wiping rows.
+	path := filepath.Join(t.TempDir(), "tracker.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE attempts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		exercise_id TEXT NOT NULL, category TEXT NOT NULL,
+		language TEXT NOT NULL, date TEXT NOT NULL,
+		time_spent_min REAL NOT NULL,
+		result TEXT NOT NULL CHECK (result IN ('pass', 'fail')),
+		notes TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO attempts (exercise_id, category, language, date, time_spent_min, result, notes)
+		VALUES ('two-sum-01', 'dsa', 'go', '2026-07-01', 12, 'pass', 'old row')`); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+	db.Close()
+
+	tr, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer tr.Close()
+	attempts, err := tr.ListAttempts()
+	if err != nil {
+		t.Fatalf("ListAttempts: %v", err)
+	}
+	if len(attempts) != 1 || attempts[0].Notes != "old row" || attempts[0].GradeSummary != "" {
+		t.Errorf("legacy row after migration = %+v, want preserved with empty GradeSummary", attempts)
+	}
+}
+
+func TestLogAttempt_RoundTripsGradeSummary(t *testing.T) {
+	tr, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer tr.Close()
+
+	want := "VERDICT: fail\n1. Estimates: missing."
+	if _, err := tr.LogAttempt(Attempt{
+		ExerciseID: "url-shortener-01-interviewer", Category: "system-design",
+		Language: "interviewer", Date: "2026-07-15", TimeSpentMin: 40,
+		Result: ResultFail, GradeSummary: want,
+	}); err != nil {
+		t.Fatalf("LogAttempt: %v", err)
+	}
+	attempts, err := tr.ListAttempts()
+	if err != nil {
+		t.Fatalf("ListAttempts: %v", err)
+	}
+	if len(attempts) != 1 || attempts[0].GradeSummary != want {
+		t.Errorf("GradeSummary = %q, want %q", attempts[0].GradeSummary, want)
 	}
 }

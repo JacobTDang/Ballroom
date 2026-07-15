@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS attempts (
 	date            TEXT NOT NULL,
 	time_spent_min  REAL NOT NULL,
 	result          TEXT NOT NULL CHECK (result IN ('pass', 'fail')),
-	notes           TEXT NOT NULL DEFAULT ''
+	notes           TEXT NOT NULL DEFAULT '',
+	grade_summary   TEXT NOT NULL DEFAULT ''
 );
 `
 
@@ -38,6 +39,11 @@ type Attempt struct {
 	TimeSpentMin float64
 	Result       string
 	Notes        string
+	// GradeSummary is the design grader's per-dimension assessment (see
+	// tutor.GradeDesign) -- empty for coding attempts and self-assessed
+	// design attempts. Persisted so Stats can aggregate weak dimensions
+	// after the session's workspace is gone.
+	GradeSummary string
 }
 
 // Tracker is a handle to the attempts SQLite database.
@@ -63,6 +69,14 @@ func Open(path string) (*Tracker, error) {
 		db.Close()
 		return nil, fmt.Errorf("tracker: migrate pattern category: %w", err)
 	}
+	// grade_summary arrived after databases already existed in the wild;
+	// CREATE TABLE IF NOT EXISTS won't touch those, so probe and ALTER.
+	if _, err := db.Exec(`SELECT grade_summary FROM attempts LIMIT 0`); err != nil {
+		if _, err := db.Exec(`ALTER TABLE attempts ADD COLUMN grade_summary TEXT NOT NULL DEFAULT ''`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("tracker: migrate grade_summary column: %w", err)
+		}
+	}
 	return &Tracker{db: db}, nil
 }
 
@@ -78,9 +92,9 @@ func (t *Tracker) LogAttempt(a Attempt) (int64, error) {
 	}
 
 	res, err := t.db.Exec(
-		`INSERT INTO attempts (exercise_id, category, language, date, time_spent_min, result, notes)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		a.ExerciseID, a.Category, a.Language, a.Date, a.TimeSpentMin, a.Result, a.Notes,
+		`INSERT INTO attempts (exercise_id, category, language, date, time_spent_min, result, notes, grade_summary)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ExerciseID, a.Category, a.Language, a.Date, a.TimeSpentMin, a.Result, a.Notes, a.GradeSummary,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("tracker: insert attempt: %w", err)
@@ -91,7 +105,7 @@ func (t *Tracker) LogAttempt(a Attempt) (int64, error) {
 // ListAttempts returns all attempts ordered by id ascending.
 func (t *Tracker) ListAttempts() ([]Attempt, error) {
 	rows, err := t.db.Query(
-		`SELECT id, exercise_id, category, language, date, time_spent_min, result, notes
+		`SELECT id, exercise_id, category, language, date, time_spent_min, result, notes, grade_summary
 		 FROM attempts ORDER BY id ASC`,
 	)
 	if err != nil {
@@ -102,7 +116,7 @@ func (t *Tracker) ListAttempts() ([]Attempt, error) {
 	var attempts []Attempt
 	for rows.Next() {
 		var a Attempt
-		if err := rows.Scan(&a.ID, &a.ExerciseID, &a.Category, &a.Language, &a.Date, &a.TimeSpentMin, &a.Result, &a.Notes); err != nil {
+		if err := rows.Scan(&a.ID, &a.ExerciseID, &a.Category, &a.Language, &a.Date, &a.TimeSpentMin, &a.Result, &a.Notes, &a.GradeSummary); err != nil {
 			return nil, fmt.Errorf("tracker: scan attempt: %w", err)
 		}
 		attempts = append(attempts, a)

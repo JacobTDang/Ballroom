@@ -64,6 +64,12 @@ func fakeRecentAttempts(attempts []tracker.Attempt, err error) func() {
 	return func() { recentAttemptsFn = orig }
 }
 
+func fakeAllAttempts(attempts []tracker.Attempt, err error) func() {
+	orig := allAttemptsFn
+	allAttemptsFn = func(config.Config) ([]tracker.Attempt, error) { return attempts, err }
+	return func() { allAttemptsFn = orig }
+}
+
 func practiceFixture() []catalog.ExerciseStatus {
 	return []catalog.ExerciseStatus{
 		fakeStatusIn("two-pointers", "two-pointers-01"),
@@ -200,6 +206,37 @@ func TestAppModel_EnterOnStats_LoadsStatsInline(t *testing.T) {
 	}
 	if len(got.statsRecent) != 1 {
 		t.Errorf("statsRecent = %v, want 1 entry", got.statsRecent)
+	}
+}
+
+func TestAppModel_Stats_ShowsRubricWeakSpots(t *testing.T) {
+	defer fakeCatalogList(nil, nil)()
+	defer fakeRecentAttempts(nil, nil)()
+	defer fakeAllAttempts([]tracker.Attempt{
+		{Category: "system-design", GradeSummary: "1. Back-of-envelope estimates: missing. none"},
+		{Category: "system-design", GradeSummary: "1. Back-of-envelope estimates: missing. again\n2. High-level design: strong. good"},
+	}, nil)()
+
+	m := appModel{stage: stageMain}
+	m = m.loadStats()
+	view := m.View()
+	if !strings.Contains(view, "Rubric weak spots") {
+		t.Fatalf("stats view missing the weak-spots section:\n%s", view)
+	}
+	if !strings.Contains(view, "Back-of-envelope estimates") || !strings.Contains(view, "missing 2/2") {
+		t.Errorf("stats view should rank estimates as missing 2/2:\n%s", view)
+	}
+}
+
+func TestAppModel_Stats_NoGradedAttemptsHidesWeakSpots(t *testing.T) {
+	defer fakeCatalogList(nil, nil)()
+	defer fakeRecentAttempts(nil, nil)()
+	defer fakeAllAttempts([]tracker.Attempt{{Category: "dsa"}}, nil)()
+
+	m := appModel{stage: stageMain}
+	m = m.loadStats()
+	if strings.Contains(m.View(), "Rubric weak spots") {
+		t.Error("weak-spots section should be absent with no graded attempts")
 	}
 }
 
