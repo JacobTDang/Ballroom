@@ -93,6 +93,9 @@ func TestSubmit_DesignUsesGraderVerdict(t *testing.T) {
 	if !strings.Contains(out.String(), "Estimates: missing") {
 		t.Errorf("output %q should show the grader's summary", out.String())
 	}
+	if attempt.GradeSummary != "Estimates: missing. Sharding: adequate." {
+		t.Errorf("GradeSummary = %q, want the grader's summary persisted on the attempt", attempt.GradeSummary)
+	}
 	if strings.Contains(out.String(), "Self-assessment") {
 		t.Errorf("output %q ran the self-assessment prompt despite a successful grade", out.String())
 	}
@@ -128,6 +131,9 @@ func TestSubmit_DesignGraderErrorFallsBackToSelfAssessment(t *testing.T) {
 	}
 	if attempt.Result != tracker.ResultPass {
 		t.Errorf("Result = %q, want the self-assessed pass after fallback", attempt.Result)
+	}
+	if attempt.GradeSummary != "" {
+		t.Errorf("GradeSummary = %q, want empty for a self-assessed attempt", attempt.GradeSummary)
 	}
 	if !strings.Contains(out.String(), "empty choices from provider") {
 		t.Errorf("output %q should surface the grading failure, not swallow it", out.String())

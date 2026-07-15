@@ -73,6 +73,18 @@ func RunApp(cfg config.Config, resume appResume) (appModel, error) {
 }
 
 // recentAttempts returns up to n attempts, newest first.
+// allAttempts returns the full attempt log -- Stats aggregates rubric
+// weak spots across every graded design attempt, not just the recent
+// window recentAttempts trims to.
+func allAttempts(cfg config.Config) ([]tracker.Attempt, error) {
+	tr, err := tracker.Open(cfg.DBPath)
+	if err != nil {
+		return nil, err
+	}
+	defer tr.Close()
+	return tr.ListAttempts()
+}
+
 func recentAttempts(cfg config.Config, n int) ([]tracker.Attempt, error) {
 	tr, err := tracker.Open(cfg.DBPath)
 	if err != nil {
