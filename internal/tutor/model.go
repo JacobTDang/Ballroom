@@ -90,13 +90,23 @@ type tutorModel struct {
 	routingEnabled       bool
 
 	// workerStrategy/orchestratorStrategy are each role's detected
-	// toolCallingStrategy (newTutorModel, via detectStrategy) --
-	// orchestratorStrategy is only meaningful when routingEnabled.
-	// startTurn's callRole dispatch reads these to decide whether a
-	// role's Generate call goes through the real react.Agent or
-	// runFallbackToolLoop (fallback.go).
+	// toolCallingStrategy -- orchestratorStrategy is only meaningful
+	// when routingEnabled. startTurn's callRole dispatch reads these to
+	// decide whether a role's Generate call goes through the real
+	// react.Agent or runFallbackToolLoop (fallback.go).
+	//
+	// Detection is asynchronous: Init()'s detectStrategies command makes
+	// the (up to two) live probe calls off the UI thread and delivers a
+	// strategiesDetectedMsg. It used to run blocking inside newTutorModel
+	// -- a real bug found live: with slow free-tier models the whole
+	// pane, chat box included, stayed blank until both probes returned,
+	// because Run()'s tea.Program hadn't even started. strategiesDetected
+	// flips true when the message lands; a submit arriving before then is
+	// held in queuedSubmits and started by the strategiesDetectedMsg case.
 	workerStrategy       toolCallingStrategy
 	orchestratorStrategy toolCallingStrategy
+	strategiesDetected   bool
+	queuedSubmits        []queuedSubmit
 
 	// tools/toolCatalogText are built once per session (buildTools +
 	// renderToolCatalog) and reused by both roles -- the tool set is
@@ -204,31 +214,11 @@ func newTutorModel(ctx context.Context, cfg Config) (tutorModel, error) {
 		m.banner = fmt.Sprintf("tutor (%s, mode=%s) — connected to %s. Ctrl-D to exit.", cfg.Model, cfg.Mode, m.workerEndpoint)
 	}
 
-	// Detect each configured role's tool-calling strategy concurrently --
-	// halves the worst-case added session-startup latency versus running
-	// them sequentially (newTutorModel previously made zero network
-	// calls before Run()'s tea.NewProgram even started; this adds up to
-	// two). Written into separate local vars, not directly into m's
-	// fields, so there's no question of concurrent access to the same
-	// struct value across goroutines -- only the single-threaded code
-	// after wg.Wait() ever touches m.
-	var workerStrategy, orchestratorStrategy toolCallingStrategy
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		workerStrategy = detectStrategy(ctx, cfg.OllamaHost, cfg.Model, cfg.APIKey)
-	}()
-	if m.routingEnabled {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			orchestratorStrategy = detectStrategy(ctx, cfg.OllamaHost, cfg.OrchestratorModel, cfg.APIKey)
-		}()
-	}
-	wg.Wait()
-	m.workerStrategy = workerStrategy
-	m.orchestratorStrategy = orchestratorStrategy
+	// Strategy detection deliberately does NOT happen here -- see the
+	// strategiesDetected field's doc comment. Construction must make
+	// zero probe network calls so Run()'s tea.Program starts (and the
+	// chat box paints) immediately; Init()'s detectStrategies command
+	// delivers the strategies asynchronously.
 
 	// Seeded with persona text only, not systemPromptForMode's combined
 	// persona+native-tools string: the tools instruction is strategy-
@@ -266,6 +256,12 @@ func RunOneTurn(ctx context.Context, cfg Config, message string) (reply string, 
 	if err != nil {
 		return "", err
 	}
+	// Detection is async in a real session (Init's command); headless
+	// there is no tea runtime to deliver it, and blocking here is fine --
+	// this caller wants one turn's result, not a responsive UI. Without
+	// this the submit below would queue forever.
+	newModel, _ := m.Update(m.detectStrategies()())
+	m = newModel.(tutorModel)
 	m.textarea.SetValue(message)
 	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = newModel.(tutorModel)
@@ -289,7 +285,43 @@ func RunOneTurn(ctx context.Context, cfg Config, message string) (reply string, 
 }
 
 func (m tutorModel) Init() tea.Cmd {
-	return tea.Batch(textarea.Blink, pulseTickCmd())
+	return tea.Batch(textarea.Blink, pulseTickCmd(), m.detectStrategies())
+}
+
+// strategiesDetectedMsg delivers both roles' async strategy-detection
+// results (see the strategiesDetected field's doc comment).
+// orchestrator is only meaningful for a routing-enabled session.
+type strategiesDetectedMsg struct {
+	worker       toolCallingStrategy
+	orchestrator toolCallingStrategy
+}
+
+// detectStrategies probes each configured role's tool-calling strategy
+// concurrently -- worker always, orchestrator only when routing is
+// enabled -- off the UI thread, as a tea.Cmd from Init(). detectStrategy
+// never fails (any probe error resolves to jsonFallbackToolCalling, the
+// strategy that can actually work when the check itself can't complete
+// -- see its doc comment), so this always delivers a usable result.
+func (m tutorModel) detectStrategies() tea.Cmd {
+	ctx, cfg, routingEnabled := m.ctx, m.cfg, m.routingEnabled
+	return func() tea.Msg {
+		var msg strategiesDetectedMsg
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			msg.worker = detectStrategy(ctx, cfg.OllamaHost, cfg.Model, cfg.APIKey)
+		}()
+		if routingEnabled {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				msg.orchestrator = detectStrategy(ctx, cfg.OllamaHost, cfg.OrchestratorModel, cfg.APIKey)
+			}()
+		}
+		wg.Wait()
+		return msg
+	}
 }
 
 func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -360,6 +392,22 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// turnInFlight.
 		m.pulsePhase++
 		return m, pulseTickCmd()
+
+	case strategiesDetectedMsg:
+		m.workerStrategy = msg.worker
+		m.orchestratorStrategy = msg.orchestrator
+		m.strategiesDetected = true
+		// Start every submit that arrived while detection was still in
+		// flight -- each queued line already echoed and engaged the
+		// thinking state in submit(); only the actual turn was held back,
+		// because startTurn snapshots m and needs the strategies resolved.
+		var cmds []tea.Cmd
+		for _, q := range m.queuedSubmits {
+			activityCh, doneCh := startTurn(m, q.line, q.checkComprehension)
+			cmds = append(cmds, waitForActivityEvent(activityCh, doneCh))
+		}
+		m.queuedSubmits = nil
+		return m, tea.Batch(cmds...)
 
 	case turnCompleteMsg:
 		// Read the glow's level before flipping turnInFlight, then
@@ -565,8 +613,29 @@ func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 	m.displayLines = append(m.displayLines, "> "+line)
 	m.refreshViewport()
 
+	// Strategy detection still in flight (a submit typed faster than the
+	// probes resolved): hold the turn -- everything visible (echo,
+	// thinking state) is already engaged above, and the
+	// strategiesDetectedMsg case starts the queued turn the moment the
+	// strategies land. startTurn can't run yet because it snapshots m,
+	// strategies included.
+	if !m.strategiesDetected {
+		m.queuedSubmits = append(m.queuedSubmits, queuedSubmit{line: line, checkComprehension: checkComprehension})
+		return m, nil
+	}
+
 	activityCh, doneCh := startTurn(m, line, checkComprehension)
 	return m, waitForActivityEvent(activityCh, doneCh)
+}
+
+// queuedSubmit is one message submitted before strategy detection
+// resolved -- see the strategiesDetected field's doc comment.
+// checkComprehension is captured at submit time because submit consumes
+// comprehensionCheckPending immediately, whether or not the turn can
+// start yet.
+type queuedSubmit struct {
+	line               string
+	checkComprehension bool
 }
 
 // turnCompleteMsg carries one turn's final outcome — whether it went

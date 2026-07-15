@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -369,6 +370,13 @@ func TestTutorModel_LongReplyWrapsInsteadOfBeingCutOff(t *testing.T) {
 
 func submitAndRun(t *testing.T, m tutorModel, line string) tutorModel {
 	t.Helper()
+	// Detection is async (from Init) in a real session and always lands
+	// before the user can type -- deliver it here the same way if this
+	// model hasn't resolved its strategies yet, so the submit below
+	// starts a real turn instead of queueing.
+	if !m.strategiesDetected {
+		m = detectAndApply(t, m)
+	}
 	m.textarea.SetValue(line)
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = newM.(tutorModel)
@@ -439,6 +447,128 @@ func withFakeCheckToolCallingForSession(t *testing.T, fn func(ctx context.Contex
 	t.Cleanup(func() { checkToolCallingForSession = orig })
 }
 
+// detectAndApply synchronously runs m's strategy-detection command and
+// feeds its message back through Update -- what the real bubbletea
+// runtime does asynchronously after Init(). Tests that need a model
+// with strategies already resolved call this right after newTutorModel
+// (detection no longer happens during construction -- see
+// TestNewTutorModel_DoesNotProbeDuringConstruction for why).
+func detectAndApply(t *testing.T, m tutorModel) tutorModel {
+	t.Helper()
+	msg := m.detectStrategies()()
+	if _, ok := msg.(strategiesDetectedMsg); !ok {
+		t.Fatalf("detectStrategies produced %T, want strategiesDetectedMsg", msg)
+	}
+	newM, _ := m.Update(msg)
+	return newM.(tutorModel)
+}
+
+// TestNewTutorModel_DoesNotProbeDuringConstruction locks in the fix for
+// a real bug found live: strategy detection used to run (and block on
+// wg.Wait) inside newTutorModel, BEFORE Run() ever started the
+// tea.Program -- so with slow free-tier models the whole tutor pane,
+// chat box included, stayed completely blank for the duration of up to
+// two live LLM round-trips. Construction must make zero probe calls;
+// detection belongs to Init()'s async command.
+func TestNewTutorModel_DoesNotProbeDuringConstruction(t *testing.T) {
+	var probes atomic.Int32
+	withFakeCheckToolCallingForSession(t, func(context.Context, string, string, string) (bool, error) {
+		probes.Add(1)
+		return false, nil
+	})
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	if n := probes.Load(); n != 0 {
+		t.Fatalf("newTutorModel made %d strategy probes, want 0 -- detection must not block construction", n)
+	}
+	m = detectAndApply(t, m)
+	if n := probes.Load(); n != 1 {
+		t.Errorf("detectStrategies made %d probes for a worker-only session, want 1", n)
+	}
+	if m.workerStrategy != jsonFallbackToolCalling {
+		t.Errorf("workerStrategy = %v after detection, want jsonFallbackToolCalling", m.workerStrategy)
+	}
+}
+
+// Init must actually carry the detection command -- if it didn't, a
+// real session would paint fine but any message submitted before
+// detection would sit queued forever, waiting on a strategiesDetectedMsg
+// that never comes.
+func TestTutorModel_InitIncludesStrategyDetection(t *testing.T) {
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	batch, ok := m.Init()().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("Init() produced %T, want tea.BatchMsg", m.Init()())
+	}
+	for _, cmd := range batch {
+		if _, ok := cmd().(strategiesDetectedMsg); ok {
+			return
+		}
+	}
+	t.Error("no command in Init()'s batch produced a strategiesDetectedMsg")
+}
+
+func TestTutorModel_SubmitBeforeDetectionQueuesTurnUntilStrategiesArrive(t *testing.T) {
+	mock := newSequencedOllama(t, "queued reply")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	// Submit while detection is still pending -- the message must echo
+	// and the thinking state must engage, but no turn can start yet.
+	m.textarea.SetValue("early question")
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(tutorModel)
+	if cmd != nil {
+		t.Fatal("submit before detection returned a command, want the turn queued until strategies arrive")
+	}
+	if !m.turnInFlight {
+		t.Error("turnInFlight = false after a queued submit, want true -- the thinking indicator must engage immediately")
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "> early question") {
+		t.Error("queued submit's echo missing from the view")
+	}
+
+	// Detection lands -> the queued turn must start and complete.
+	newM, cmd = m.Update(m.detectStrategies()())
+	m = newM.(tutorModel)
+	if cmd == nil {
+		t.Fatal("strategiesDetectedMsg with a queued submit produced no command, want the turn to start")
+	}
+	for i := 0; i < 100; i++ {
+		msg := cmd()
+		newM, cmd = m.Update(msg)
+		m = newM.(tutorModel)
+		if _, ok := msg.(turnCompleteMsg); ok {
+			if !strings.Contains(ansi.Strip(m.View()), "queued reply") {
+				t.Error("queued turn's reply missing from the view after completion")
+			}
+			return
+		}
+		if cmd == nil {
+			t.Fatal("queued turn ended without a turnCompleteMsg")
+		}
+	}
+	t.Fatal("queued turn never completed")
+}
+
 func TestNewTutorModel_DetectsFallbackStrategyWhenCheckReportsUnsupported(t *testing.T) {
 	withFakeCheckToolCallingForSession(t, func(context.Context, string, string, string) (bool, error) {
 		return false, nil
@@ -450,6 +580,7 @@ func TestNewTutorModel_DetectsFallbackStrategyWhenCheckReportsUnsupported(t *tes
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
+	m = detectAndApply(t, m)
 	if m.workerStrategy != jsonFallbackToolCalling {
 		t.Errorf("workerStrategy = %v, want jsonFallbackToolCalling", m.workerStrategy)
 	}
@@ -466,6 +597,7 @@ func TestNewTutorModel_DetectsNativeStrategyWhenCheckReportsSupported(t *testing
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
+	m = detectAndApply(t, m)
 	if m.workerStrategy != nativeToolCalling {
 		t.Errorf("workerStrategy = %v, want nativeToolCalling", m.workerStrategy)
 	}
@@ -497,6 +629,7 @@ func TestNewTutorModel_DetectsFallbackStrategyOnCheckError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
+	m = detectAndApply(t, m)
 	if m.workerStrategy != jsonFallbackToolCalling {
 		t.Errorf("workerStrategy = %v, want jsonFallbackToolCalling (fail toward the strategy that can actually work when the check itself fails)", m.workerStrategy)
 	}
@@ -515,6 +648,7 @@ func TestNewTutorModel_DetectsOrchestratorStrategyIndependentlyFromWorker(t *tes
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
+	m = detectAndApply(t, m)
 	if m.workerStrategy != jsonFallbackToolCalling {
 		t.Errorf("workerStrategy = %v, want jsonFallbackToolCalling", m.workerStrategy)
 	}
@@ -556,6 +690,7 @@ func TestTutorModel_ComprehensionCheckAndRoutedTurnUseOrchestratorFallbackStrate
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
+	m = detectAndApply(t, m)
 	if m.workerStrategy != nativeToolCalling {
 		t.Fatalf("workerStrategy = %v, want nativeToolCalling", m.workerStrategy)
 	}
@@ -988,6 +1123,7 @@ func TestTutorModel_SubmitShowsLiveToolCallActivity(t *testing.T) {
 	}
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = newM.(tutorModel)
+	m = detectAndApply(t, m)
 
 	m.textarea.SetValue("what does my code look like?")
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
