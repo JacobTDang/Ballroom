@@ -56,6 +56,17 @@ func TestExerciseRunArgs_StillIncludesExistingPracticeEnvVars(t *testing.T) {
 	}
 }
 
+func TestExerciseRunArgs_ForwardsKind(t *testing.T) {
+	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
+	ex := exercise.Exercise{ID: "url-shortener-01-coach", Kind: exercise.KindDesign, Category: "system-design", Language: "coach", TutorMode: "design-coach"}
+
+	args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now())
+
+	if !containsFlag(args, "PRACTICE_KIND=design") {
+		t.Errorf("expected PRACTICE_KIND=design so the in-container submit takes the design path, got %v", args)
+	}
+}
+
 func TestSandboxRunArgs_IncludesTutorModelEnvFromConfig(t *testing.T) {
 	cfg := config.Config{DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
 
