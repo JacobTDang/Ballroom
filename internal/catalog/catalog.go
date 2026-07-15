@@ -41,6 +41,8 @@ var categoryOrder = map[string]int{
 	exercise.CategoryIntervals:       20,
 	exercise.CategoryMathGeometry:    21,
 	exercise.CategoryBitManipulation: 22,
+
+	exercise.CategorySystemDesign: 23,
 }
 
 // languageOrder ranks language variants of the same problem so Python
@@ -52,6 +54,14 @@ var languageOrder = map[string]int{
 	exercise.LanguagePython: 0,
 	exercise.LanguageGo:     1,
 	exercise.LanguageCpp:    2,
+
+	// Design-kind session styles (the language slot carries the style --
+	// see exercise.LanguageCoach's doc comment). Coach ranks first so
+	// it's the picker default: the roadmap does each question coach-first,
+	// interviewer on the second pass. Explicit ranks, not the
+	// alphabetical accident this map exists to prevent.
+	exercise.LanguageCoach:       3,
+	exercise.LanguageInterviewer: 4,
 }
 
 // categoryDisplayNames holds the categories whose display label isn't

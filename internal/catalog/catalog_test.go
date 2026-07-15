@@ -61,6 +61,37 @@ func TestTopLevelGroup_UngroupedCategoriesAreTheirOwnGroup(t *testing.T) {
 	}
 }
 
+func TestSystemDesign_IsItsOwnTopLevelCategory(t *testing.T) {
+	if got := TopLevelGroup(exercise.CategorySystemDesign); got != exercise.CategorySystemDesign {
+		t.Errorf("TopLevelGroup(system-design) = %q, want itself -- design questions are not DSA subcategories", got)
+	}
+	if IsGroupedCategory(exercise.CategorySystemDesign) {
+		t.Error("IsGroupedCategory(system-design) = true, want false")
+	}
+	if got := DisplayCategory(exercise.CategorySystemDesign); got != "System Design" {
+		t.Errorf("DisplayCategory(system-design) = %q, want %q from the humanizer", got, "System Design")
+	}
+	if CategoryRank(exercise.CategorySystemDesign) <= CategoryRank(exercise.CategoryBitManipulation) {
+		t.Error("system-design must rank after the last NeetCode category so it sorts at the end of the picker")
+	}
+}
+
+func TestLanguageOrder_CoachSortsBeforeInterviewer(t *testing.T) {
+	// Coach must be the session-style picker's default (top) choice --
+	// the curriculum does each question coach-first, interviewer later.
+	// Explicit ranks, not the alphabetical accident languageOrder's own
+	// doc comment warns about ("coach" < "interviewer" only by luck).
+	if languageOrder[exercise.LanguageCoach] >= languageOrder[exercise.LanguageInterviewer] {
+		t.Errorf("languageOrder: coach=%d interviewer=%d, want coach strictly first",
+			languageOrder[exercise.LanguageCoach], languageOrder[exercise.LanguageInterviewer])
+	}
+	// And both must sort after the real languages so coding exercises'
+	// ordering is untouched.
+	if languageOrder[exercise.LanguageCoach] <= languageOrder[exercise.LanguageCpp] {
+		t.Error("session styles must rank after all real languages")
+	}
+}
+
 func TestDisplayCategory_NeetCodeCategoriesGetHumanReadableLabels(t *testing.T) {
 	cases := map[string]string{
 		exercise.CategoryDSA:             "DSA",
