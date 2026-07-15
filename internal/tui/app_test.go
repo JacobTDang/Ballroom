@@ -12,6 +12,7 @@ import (
 
 	"github.com/JacobTDang/Ballroom/internal/catalog"
 	"github.com/JacobTDang/Ballroom/internal/config"
+	"github.com/JacobTDang/Ballroom/internal/exercise"
 	"github.com/JacobTDang/Ballroom/internal/preflight"
 	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
@@ -703,6 +704,40 @@ func TestAppModel_Language_EnterSetsOutcomeAndQuits(t *testing.T) {
 	}
 	if got.exerciseToRun.ID != "two-pointers-01" {
 		t.Errorf("exerciseToRun.ID = %q, want %q", got.exerciseToRun.ID, "two-pointers-01")
+	}
+}
+
+func TestAppModel_Language_DesignProblemSaysSessionStyle(t *testing.T) {
+	// A design problem's "language" variants are session styles
+	// (coach/interviewer) -- calling them a language on screen would be
+	// wrong, this is the one cosmetic spot the variant trick shows.
+	m := appModel{stage: stageLanguage, selectedProblem: catalog.ProblemStatus{
+		ProblemID: "url-shortener-01",
+		Title:     "Design Pastebin / Bit.ly",
+		Category:  exercise.CategorySystemDesign,
+		Variants: []catalog.ExerciseStatus{
+			{Exercise: exercise.Exercise{ID: "url-shortener-01-coach", Kind: exercise.KindDesign, Language: exercise.LanguageCoach}},
+			{Exercise: exercise.Exercise{ID: "url-shortener-01-interviewer", Kind: exercise.KindDesign, Language: exercise.LanguageInterviewer}},
+		},
+	}}
+	view := m.View()
+	if !strings.Contains(view, "choose a session style") {
+		t.Errorf("design problem's variant picker should say \"choose a session style\", got:\n%s", view)
+	}
+	if strings.Contains(view, "choose a language") {
+		t.Errorf("design problem's variant picker must not say language:\n%s", view)
+	}
+	for _, want := range []string{"coach", "interviewer"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("variant picker missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestAppModel_Language_CodingProblemStillSaysLanguage(t *testing.T) {
+	m := languageFixture(t)
+	if view := m.View(); !strings.Contains(view, "choose a language") {
+		t.Errorf("coding problem's variant picker should still say \"choose a language\", got:\n%s", view)
 	}
 }
 

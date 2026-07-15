@@ -67,6 +67,78 @@ const blankDouble = "package main\n\nfunc Double(n int) int { return 0 }\n"
 const wrongReferenceDouble = "package main\n\nfunc Double(n int) int { return n + 1 }\n"
 const accidentallyCorrectStarter = "package main\n\nfunc Double(n int) int { return n * 2 }\n"
 
+// fixtureDesignExercise builds a design-kind exercise: exercise.json,
+// repo/{problem.md, solution.md}, and tests/<id>/rubric.md -- each
+// optional so tests can knock out one structural piece at a time.
+func fixtureDesignExercise(t *testing.T, withProblem, withSolution, withRubric bool) (exerciseDir, testsDir string) {
+	t.Helper()
+	root := t.TempDir()
+	exerciseDir = filepath.Join(root, "exercises", "url-shortener-01-coach")
+	testsDir = filepath.Join(root, "tests", "url-shortener-01-coach")
+
+	writeFile(t, filepath.Join(exerciseDir, "exercise.json"), `{
+  "id": "url-shortener-01-coach",
+  "problem_id": "url-shortener-01",
+  "title": "Design Pastebin / Bit.ly",
+  "kind": "design",
+  "category": "system-design",
+  "language": "coach",
+  "time_limit_min": 90,
+  "tutor_mode": "design-coach",
+  "repo_path": "./repo",
+  "test_command": ""
+}`)
+	if withProblem {
+		writeFile(t, filepath.Join(exerciseDir, "repo", "problem.md"), "# Design Pastebin\n\nprompt")
+	}
+	if withSolution {
+		writeFile(t, filepath.Join(exerciseDir, "repo", "solution.md"), "# My design\n\n## Step 1")
+	}
+	if !withProblem && !withSolution {
+		// repo_path must exist for exercise.Load either way.
+		if err := os.MkdirAll(filepath.Join(exerciseDir, "repo"), 0o755); err != nil {
+			t.Fatalf("mkdir repo: %v", err)
+		}
+	}
+	if withRubric {
+		writeFile(t, filepath.Join(testsDir, "rubric.md"), "- estimates\n- high-level design")
+	}
+	return exerciseDir, testsDir
+}
+
+func TestExercise_DesignWithAllStructuralPieces_IsOK(t *testing.T) {
+	exDir, testsDir := fixtureDesignExercise(t, true, true, true)
+
+	result, err := Exercise(exDir, testsDir)
+	if err != nil {
+		t.Fatalf("Exercise: %v", err)
+	}
+	if !result.OK() {
+		t.Error("expected OK() for a structurally complete design exercise")
+	}
+}
+
+func TestExercise_DesignMissingPieces_EachFailsLoud(t *testing.T) {
+	cases := []struct {
+		name                                  string
+		withProblem, withSolution, withRubric bool
+		wantErr                               string
+	}{
+		{"missing problem.md", false, true, true, "problem.md"},
+		{"missing solution.md template", true, false, true, "solution.md"},
+		{"missing rubric.md", true, true, false, "rubric.md"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			exDir, testsDir := fixtureDesignExercise(t, tc.withProblem, tc.withSolution, tc.withRubric)
+			_, err := Exercise(exDir, testsDir)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Exercise err = %v, want error naming %q -- a missing rubric would otherwise only surface as a live 30s submit timeout", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestExercise_ReferencePassesAndStarterFails_IsOK(t *testing.T) {
 	exDir, testsDir := fixtureExercise(t, blankDouble, correctDouble)
 
