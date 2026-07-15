@@ -1,0 +1,11 @@
+{
+  "id": "whatsapp-01-interviewer",
+  "problem_id": "whatsapp-01",
+  "title": "Design WhatsApp",
+  "kind": "design",
+  "category": "system-design",
+  "language": "interviewer",
+  "time_limit_min": 45,
+  "tutor_mode": "interviewer",
+  "repo_path": "./repo"
+}
