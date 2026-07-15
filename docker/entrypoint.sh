@@ -53,7 +53,12 @@ tmux -f "$TMUX_CONF" new-session -d -s "$SESSION" -n MAIN -c "$WORKDIR" -x "$REA
 NVIM_SOCKET="${NVIM_SOCKET:-/tmp/ballroom-nvim.sock}"
 rm -f "$NVIM_SOCKET"
 SOLUTION_FILE=$(find "$WORKDIR" -maxdepth 1 -name 'solution.*' -type f | head -n1)
-PROBLEM_FILE="$WORKDIR/problem.md"
+# Prefer the plain-text render (problem.txt, written by the host's
+# PrepareWorkspace) -- clean structured text with no markdown markers.
+# problem.md is the fallback for workspaces prepared by an older host
+# binary that didn't render it.
+PROBLEM_FILE="$WORKDIR/problem.txt"
+[ -f "$PROBLEM_FILE" ] || PROBLEM_FILE="$WORKDIR/problem.md"
 if [ -n "$SOLUTION_FILE" ] && [ -f "$PROBLEM_FILE" ]; then
   # -c arguments are Vim ex-commands, not shell — no shell quoting inside
   # them (paths are already fully resolved by this point, so this is safe

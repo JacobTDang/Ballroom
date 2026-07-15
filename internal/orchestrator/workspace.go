@@ -3,6 +3,9 @@ package orchestrator
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+
+	"github.com/JacobTDang/Ballroom/internal/exercise"
 )
 
 // PrepareWorkspace copies repoPath into a fresh temp directory and returns
@@ -23,6 +26,25 @@ func PrepareWorkspace(repoPath string) (workspaceDir string, cleanup func(), err
 	if err := copyTree(repoPath, dir); err != nil {
 		cleanup()
 		return "", nil, fmt.Errorf("orchestrator: copy repo into workspace: %w", err)
+	}
+
+	// Exercises that ship a problem.md get a plain-text render written
+	// alongside it -- problem.txt is what the editor pane actually opens
+	// (docker/entrypoint.sh prefers it), showing the statement as clean
+	// structured text instead of raw markdown markers. problem.md itself
+	// stays in the workspace untouched: it remains the authoring format
+	// and what the tutor's read_problem_statement tool reads. Written to
+	// the disposable workspace only, never the source repo.
+	md, err := os.ReadFile(filepath.Join(dir, "problem.md"))
+	if err == nil {
+		text := exercise.RenderProblemText(string(md))
+		if err := os.WriteFile(filepath.Join(dir, "problem.txt"), []byte(text), 0o644); err != nil {
+			cleanup()
+			return "", nil, fmt.Errorf("orchestrator: write problem.txt: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		cleanup()
+		return "", nil, fmt.Errorf("orchestrator: read problem.md: %w", err)
 	}
 	return dir, cleanup, nil
 }
