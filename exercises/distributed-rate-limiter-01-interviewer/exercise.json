@@ -1,6 +1,6 @@
 {
-  "id": "rate-limiter-01-interviewer",
-  "problem_id": "rate-limiter-01",
+  "id": "distributed-rate-limiter-01-interviewer",
+  "problem_id": "distributed-rate-limiter-01",
   "title": "Design a Distributed Rate Limiter",
   "kind": "design",
   "category": "system-design",
