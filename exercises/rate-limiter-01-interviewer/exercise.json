@@ -1,0 +1,11 @@
+{
+  "id": "rate-limiter-01-interviewer",
+  "problem_id": "rate-limiter-01",
+  "title": "Design a Distributed Rate Limiter",
+  "kind": "design",
+  "category": "system-design",
+  "language": "interviewer",
+  "time_limit_min": 45,
+  "tutor_mode": "interviewer",
+  "repo_path": "./repo"
+}
