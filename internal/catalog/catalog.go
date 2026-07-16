@@ -161,6 +161,10 @@ type ExerciseStatus struct {
 	Exercise   exercise.Exercise
 	Attempts   int
 	LastResult string // tracker.ResultPass, tracker.ResultFail, or "" if never attempted
+	// LastAttemptDate is the most recent attempt's date ("2006-01-02",
+	// the format session submits log), or "" if never attempted --
+	// what ReviewDue's spaced resurfacing runs on.
+	LastAttemptDate string
 }
 
 // List returns every valid exercise under cfg.ExercisesDir (skipping
@@ -210,9 +214,10 @@ func List(cfg config.Config) ([]ExerciseStatus, error) {
 	for i, ex := range exercises {
 		a := attemptsByExercise[ex.ID]
 		statuses[i] = ExerciseStatus{
-			Exercise:   ex,
-			Attempts:   len(a),
-			LastResult: lastResult(a),
+			Exercise:        ex,
+			Attempts:        len(a),
+			LastResult:      lastResult(a),
+			LastAttemptDate: lastAttemptDate(a),
 		}
 	}
 	return statuses, nil
@@ -244,6 +249,14 @@ func lastResult(attempts []tracker.Attempt) string {
 		return ""
 	}
 	return attempts[len(attempts)-1].Result
+}
+
+// lastAttemptDate is lastResult's date counterpart.
+func lastAttemptDate(attempts []tracker.Attempt) string {
+	if len(attempts) == 0 {
+		return ""
+	}
+	return attempts[len(attempts)-1].Date
 }
 
 // FormatSummary renders a "solved/total" count per category, in

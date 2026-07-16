@@ -696,10 +696,11 @@ func categoryCounts(problems []catalog.ProblemStatus, category string) (solved, 
 
 // filterByCategory builds the picker's problem list for one category:
 // the category's problems in List's order, except problems that are
-// due (catalog.MockDue) float to the top -- the "mock due" marker is
-// useless on a problem sitting below the fold of an alphabetical list.
-// Every categoryProblems assignment goes through here, so the ordering
-// can't diverge between the category, DSA-subcategory, and resume paths.
+// due (catalog.Due: the mock second pass, or date-based review) float
+// to the top -- a due marker is useless on a problem sitting below the
+// fold of an alphabetical list. Every categoryProblems assignment goes
+// through here, so the ordering can't diverge between the category,
+// DSA-subcategory, and resume paths.
 func filterByCategory(problems []catalog.ProblemStatus, category string) []catalog.ProblemStatus {
 	var out []catalog.ProblemStatus
 	for _, p := range problems {
@@ -707,7 +708,8 @@ func filterByCategory(problems []catalog.ProblemStatus, category string) []catal
 			out = append(out, p)
 		}
 	}
-	return catalog.SortDueFirst(out, catalog.MockDue)
+	now := time.Now()
+	return catalog.SortDueFirst(out, func(p catalog.ProblemStatus) bool { return catalog.Due(p, now) })
 }
 
 // --- stageCategories ---
@@ -1362,15 +1364,20 @@ func (m appModel) renderProblems() string {
 				statusStyle = passStyle
 			}
 		}
+		marker := ""
 		if catalog.MockDue(p) {
 			// The roadmap's second pass: coach passed, interviewer mock
 			// still untouched -- nudge without nagging.
-			status += "  · mock due"
+			marker = "  · mock due"
+		} else if catalog.ReviewDue(p, time.Now()) {
+			// Date-based resurfacing: a stale failure or a solved
+			// problem gone untouched for a month.
+			marker = "  · review due"
 		}
 		if i == m.problemCursor {
-			b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s %s", label, status)))
+			b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s %s%s", label, status, marker)))
 		} else {
-			b.WriteString(fmt.Sprintf("  %s %s", label, statusStyle.Render(status)))
+			b.WriteString(fmt.Sprintf("  %s %s%s", label, statusStyle.Render(status), dueMarkerStyle.Render(marker)))
 		}
 		b.WriteString("\n")
 	}
