@@ -16,7 +16,10 @@ import (
 // and a grading verdict is too load-bearing for that failure rate.
 // The rigid VERDICT first-line contract exists so the caller can parse
 // pass/fail mechanically and fail loud when the model doesn't comply.
-const gradingInstruction = "You are grading a system-design mock interview answer against a rubric. Judge only what is written in the design -- do not fill gaps with charitable assumptions. Your reply MUST start with a first line that is exactly 'VERDICT: pass' or 'VERDICT: fail' (a passing design is adequate or better on every rubric dimension), followed by a short assessment of each rubric dimension with specific evidence from the design."
+// Category-neutral on purpose: the same grading path serves
+// system-design mocks and behavioral STAR stories -- the rubric
+// carries everything category-specific.
+const gradingInstruction = "You are grading a mock interview answer against a rubric. Judge only what is written in the answer -- do not fill gaps with charitable assumptions. Your reply MUST start with a first line that is exactly 'VERDICT: pass' or 'VERDICT: fail' (a passing answer is adequate or better on every rubric dimension), followed by a short assessment of each rubric dimension with specific evidence from the answer."
 
 // GradeDesign grades a design session's solution.md against the
 // revealed rubric.md with one model call, returning the parsed verdict
