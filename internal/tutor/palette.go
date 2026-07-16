@@ -24,6 +24,18 @@ const (
 	// paneInputRule is the input box's top rule -- a dimmed teal, so the
 	// separation reads without the line competing with real content.
 	paneInputRule = "#1E5A5A"
+
+	// Editor-card colors (card.go): the card floats on its own
+	// near-black background with a slightly lighter header bar, framed
+	// by the same paneRule chrome as the header rule.
+	cardBg       = "#14151C"
+	cardHeaderBg = "#1E2029"
+	// cardGutterFg is the line-number gutter -- warm and dim, present
+	// without competing with the code.
+	cardGutterFg = "#5C5852"
+	// The header bar's three traffic-light dots.
+	trafficRed  = "#F03C3C"
+	trafficGold = "#E8A93C"
 )
 
 // ansiFg renders a palette hex color as a raw truecolor foreground
@@ -38,4 +50,14 @@ func ansiFg(hex string) string {
 		panic("tutor: ansiFg wants #RRGGBB, got " + hex)
 	}
 	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b)
+}
+
+// ansiBg is ansiFg's background counterpart, for the editor cards'
+// per-row backgrounds (card.go).
+func ansiBg(hex string) string {
+	var r, g, b int
+	if n, err := fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b); n != 3 || err != nil {
+		panic("tutor: ansiBg wants #RRGGBB, got " + hex)
+	}
+	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", r, g, b)
 }
