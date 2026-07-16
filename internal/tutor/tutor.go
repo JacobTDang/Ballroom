@@ -238,9 +238,18 @@ func generateWithLeakRetry(ctx context.Context, agent *react.Agent, messages []*
 	if !looksLikeLeakedToolCall(reply.Content) {
 		return reply, nil
 	}
+	return retryLeakedReply(ctx, agent, messages, reply.Content, opts...)
+}
 
+// retryLeakedReply is the shared corrective tail behind
+// generateWithLeakRetry and streamWithLeakGuard (stream.go): one
+// blocking retry with the leaked reply and a corrective note appended,
+// falling back to an honest message rather than ever showing raw
+// tool-call JSON. Always a plain Generate, even when the first attempt
+// streamed -- see streamWithLeakGuard's doc comment.
+func retryLeakedReply(ctx context.Context, agent *react.Agent, messages []*schema.Message, leakedContent string, opts ...agentopt.AgentOption) (*schema.Message, error) {
 	retryMessages := append(append([]*schema.Message{}, messages...),
-		schema.AssistantMessage(reply.Content, nil),
+		schema.AssistantMessage(leakedContent, nil),
 		schema.SystemMessage(leakedToolCallRetryNote),
 	)
 	retryReply, err := agent.Generate(ctx, retryMessages, opts...)

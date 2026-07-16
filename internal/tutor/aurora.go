@@ -211,7 +211,11 @@ func auroraColorAt(u, v, t float64) (r, g, b float64) {
 // free-running pulseTickMsg guarantees a re-render every 40ms to
 // actually show both ramps.
 func (m tutorModel) auroraFade() float64 {
-	if m.turnInFlight {
+	// streamPainting redirects a still-in-flight turn onto the fade-out
+	// ramp: once the streamed reply is visibly painting, the "thinking"
+	// glow should already be dying (see Update's streamTextMsg case,
+	// which set turnSettledAt when it flipped this).
+	if m.turnInFlight && !m.streamPainting {
 		if m.turnStartedAt.IsZero() {
 			// No recorded start (layout-only tests flip turnInFlight
 			// directly) -- treat as fully risen.

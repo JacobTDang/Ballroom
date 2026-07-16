@@ -423,9 +423,15 @@ func runFallbackToolLoop(ctx context.Context, cm model.ToolCallingChatModel, too
 // jsonFallbackToolCalling. Called identically from startTurn's
 // checkComprehension and real-turn branches (model.go), so a role's
 // strategy is honored everywhere it can answer, not just the main turn.
-func callRole(ctx context.Context, strategy toolCallingStrategy, agent *react.Agent, cm model.ToolCallingChatModel, tools []tool.BaseTool, messages []*schema.Message, feed *activityFeed, activityCh chan<- []activityCall, activityOpt agentopt.AgentOption) (*schema.Message, error) {
+func callRole(ctx context.Context, strategy toolCallingStrategy, agent *react.Agent, cm model.ToolCallingChatModel, tools []tool.BaseTool, messages []*schema.Message, feed *activityFeed, activityCh chan<- []activityCall, activityOpt agentopt.AgentOption, onText func(string)) (*schema.Message, error) {
 	if strategy == jsonFallbackToolCalling {
+		// Deliberately never streams: on this path any reply might be a
+		// tool call written as text, so nothing is displayable until the
+		// full reply is parsed.
 		return runFallbackToolLoop(ctx, cm, tools, messages, feed, activityCh)
+	}
+	if onText != nil {
+		return streamWithLeakGuard(ctx, agent, messages, onText, activityOpt)
 	}
 	return generateWithLeakRetry(ctx, agent, messages, activityOpt)
 }

@@ -107,16 +107,22 @@ const reactMaxStep = 30
 
 // newAgent wires a ReAct agent (github.com/cloudwego/eino/flow/agent/react)
 // around cm and tools. The agent handles the full call-model -> tool-calls
-// -> execute -> feed-back -> loop cycle internally; callers only ever call
-// Generate, never Stream — see cmd/tutor-spike's finding that eino's
-// Generate path sends every internal model call with "stream": false,
-// which sidesteps a known Ollama bug where streaming responses drop
-// tool_calls for some model families.
+// -> execute -> feed-back -> loop cycle internally. Callers use Generate
+// by default; Stream only when streamingEnabled says the model can take
+// it (stream.go) — cmd/tutor-spike found eino's Generate path sends
+// every internal model call with "stream": false, which sidesteps a
+// known Ollama bug where streaming responses drop tool_calls for some
+// model families, so Ollama-backed agents stay on Generate exclusively.
+//
+// StreamToolCallChecker only affects the Stream path — see
+// windowedStreamToolCallChecker for the live narrate-then-call bug the
+// default first-chunk checker caused.
 func newAgent(ctx context.Context, cm model.ToolCallingChatModel, tools []tool.BaseTool) (*react.Agent, error) {
 	a, err := react.NewAgent(ctx, &react.AgentConfig{
-		ToolCallingModel: cm,
-		ToolsConfig:      compose.ToolsNodeConfig{Tools: tools},
-		MaxStep:          reactMaxStep,
+		ToolCallingModel:      cm,
+		ToolsConfig:           compose.ToolsNodeConfig{Tools: tools},
+		MaxStep:               reactMaxStep,
+		StreamToolCallChecker: windowedStreamToolCallChecker,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("tutor: new agent: %w", err)

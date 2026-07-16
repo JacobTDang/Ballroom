@@ -89,6 +89,19 @@ func TestExerciseRunArgs_ForwardsTimeLimit(t *testing.T) {
 	}
 }
 
+func TestRunArgs_ForwardTutorStreamOverrideFromHostEnv(t *testing.T) {
+	t.Setenv("TUTOR_STREAM", "off")
+	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "openrouter:some/model"}
+	ex := exercise.Exercise{ID: "two-pointers-01-go", Category: "pattern", Language: "go", TutorMode: "hint", TestCommand: "go test ./..."}
+
+	if args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now()); !containsFlag(args, "TUTOR_STREAM=off") {
+		t.Errorf("expected the host's TUTOR_STREAM override forwarded into the exercise container, got %v", args)
+	}
+	if args := sandboxRunArgs(cfg); !containsFlag(args, "TUTOR_STREAM=off") {
+		t.Errorf("expected the host's TUTOR_STREAM override forwarded into the sandbox container, got %v", args)
+	}
+}
+
 func TestSandboxRunArgs_MarksTheSandboxSessionContext(t *testing.T) {
 	cfg := config.Config{DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
 
