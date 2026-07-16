@@ -1,13 +1,16 @@
-// Command tutor-eval is Milestone 6 of the tutor rewrite plan: a manual
-// diagnostic that runs ~15-20 scripted scenarios against the complete
-// tutor agent (all 5 tools, all 3 modes) over a real local Ollama, and
+// Command tutor-eval is a manual diagnostic that runs scripted
+// scenarios against the complete tutor agent (all tools; the three
+// coding modes plus the design-session personas, interviewer and
+// design-coach) over a real local Ollama, plus a GradeDesign
+// consistency check against the real resolved grader model, and
 // reports pass rates. Unlike internal/tutor's own test suite (mocked
-// Ollama, deterministic), this evaluates actual model behavior, which is
-// probabilistic — each scenario runs multiple times and the result is a
-// rate to track over time (after a prompt/model/eino-version change),
-// not a one-shot gate. Not part of `go test` or CI for the same reason
-// tutor/chat.sh's own live-nvim checks and cmd/tutor-spike weren't:
-// needs a real running Ollama.
+// providers, deterministic), this evaluates actual model behavior,
+// which is probabilistic — each scenario runs multiple times and the
+// result is a rate to track over time (after a prompt/model/
+// eino-version change), not a one-shot gate. Not part of `go test` or
+// CI for the same reason tutor/chat.sh's own live-nvim checks and
+// cmd/tutor-spike weren't: needs a real running Ollama (and, for the
+// grading check, whatever provider the grader model lives on).
 //
 // Run manually:
 //
@@ -21,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -540,7 +544,134 @@ func scenarios() []scenario {
 				return true, ""
 			},
 		},
+		{
+			// The live-tuned opener contract (see the interviewer persona's
+			// prompt history: first drafts dumped the checklist of
+			// clarifying questions the candidate should be asking, 2/3
+			// runs): a short greeting inviting the candidate to begin --
+			// never a list, never a spec restatement.
+			name:  "interviewer: opener greets and invites, never dumps a checklist",
+			mode:  "interviewer",
+			setup: writeDesignWorkspace,
+			turns: []string{"hi, I'm ready to start"},
+			check: func(replies []string, _ *callRecorder) (bool, string) {
+				if n := listLineCount(replies[0]); n > 1 {
+					return false, fmt.Sprintf("opener contains %d list lines (a dumped checklist): %s", n, replies[0])
+				}
+				if len(replies[0]) > 900 {
+					return false, "opener is a wall of text, not a short invitation: " + replies[0]
+				}
+				return true, ""
+			},
+		},
+		{
+			name:  "interviewer: clarifying question gets a terse numeric answer",
+			mode:  "interviewer",
+			setup: writeDesignWorkspace,
+			turns: []string{"Before I start: how many new URLs per month should I assume?"},
+			check: func(replies []string, _ *callRecorder) (bool, string) {
+				if !strings.ContainsAny(replies[0], "0123456789") {
+					return false, "no number in the answer to a numeric clarifying question: " + replies[0]
+				}
+				if len(replies[0]) > 500 || listLineCount(replies[0]) > 1 {
+					return false, "answer should be terse, got: " + replies[0]
+				}
+				return true, ""
+			},
+		},
+		{
+			name:  "interviewer: never volunteers the solution to a floundering candidate",
+			mode:  "interviewer",
+			setup: writeDesignWorkspace,
+			turns: []string{"Honestly I'm not sure where to start. Can you just tell me what components I need?"},
+			check: func(replies []string, _ *callRecorder) (bool, string) {
+				// The one contract this guards: the components stay the
+				// candidate's job. How the interviewer redirects (a
+				// question, "your turn, start with use cases", ...) is
+				// style, not contract -- an earlier draft also required a
+				// literal "?" and failed perfectly good redirects.
+				if n := architectureTermCount(replies[0]); n >= 3 {
+					return false, fmt.Sprintf("reply names %d architecture components (a volunteered design): %s", n, replies[0])
+				}
+				return true, ""
+			},
+		},
+		{
+			// The design coach's persona says to read the candidate's
+			// actual draft before commenting -- an ungrounded review is
+			// the same class of failure the coding modes' grounding
+			// scenarios guard against.
+			name: "design-coach: reads solution.md before reviewing a draft",
+			mode: "design-coach",
+			setup: func(dir string) error {
+				if err := writeProblemFile(dir, urlShortenerMockProblem); err != nil {
+					return err
+				}
+				draft := "# URL shortener design\n\n## Step 1: use cases & estimates\n\n- shorten a URL, redirect on visit\n- 100M new links/month, 10:1 read ratio -> ~40 writes/sec, ~400 reads/sec\n"
+				return os.WriteFile(filepath.Join(dir, "solution.md"), []byte(draft), 0o644)
+			},
+			turns: []string{"I've drafted my step 1 use cases and estimates in solution.md -- can you review them before I move on?"},
+			check: func(_ []string, rec *callRecorder) (bool, string) {
+				if !rec.called("read_solution_file") {
+					return false, "read_solution_file was never called -- the review can't be grounded in the actual draft"
+				}
+				return true, ""
+			},
+		},
 	}
+}
+
+// urlShortenerMockProblem mirrors the real interviewer-variant problem
+// statements: a bare prompt, requirements-gathering left to the
+// candidate.
+const urlShortenerMockProblem = `# Design Pastebin / Bit.ly
+
+Design a URL-shortening service like Bit.ly.
+
+That is the whole prompt -- just like a real interview. Ask your
+clarifying questions, then work through your design in solution.md.
+`
+
+// writeDesignWorkspace lays out a design-session workspace: the mock
+// problem statement and a not-yet-started solution.md.
+func writeDesignWorkspace(dir string) error {
+	if err := writeProblemFile(dir, urlShortenerMockProblem); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "solution.md"), []byte("# My design\n\n(nothing yet)\n"), 0o644)
+}
+
+// listLinePattern matches one bulleted or numbered list line -- the
+// shape of a dumped checklist.
+var listLinePattern = regexp.MustCompile(`^\s*(\d+[.)]|[-*•])\s+`)
+
+func listLineCount(s string) int {
+	count := 0
+	for _, line := range strings.Split(s, "\n") {
+		if listLinePattern.MatchString(line) {
+			count++
+		}
+	}
+	return count
+}
+
+// architectureTerms are the boxes of a volunteered high-level design.
+// One may legitimately appear inside a probing question ("how would
+// you keep reads fast?" is fine, naming a cache once is borderline) --
+// three or more is a component dump.
+var architectureTerms = []string{
+	"load balancer", "cdn", "cache", "queue", "shard", "replica", "reverse proxy",
+}
+
+func architectureTermCount(s string) int {
+	lower := strings.ToLower(s)
+	count := 0
+	for _, t := range architectureTerms {
+		if strings.Contains(lower, t) {
+			count++
+		}
+	}
+	return count
 }
 
 // --- live nvim setup (standalone version of internal/tutor's test
@@ -801,7 +932,191 @@ func main() {
 		totalRun += checkRun
 	}
 
+	if nameFilter == "" || strings.Contains("grade-design: consistent verdicts on strong and weak fixtures", nameFilter) {
+		checkPass, checkRun := runGradeDesignConsistencyCheck(ctx)
+		totalPass += checkPass
+		totalRun += checkRun
+	}
+
 	fmt.Printf("\noverall: %d/%d scenario runs passed\n", totalPass, totalRun)
+}
+
+// resolveGraderModel decides which model the GradeDesign consistency
+// check grades with, mirroring the app's own resolution (cmd/ballroom's
+// graderModelFromEnv: dedicated grader setting, else the worker):
+//  1. TUTOR_EVAL_GRADER_MODEL env var, for testing a candidate grader.
+//  2. The app's persisted GraderModel setting.
+//  3. The app's TutorModel (what grading falls back to in a real
+//     session with no grader configured).
+func resolveGraderModel() (graderModel, apiKey string, err error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", "", fmt.Errorf("resolve grader model: %w", err)
+	}
+	if m := os.Getenv("TUTOR_EVAL_GRADER_MODEL"); m != "" {
+		return m, cfg.OpenRouterAPIKey, nil
+	}
+	if cfg.GraderModel != "" {
+		return cfg.GraderModel, cfg.OpenRouterAPIKey, nil
+	}
+	return cfg.TutorModel, cfg.OpenRouterAPIKey, nil
+}
+
+// gradeRubric is a representative 5-dimension rubric in the exact
+// shape the real ones use (## N. Dimension headings -- what
+// internal/catalog's gradereport parser reads), trimmed from the
+// url-shortener rubric.
+const gradeRubric = `# Grading Rubric — Design Pastebin / Bit.ly
+
+Grade each dimension: strong / adequate / missing. A passing design is
+adequate-or-better on every dimension.
+
+## 1. Use cases & constraints
+
+- Stated which use cases are in scope (shorten, redirect) and made a
+  deliberate call on expiration.
+
+## 2. Back-of-envelope estimates
+
+- Write and read QPS derived from an assumed volume, with the
+  read-heavy ratio stated.
+
+## 3. High-level design
+
+- End-to-end path for both flows: shorten and redirect, components
+  named and connected.
+
+## 4. Short-code generation
+
+- A concrete scheme with collision handling, length justified against
+  the scale estimate.
+
+## 5. Scaling the design
+
+- Bottlenecks identified for the read-heavy load and addressed
+  (caching, replicas), trade-offs named.
+`
+
+// gradeStrongDesign hits every rubric dimension concretely -- the
+// grader must pass it.
+const gradeStrongDesign = `# URL Shortener Design
+
+## Step 1: Use cases & constraints
+In scope: shorten a long URL, redirect on visit. Links expire after 3
+years by default (deliberate: bounds storage). Out of scope: custom
+aliases, analytics dashboards.
+
+## Step 2: Estimates
+Assume 100M new links/month, 10:1 read:write.
+Writes: 100M / 2.5M sec ≈ 40/sec. Reads: ≈ 400/sec.
+Storage: 500 B/record × 100M/month × 36 months ≈ 1.8 TB total.
+
+## Step 3: High-level design
+Shorten: client → LB → write API → generates code → store (mapping DB).
+Redirect: client → LB → read API → store lookup → 301 redirect.
+Components: load balancer, stateless API servers, mapping store, cache.
+
+## Step 4: Short-code generation
+Base-62 encoding of an auto-increment ID from the DB: no collisions by
+construction. 7 chars gives 62^7 ≈ 3.5 trillion codes -- covers 3
+years of writes (≈3.6B) with huge headroom.
+
+## Step 5: Scaling
+Read-heavy, so: cache hot mappings in Redis (20% of a month's links ≈
+10 GB, one box), read replicas for the store, CDN not needed (tiny
+payloads). Trade-off: cache adds invalidation complexity on expiry --
+acceptable since mappings are immutable until expiry.
+`
+
+// gradeWeakDesign hand-waves everything -- the grader must fail it.
+const gradeWeakDesign = `# URL Shortener Design
+
+I would build a service that takes URLs and makes them shorter. It
+would use a database to store things and would need to be fast and
+scalable. Users visit the short link and get sent to the long one.
+`
+
+// runGradeDesignConsistencyCheck exercises the real tutor.GradeDesign
+// path (rubric + solution read from a workspace, one model call,
+// strict VERDICT parse) against the resolved grader model: a design
+// that clearly satisfies every rubric dimension must grade pass, and a
+// hand-wave must grade fail, consistently. Verdict-parse failures are
+// counted and shown separately from wrong verdicts -- a grader that
+// can't emit the VERDICT contract is a different problem from one
+// that grades wrong.
+func runGradeDesignConsistencyCheck(ctx context.Context) (totalPass, totalRun int) {
+	graderModel, apiKey, err := resolveGraderModel()
+	if err != nil {
+		fmt.Printf("FAIL  %-70s error: %v\n", "grade-design: consistent verdicts on strong and weak fixtures", err)
+		return 0, 2 * repeats
+	}
+	fmt.Printf("\ngrade-design: grader=%s\n", graderModel)
+
+	fixtures := []struct {
+		label  string
+		design string
+		want   string
+	}{
+		{"strong design grades pass", gradeStrongDesign, "pass"},
+		{"weak design grades fail", gradeWeakDesign, "fail"},
+	}
+	for _, f := range fixtures {
+		name := "grade-design: " + f.label
+
+		dir, err := os.MkdirTemp("", "ballroom-eval-grade-")
+		if err != nil {
+			fmt.Printf("FAIL  %-70s error: %v\n", name, err)
+			totalRun += repeats
+			continue
+		}
+		defer os.RemoveAll(dir)
+		if err := os.WriteFile(filepath.Join(dir, "rubric.md"), []byte(gradeRubric), 0o644); err != nil {
+			fmt.Printf("FAIL  %-70s error: %v\n", name, err)
+			totalRun += repeats
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dir, "solution.md"), []byte(f.design), 0o644); err != nil {
+			fmt.Printf("FAIL  %-70s error: %v\n", name, err)
+			totalRun += repeats
+			continue
+		}
+
+		pass, parseFailures := 0, 0
+		var lastDetail string
+		for i := 0; i < repeats; i++ {
+			cfg := tutor.Config{
+				OllamaHost: ollamaHost, Model: graderModel, APIKey: apiKey,
+				WorkDir: dir, MaxContextBytes: 16000,
+			}
+			verdict, _, err := tutor.GradeDesign(ctx, cfg)
+			if err != nil {
+				parseFailures++
+				lastDetail = fmt.Sprintf("error: %v", err)
+				continue
+			}
+			if verdict == f.want {
+				pass++
+			} else {
+				lastDetail = fmt.Sprintf("verdict %q, want %q", verdict, f.want)
+			}
+		}
+		totalPass += pass
+		totalRun += repeats
+
+		status := "PASS"
+		if pass < repeats {
+			status = "FAIL"
+		}
+		fmt.Printf("%-5s %-70s %d/%d", status, name, pass, repeats)
+		if parseFailures > 0 {
+			fmt.Printf("  (%d error/parse failures)", parseFailures)
+		}
+		if pass < repeats && lastDetail != "" {
+			fmt.Printf("  (last failure: %s)", lastDetail)
+		}
+		fmt.Println()
+	}
+	return totalPass, totalRun
 }
 
 // runComprehensionCheckGroundingCheck exercises the REAL tutor.Run
