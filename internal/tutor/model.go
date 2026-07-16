@@ -144,6 +144,18 @@ type tutorModel struct {
 	// aurora has never had a reason to exist.
 	turnStartedAt time.Time
 	turnSettledAt time.Time
+
+	// streamingText is the in-flight turn's partial reply so far (full
+	// accumulated text, not a delta -- see pushLatestStreamText), shown
+	// as a provisional styled block below displayLines while the turn
+	// runs (refreshViewport) and cleared when it completes; the final
+	// reply is appended through the exact same turnCompleteMsg path as a
+	// non-streamed turn, so the settled display is byte-identical.
+	// streamPainting flips true at the first painted chunk and makes the
+	// aurora begin its fade-out mid-turn (auroraFade) -- the reply is
+	// visibly arriving, so the "thinking" glow should already be dying.
+	streamingText  string
+	streamPainting bool
 }
 
 // newTutorLayoutOnly builds a model with just the textarea/viewport
@@ -383,7 +395,21 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case activityEventMsg:
 		m.activeCalls = msg.calls
 		m.recomputeLayout()
-		return m, waitForActivityEvent(msg.activityCh, msg.doneCh)
+		return m, waitForActivityEvent(msg.activityCh, msg.streamCh, msg.doneCh)
+
+	case streamTextMsg:
+		if !m.streamPainting && msg.text != "" {
+			// First painted chunk: the reply is visibly arriving, so the
+			// thinking glow starts dying now rather than at turn
+			// completion -- backdated the same way turnCompleteMsg does,
+			// so the fade continues from the glow's current level.
+			glowLevel := m.auroraFade()
+			m.streamPainting = true
+			m.turnSettledAt = time.Now().Add(-auroraFadeOutLead(glowLevel))
+		}
+		m.streamingText = msg.text
+		m.refreshViewport()
+		return m, waitForActivityEvent(msg.activityCh, msg.streamCh, msg.doneCh)
 
 	case pulseTickMsg:
 		// Free-running for the program's whole lifetime (see the doc
@@ -403,8 +429,8 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// because startTurn snapshots m and needs the strategies resolved.
 		var cmds []tea.Cmd
 		for _, q := range m.queuedSubmits {
-			activityCh, doneCh := startTurn(m, q.line, q.checkComprehension)
-			cmds = append(cmds, waitForActivityEvent(activityCh, doneCh))
+			activityCh, streamCh, doneCh := startTurn(m, q.line, q.checkComprehension)
+			cmds = append(cmds, waitForActivityEvent(activityCh, streamCh, doneCh))
 		}
 		m.queuedSubmits = nil
 		return m, tea.Batch(cmds...)
@@ -417,6 +443,11 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		glowLevel := m.auroraFade()
 		m.turnInFlight = false
 		m.turnSettledAt = time.Now().Add(-auroraFadeOutLead(glowLevel))
+		// The provisional streamed block (if any) is done: the final
+		// reply below replaces it on success, and a failed turn must not
+		// leave a partial reply looking like a real one.
+		m.streamingText = ""
+		m.streamPainting = false
 		calls := m.activeCalls
 		m.activeCalls = nil
 		m.helpRequestCount = msg.helpRequestCount
@@ -561,7 +592,16 @@ func estimatedTextareaRows(value string, width int) int {
 // same reason recomputeLayout uses estimatedTextareaRows: real word
 // wrapping, not truncation.
 func (m *tutorModel) refreshViewport() {
-	content := strings.Join(m.displayLines, "\n\n")
+	lines := m.displayLines
+	if m.turnInFlight && m.streamingText != "" {
+		// The in-flight turn's provisional partial reply, styled the
+		// same way its final version will be (styleMarkdown renders an
+		// unterminated code fence fine, so a reply cut mid-block still
+		// displays) -- never appended to displayLines itself: the
+		// turnCompleteMsg case owns the permanent append.
+		lines = append(append([]string{}, m.displayLines...), styleMarkdown(m.streamingText))
+	}
+	content := strings.Join(lines, "\n\n")
 	if w := m.viewport.Width - m.viewport.Style.GetHorizontalFrameSize(); w > 0 {
 		content = lipgloss.NewStyle().Width(w).Render(content)
 	}
@@ -609,6 +649,8 @@ func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 	glowLevel := m.auroraFade()
 	m.turnInFlight = true
 	m.turnStartedAt = time.Now().Add(-auroraFadeInLead(glowLevel))
+	m.streamingText = ""
+	m.streamPainting = false
 	m.recomputeLayout()
 	m.displayLines = append(m.displayLines, userEchoPrefix+line)
 	m.refreshViewport()
@@ -624,8 +666,8 @@ func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	activityCh, doneCh := startTurn(m, line, checkComprehension)
-	return m, waitForActivityEvent(activityCh, doneCh)
+	activityCh, streamCh, doneCh := startTurn(m, line, checkComprehension)
+	return m, waitForActivityEvent(activityCh, streamCh, doneCh)
 }
 
 // queuedSubmit is one message submitted before strategy detection
@@ -668,6 +710,18 @@ type turnCompleteMsg struct {
 type activityEventMsg struct {
 	calls      []activityCall
 	activityCh <-chan []activityCall
+	streamCh   <-chan string
+	doneCh     <-chan turnCompleteMsg
+}
+
+// streamTextMsg carries the in-flight turn's accumulated partial reply
+// (see stream.go's pushLatestStreamText) — the streaming counterpart of
+// activityEventMsg, delivered by the same waitForActivityEvent wait and
+// carrying the same channels so Update re-arms identically.
+type streamTextMsg struct {
+	text       string
+	activityCh <-chan []activityCall
+	streamCh   <-chan string
 	doneCh     <-chan turnCompleteMsg
 }
 
@@ -680,18 +734,35 @@ func pulseTickCmd() tea.Cmd {
 	return tea.Tick(activityPulseInterval, func(time.Time) tea.Msg { return pulseTickMsg{} })
 }
 
-// waitForActivityEvent mirrors internal/tui/boot.go's waitForBuildLine
-// exactly: blocks on activityCh, forwarding each snapshot as it arrives;
-// once that channel closes (the turn's goroutine has finished — see
-// startTurn's deferred close) it reads the buffered final result from
-// doneCh instead.
-func waitForActivityEvent(activityCh <-chan []activityCall, doneCh <-chan turnCompleteMsg) tea.Cmd {
+// waitForActivityEvent mirrors internal/tui/boot.go's waitForBuildLine:
+// blocks on the turn's live channels — activity snapshots and streamed
+// partial text — forwarding each event as it arrives; once activityCh
+// closes (the turn's goroutine has finished — see startTurn's deferred
+// closes, which close streamCh first) it reads the buffered final
+// result from doneCh instead. One single re-armed command rather than
+// one per channel, so every caller that drains a turn synchronously
+// (RunOneTurn, the test helpers) keeps its one-cmd-chain invariant.
+func waitForActivityEvent(activityCh <-chan []activityCall, streamCh <-chan string, doneCh <-chan turnCompleteMsg) tea.Cmd {
 	return func() tea.Msg {
-		calls, ok := <-activityCh
-		if ok {
-			return activityEventMsg{calls: calls, activityCh: activityCh, doneCh: doneCh}
+		for {
+			select {
+			case calls, ok := <-activityCh:
+				if !ok {
+					// streamCh is already closed (startTurn's defer order),
+					// so nothing more can paint: the turn is done.
+					return <-doneCh
+				}
+				return activityEventMsg{calls: calls, activityCh: activityCh, streamCh: streamCh, doneCh: doneCh}
+			case text, ok := <-streamCh:
+				if !ok {
+					// Stream finished but the turn hasn't: disable this arm
+					// (a nil channel never fires) and keep waiting.
+					streamCh = nil
+					continue
+				}
+				return streamTextMsg{text: text, activityCh: activityCh, streamCh: streamCh, doneCh: doneCh}
+			}
 		}
-		return <-doneCh
 	}
 }
 
@@ -703,23 +774,38 @@ func waitForActivityEvent(activityCh <-chan []activityCall, doneCh <-chan turnCo
 // value here since m is passed as a parameter, not a live reference),
 // which is why helpRequestCount/comprehensionCheckPending are already
 // resolved by submit before this is called.
-func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []activityCall, <-chan turnCompleteMsg) {
+func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []activityCall, <-chan string, <-chan turnCompleteMsg) {
 	activityCh := make(chan []activityCall, 32)
+	streamCh := make(chan string, 1)
 	doneCh := make(chan turnCompleteMsg, 1)
 
 	go func() {
+		// LIFO: streamCh closes first, so by the time waitForActivityEvent
+		// sees activityCh closed (its read-doneCh signal), no more partial
+		// text can arrive.
 		defer close(activityCh)
+		defer close(streamCh)
 
 		feed := &activityFeed{}
 		activityOpt := buildActivityChannelOption(feed, activityCh)
 
+		// onTextFor gates streaming per role by that role's own model --
+		// worker and orchestrator can differ (e.g. an OpenRouter worker
+		// with a local Ollama orchestrator must stream only worker turns).
+		onTextFor := func(roleModel string) func(string) {
+			if !streamingEnabled(roleModel) {
+				return nil
+			}
+			return func(text string) { pushLatestStreamText(streamCh, text) }
+		}
+
 		if checkComprehension {
-			checkAgent, checkCM, checkStrategy := m.workerAgent, m.workerCM, m.workerStrategy
+			checkAgent, checkCM, checkStrategy, checkModel := m.workerAgent, m.workerCM, m.workerStrategy, m.cfg.Model
 			if m.routingEnabled {
-				checkAgent, checkCM, checkStrategy = m.orchestratorAgent, m.orchestratorCM, m.orchestratorStrategy
+				checkAgent, checkCM, checkStrategy, checkModel = m.orchestratorAgent, m.orchestratorCM, m.orchestratorStrategy, m.cfg.OrchestratorModel
 			}
 			checkMessages := prependToolsPrompt(checkStrategy, m.toolCatalogText, comprehensionCheckMessages(m.history, m.cfg.WorkDir, line))
-			reply, err := callRole(m.ctx, checkStrategy, checkAgent, checkCM, m.tools, checkMessages, feed, activityCh, activityOpt)
+			reply, err := callRole(m.ctx, checkStrategy, checkAgent, checkCM, m.tools, checkMessages, feed, activityCh, activityOpt, onTextFor(checkModel))
 			if err == nil {
 				// helpRequestCount stays at its pre-turn snapshot -- a
 				// successful comprehension check never counts as a
@@ -732,7 +818,7 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 			// silently dropping it, exactly like the old Run() loop.
 		}
 
-		turnAgent, turnCM, turnStrategy, turnEndpoint := m.workerAgent, m.workerCM, m.workerStrategy, m.workerEndpoint
+		turnAgent, turnCM, turnStrategy, turnEndpoint, turnModel := m.workerAgent, m.workerCM, m.workerStrategy, m.workerEndpoint, m.cfg.Model
 		routingWarning := ""
 		if m.routingEnabled {
 			handoff, err := decideHandoff(m.ctx, m.orchestratorCM, line)
@@ -746,7 +832,7 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 				routingWarning = fmt.Sprintf("routing decision failed, defaulting to handoff: %v", err)
 			}
 			if !handoff {
-				turnAgent, turnCM, turnStrategy, turnEndpoint = m.orchestratorAgent, m.orchestratorCM, m.orchestratorStrategy, m.orchestratorEndpoint
+				turnAgent, turnCM, turnStrategy, turnEndpoint, turnModel = m.orchestratorAgent, m.orchestratorCM, m.orchestratorStrategy, m.orchestratorEndpoint, m.cfg.OrchestratorModel
 			}
 		}
 
@@ -760,7 +846,7 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 			turn = append([]*schema.Message{note}, turn...)
 		}
 		requestMessages := prependToolsPrompt(turnStrategy, m.toolCatalogText, append(append([]*schema.Message{}, m.history...), turn...))
-		reply, err := callRole(m.ctx, turnStrategy, turnAgent, turnCM, m.tools, requestMessages, feed, activityCh, activityOpt)
+		reply, err := callRole(m.ctx, turnStrategy, turnAgent, turnCM, m.tools, requestMessages, feed, activityCh, activityOpt, onTextFor(turnModel))
 		if err != nil {
 			doneCh <- turnCompleteMsg{err: err, endpoint: turnEndpoint, userMessage: line, helpRequestCount: newHelpRequestCount, routingWarning: routingWarning}
 			return
@@ -768,7 +854,7 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 		doneCh <- turnCompleteMsg{reply: reply, userMessage: line, helpRequestCount: newHelpRequestCount, routingWarning: routingWarning}
 	}()
 
-	return activityCh, doneCh
+	return activityCh, streamCh, doneCh
 }
 
 // buildActivityChannelOption wires the eino callback machinery
