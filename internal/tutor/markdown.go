@@ -70,6 +70,7 @@ var (
 // (see displayBlock, model.go). Prose ignores it entirely;
 // refreshViewport word-wraps prose after the fact, same as always.
 func styleMarkdown(content string, width int) string {
+	cardWidth := cardWidthFor(width)
 	lines := strings.Split(content, "\n")
 	out := make([]string, 0, len(lines))
 	inFence := false
@@ -82,15 +83,9 @@ func styleMarkdown(content string, width int) string {
 				inFence = true
 				fenceLabel = strings.TrimSpace(strings.TrimPrefix(trimmed, "```"))
 				fenceLines = fenceLines[:0]
-				label := fenceLabel
-				if label == "" {
-					label = "code"
-				}
-				out = append(out, mdDimColor+"── "+label+" ──"+mdColorReset)
 			} else {
 				inFence = false
-				out = append(out, highlightCode(fenceLabel, fenceLines)...)
-				out = append(out, mdDimColor+"──"+mdColorReset)
+				out = append(out, renderFence(fenceLabel, fenceLines, cardWidth, false)...)
 			}
 			continue
 		}
@@ -107,11 +102,32 @@ func styleMarkdown(content string, width int) string {
 		out = append(out, line)
 	}
 	if inFence {
-		// Unterminated fence (a truncated reply): still render what
-		// arrived rather than dropping it.
-		out = append(out, highlightCode(fenceLabel, fenceLines)...)
+		// Unterminated fence (a reply still streaming, or truncated):
+		// still render what arrived rather than dropping it -- as a
+		// bottomless card that visibly grows until the closing fence.
+		out = append(out, renderFence(fenceLabel, fenceLines, cardWidth, true)...)
 	}
 	return strings.Join(out, "\n")
+}
+
+// renderFence renders one fenced block: an editor card (card.go) when
+// the pane gives it enough width, the width-independent rule style
+// otherwise -- dim label rule, highlighted code, closing rule.
+func renderFence(label string, lines []string, cardWidth int, unterminated bool) []string {
+	if cardWidth > 0 {
+		return renderCodeCard(label, lines, cardWidth, unterminated)
+	}
+	shown := label
+	if shown == "" {
+		shown = "code"
+	}
+	out := make([]string, 0, len(lines)+2)
+	out = append(out, mdDimColor+"── "+shown+" ──"+mdColorReset)
+	out = append(out, highlightCode(label, lines)...)
+	if !unterminated {
+		out = append(out, mdDimColor+"──"+mdColorReset)
+	}
+	return out
 }
 
 // chromaStyle renders well on this pane's dark background; the
