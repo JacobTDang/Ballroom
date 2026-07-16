@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
@@ -38,13 +39,16 @@ const (
 // vertical "sidebar" running down the pane, a real complaint from live
 // use ("remove the side bar ... it will look a lot nicer"); a lone top
 // border keeps the same visual separation from the conversation above
-// without that vertical bar. PaddingLeft(1) keeps the "> " prompt
-// roughly aligned with the conversation's own left inset
+// without that vertical bar. PaddingLeft(1) keeps the prompt roughly
+// aligned with the conversation's own left inset
 // (viewportContentStyle's PaddingLeft(2)) instead of sitting flush
-// against the pane's bare left edge.
+// against the pane's bare left edge. The rule is the palette's dimmed
+// teal, not the full accent -- structure, not content: the bright rule
+// visibly competed with the prompt glyph, which now carries the
+// accent instead.
 var textareaBoxStyle = lipgloss.NewStyle().
 	Border(lipgloss.NormalBorder(), true, false, false, false).
-	BorderForeground(lipgloss.Color("#2FA6A6")).
+	BorderForeground(lipgloss.Color(paneInputRule)).
 	PaddingLeft(1)
 
 // viewportContentStyle left-pads the scrolling conversation area — a
@@ -65,14 +69,18 @@ type tutorModel struct {
 	width    int
 	height   int
 
-	// displayLines is what the viewport actually shows: the banner, each
-	// submitted message echoed immediately (before its reply arrives),
-	// and each reply -- including a failed turn's honest fallback
-	// message, which is shown but deliberately never added to history
-	// (see submit/Update's turnCompleteMsg case). Decoupled from history
-	// on purpose: history is model context only, this is display only.
-	displayLines []string
-	banner       string
+	// displayBlocks is what the viewport shows: each submitted message
+	// echoed immediately (before its reply arrives), each reply, and
+	// pre-styled notes (tool-usage summaries, error notes) -- including
+	// a failed turn's honest fallback message, which is shown but
+	// deliberately never added to history (see submit/Update's
+	// turnCompleteMsg case). Decoupled from history on purpose: history
+	// is model context only, this is display only. Blocks hold raw
+	// content and are styled per frame at the viewport's current width
+	// (renderBlock, refreshViewport) -- styling at append time baked a
+	// width into the transcript, which is exactly what fixed-width
+	// constructs like the editor cards can't survive a resize with.
+	displayBlocks []displayBlock
 
 	// ctx is stored on the model (unusual for Go, normally a function
 	// parameter) because bubbletea's Update(msg) signature has nowhere
@@ -158,6 +166,43 @@ type tutorModel struct {
 	streamPainting bool
 }
 
+// displayBlock is one transcript entry, held raw and styled per frame
+// (renderBlock) at the viewport's current width -- see the
+// displayBlocks field's doc comment for why styling can't happen at
+// append time anymore.
+type displayBlock struct {
+	kind displayBlockKind
+	raw  string
+}
+
+type displayBlockKind int
+
+const (
+	// blockNote is pre-styled content rendered exactly as appended --
+	// tool-usage summaries, error notes, fallback messages. These were
+	// styled for a specific width at append time before this refactor
+	// too; nothing regressed, they just don't re-flow.
+	blockNote displayBlockKind = iota
+	// blockUser is one line the user submitted, echoed with the
+	// userEchoPrefix.
+	blockUser
+	// blockTutor is one tutor reply's raw markdown, styled by
+	// styleMarkdown at render time.
+	blockTutor
+)
+
+// renderBlock styles one transcript block for the given content width.
+func renderBlock(b displayBlock, width int) string {
+	switch b.kind {
+	case blockUser:
+		return userEchoPrefix + b.raw
+	case blockTutor:
+		return styleMarkdown(b.raw, width)
+	default:
+		return b.raw
+	}
+}
+
 // newTutorLayoutOnly builds a model with just the textarea/viewport
 // wiring — no agents, no config, no network. Used by this file's own
 // pure-layout tests (resize, dynamic growth, Enter-submits-not-newline)
@@ -166,7 +211,9 @@ type tutorModel struct {
 func newTutorLayoutOnly() tutorModel {
 	ta := textarea.New()
 	ta.Placeholder = "Ask a question..."
-	ta.Prompt = "> "
+	ta.Prompt = "› "
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color(paneTeal))
+	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color(paneInputRule))
 	ta.ShowLineNumbers = false
 	ta.KeyMap.InsertNewline.SetEnabled(false)
 	ta.Focus()
@@ -221,10 +268,11 @@ func newTutorModel(ctx context.Context, cfg Config) (tutorModel, error) {
 		if err != nil {
 			return tutorModel{}, err
 		}
-		m.banner = fmt.Sprintf("tutor (worker=%s, orchestrator=%s, mode=%s) — connected to %s / %s. Ctrl-D to exit.", cfg.Model, cfg.OrchestratorModel, cfg.Mode, m.workerEndpoint, m.orchestratorEndpoint)
-	} else {
-		m.banner = fmt.Sprintf("tutor (%s, mode=%s) — connected to %s. Ctrl-D to exit.", cfg.Model, cfg.Mode, m.workerEndpoint)
 	}
+	// No banner block in the transcript -- the session's identity
+	// (model, mode, endpoint, exit hint) lives in the fixed header line
+	// above the viewport now (headerView), where it stays visible
+	// instead of scrolling away with the conversation.
 
 	// Strategy detection deliberately does NOT happen here -- see the
 	// strategiesDetected field's doc comment. Construction must make
@@ -240,10 +288,60 @@ func newTutorModel(ctx context.Context, cfg Config) (tutorModel, error) {
 	// into the session's fixed history.
 	m.history = []*schema.Message{schema.SystemMessage(personaPromptForMode(cfg.Mode))}
 	m.comprehensionCheckPending = wantsComprehensionCheck(cfg.Mode)
-	m.displayLines = []string{m.banner}
 	m.refreshViewport()
 
 	return m, nil
+}
+
+// headerHeight is headerView's row count: the status line plus its
+// rule. recomputeLayout subtracts it from the viewport's budget.
+const headerHeight = 2
+
+// headerStatusText is the header's left side, without the leading dot:
+// what session this is. Split out from headerView so tests can assert
+// content without caring about width arithmetic.
+func (m tutorModel) headerStatusText() string {
+	model := m.cfg.Model
+	if m.routingEnabled {
+		model = m.cfg.Model + " +" + m.cfg.OrchestratorModel
+	}
+	return " tutor · " + model + " · " + m.cfg.Mode
+}
+
+// headerEndpointText is the header's right side: where requests go,
+// and how to leave (the old banner's "Ctrl-D to exit", kept visible
+// permanently now instead of scrolling away).
+func (m tutorModel) headerEndpointText() string {
+	endpoint := m.workerEndpoint
+	if m.routingEnabled && m.orchestratorEndpoint != endpoint {
+		endpoint = endpoint + " / " + m.orchestratorEndpoint
+	}
+	return endpoint + " · Ctrl-D exit "
+}
+
+// headerView is the fixed status line pinned above the viewport -- the
+// session's identity (live dot, model, mode on the left; endpoint and
+// exit hint on the right) over a dim rule. Replaces the old
+// banner-in-transcript, which scrolled out of sight with the first
+// long conversation.
+func (m tutorModel) headerView() string {
+	dot := lipgloss.NewStyle().Foreground(lipgloss.Color(paneTeal)).Render(" ●")
+	left := dot + m.headerStatusText()
+	right := lipgloss.NewStyle().Foreground(lipgloss.Color(paneDimText)).Render(m.headerEndpointText())
+
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		// Too narrow for both: the endpoint is the more dispensable
+		// half. Truncate what's left to the pane.
+		right = ""
+		left = ansi.Truncate(left, max(m.width, 0), "…")
+		gap = m.width - lipgloss.Width(left)
+		if gap < 0 {
+			gap = 0
+		}
+	}
+	rule := lipgloss.NewStyle().Foreground(lipgloss.Color(paneRule)).Render(strings.Repeat("─", max(m.width, 0)))
+	return left + strings.Repeat(" ", gap) + right + "\n" + rule
 }
 
 // RunOneTurn builds a tutor session and submits exactly one message,
@@ -461,7 +559,7 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// reply, and that's still worth showing. Empty (a no-op append)
 		// for a turn that made no tool calls at all.
 		if summary := toolUsageSummary(calls, m.activityContentWidth()); summary != "" {
-			m.displayLines = append(m.displayLines, summary)
+			m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockNote, raw: summary})
 		}
 		// routingWarning and a turn failure's real error detail both used
 		// to go to a raw fmt.Fprintf(m.stderr, ...) call -- a real bug
@@ -473,19 +571,20 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// redraw). Rendered into displayLines instead, both now go through
 		// the same safe pipeline as everything else on screen.
 		if msg.routingWarning != "" {
-			m.displayLines = append(m.displayLines, activityErrorNote(msg.routingWarning))
+			m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockNote, raw: activityErrorNote(msg.routingWarning)})
 		}
 		if msg.err != nil {
-			m.displayLines = append(m.displayLines, turnFailedFallbackReply)
-			m.displayLines = append(m.displayLines, activityErrorNote(fmt.Sprintf("could not reach %s: %v", msg.endpoint, msg.err)))
+			m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockNote, raw: turnFailedFallbackReply})
+			m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockNote, raw: activityErrorNote(fmt.Sprintf("could not reach %s: %v", msg.endpoint, msg.err))})
 			m.refreshViewport()
 			return m, nil
 		}
 		m.history = append(m.history, schema.UserMessage(msg.userMessage), schema.AssistantMessage(msg.reply.Content, nil))
-		// styleMarkdown is display-only: history above keeps the raw
-		// reply, because that text goes back to the model as context and
-		// escape codes there would pollute every later turn's prompt.
-		m.displayLines = append(m.displayLines, styleMarkdown(msg.reply.Content))
+		// The block keeps the raw reply -- styleMarkdown runs per frame
+		// in renderBlock, and history above keeps the raw text too,
+		// because that goes back to the model as context and escape
+		// codes there would pollute every later turn's prompt.
+		m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockTutor, raw: msg.reply.Content})
 		m.refreshViewport()
 		return m, nil
 	}
@@ -537,7 +636,7 @@ func (m *tutorModel) recomputeLayout() {
 	}
 
 	m.viewport.Width = m.width
-	m.viewport.Height = max(m.height-taRows-textareaBoxStyle.GetVerticalFrameSize()-activityRows, minViewportRows)
+	m.viewport.Height = max(m.height-headerHeight-taRows-textareaBoxStyle.GetVerticalFrameSize()-activityRows, minViewportRows)
 }
 
 // activityContentWidth is the actual text width available inside the
@@ -592,17 +691,21 @@ func estimatedTextareaRows(value string, width int) int {
 // same reason recomputeLayout uses estimatedTextareaRows: real word
 // wrapping, not truncation.
 func (m *tutorModel) refreshViewport() {
-	lines := m.displayLines
+	w := m.viewport.Width - m.viewport.Style.GetHorizontalFrameSize()
+	rendered := make([]string, 0, len(m.displayBlocks)+1)
+	for _, b := range m.displayBlocks {
+		rendered = append(rendered, renderBlock(b, w))
+	}
 	if m.turnInFlight && m.streamingText != "" {
 		// The in-flight turn's provisional partial reply, styled the
 		// same way its final version will be (styleMarkdown renders an
 		// unterminated code fence fine, so a reply cut mid-block still
-		// displays) -- never appended to displayLines itself: the
+		// displays) -- never appended to displayBlocks itself: the
 		// turnCompleteMsg case owns the permanent append.
-		lines = append(append([]string{}, m.displayLines...), styleMarkdown(m.streamingText))
+		rendered = append(rendered, styleMarkdown(m.streamingText, w))
 	}
-	content := strings.Join(lines, "\n\n")
-	if w := m.viewport.Width - m.viewport.Style.GetHorizontalFrameSize(); w > 0 {
+	content := strings.Join(rendered, "\n\n")
+	if w > 0 {
 		content = lipgloss.NewStyle().Width(w).Render(content)
 	}
 	m.viewport.SetContent(content)
@@ -652,7 +755,7 @@ func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 	m.streamingText = ""
 	m.streamPainting = false
 	m.recomputeLayout()
-	m.displayLines = append(m.displayLines, userEchoPrefix+line)
+	m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockUser, raw: line})
 	m.refreshViewport()
 
 	// Strategy detection still in flight (a submit typed faster than the
@@ -932,7 +1035,7 @@ func (m tutorModel) activityView() string {
 }
 
 func (m tutorModel) View() string {
-	parts := []string{m.viewport.View()}
+	parts := []string{m.headerView(), m.viewport.View()}
 	if av := m.activityView(); av != "" {
 		parts = append(parts, av)
 	}

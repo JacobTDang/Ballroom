@@ -11,7 +11,7 @@ import (
 // which is why it's applied at the displayLines append, not before.
 
 func TestStyleMarkdown_BoldRendersWithoutMarkers(t *testing.T) {
-	got := styleMarkdown("return true if any value appears **at least twice** in the array")
+	got := styleMarkdown("return true if any value appears **at least twice** in the array", 0)
 	if strings.Contains(got, "**") {
 		t.Errorf("styleMarkdown left raw ** markers in %q", got)
 	}
@@ -24,7 +24,7 @@ func TestStyleMarkdown_BoldRendersWithoutMarkers(t *testing.T) {
 }
 
 func TestStyleMarkdown_InlineCodeStyledWithoutBackticks(t *testing.T) {
-	got := styleMarkdown("use `set()` to track seen values")
+	got := styleMarkdown("use `set()` to track seen values", 0)
 	if strings.Contains(got, "`") {
 		t.Errorf("styleMarkdown left raw backticks in %q", got)
 	}
@@ -38,7 +38,7 @@ func TestStyleMarkdown_InlineCodeStyledWithoutBackticks(t *testing.T) {
 
 func TestStyleMarkdown_FencedBlockStyledAndFencesReplaced(t *testing.T) {
 	in := "Here you go:\n```python\ndef f():\n    return 1\n```\nDone."
-	got := styleMarkdown(in)
+	got := styleMarkdown(in, 0)
 	if strings.Contains(got, "```") {
 		t.Errorf("styleMarkdown left raw fence markers in %q", got)
 	}
@@ -52,7 +52,7 @@ func TestStyleMarkdown_FencedBlockStyledAndFencesReplaced(t *testing.T) {
 
 func TestStyleMarkdown_NoInlineStylingInsideFences(t *testing.T) {
 	in := "```\nx = a ** b  # `power` operator\n```"
-	got := stripAnsiTest(styleMarkdown(in))
+	got := stripAnsiTest(styleMarkdown(in, 0))
 	if !strings.Contains(got, "a ** b") {
 		t.Errorf("styleMarkdown mangled ** inside a code fence: %q", got)
 	}
@@ -62,7 +62,7 @@ func TestStyleMarkdown_NoInlineStylingInsideFences(t *testing.T) {
 }
 
 func TestStyleMarkdown_HeadersBold(t *testing.T) {
-	got := styleMarkdown("## Approach\nuse a set")
+	got := styleMarkdown("## Approach\nuse a set", 0)
 	if strings.Contains(stripAnsiTest(got), "##") {
 		t.Errorf("styleMarkdown left raw ## marker in %q", got)
 	}
@@ -73,21 +73,21 @@ func TestStyleMarkdown_HeadersBold(t *testing.T) {
 
 func TestStyleMarkdown_PlainTextPassesThroughUntouched(t *testing.T) {
 	in := "just a plain sentence with no markdown at all"
-	if got := styleMarkdown(in); got != in {
-		t.Errorf("styleMarkdown(%q) = %q, want unchanged", in, got)
+	if got := styleMarkdown(in, 0); got != in {
+		t.Errorf("styleMarkdown(%q, 0) = %q, want unchanged", in, got)
 	}
 }
 
 func TestStyleMarkdown_StrayAsteriskNotMangled(t *testing.T) {
 	in := "the result is 2 * 3 and 4 * 5"
-	if got := styleMarkdown(in); got != in {
-		t.Errorf("styleMarkdown(%q) = %q, want unchanged -- lone asterisks aren't bold markers", in, got)
+	if got := styleMarkdown(in, 0); got != in {
+		t.Errorf("styleMarkdown(%q, 0) = %q, want unchanged -- lone asterisks aren't bold markers", in, got)
 	}
 }
 
 func TestStyleMarkdown_KnownLanguageFenceGetsTokenColors(t *testing.T) {
 	in := "```python\ndef add(a, b):\n    return a + b\n```"
-	got := styleMarkdown(in)
+	got := styleMarkdown(in, 0)
 	if strings.Contains(got, "```") {
 		t.Errorf("fence markers leaked:\n%s", got)
 	}
@@ -106,7 +106,7 @@ func TestStyleMarkdown_KnownLanguageFenceGetsTokenColors(t *testing.T) {
 
 func TestStyleMarkdown_UnknownLanguageFenceFallsBackToFlatColor(t *testing.T) {
 	in := "```notareallang\nblorp blip 42\n```"
-	got := styleMarkdown(in)
+	got := styleMarkdown(in, 0)
 	if !strings.Contains(got, mdCodeColor) {
 		t.Errorf("unknown-language fence should keep the flat accent color:\n%q", got)
 	}
