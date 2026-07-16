@@ -24,9 +24,9 @@ import (
 // something broken.
 const minCardWidth = 16
 
-// cardsEnabledWidth converts styleMarkdown's content width into the
-// card's own width (inset from the prose flow), or 0 when the pane is
-// too narrow for cards at all.
+// cardWidthFor converts styleMarkdown's content width into the card's
+// own width (inset from the prose flow), or 0 when the pane is too
+// narrow for cards at all.
 func cardWidthFor(contentWidth int) int {
 	w := contentWidth - 2
 	if w < minCardWidth {

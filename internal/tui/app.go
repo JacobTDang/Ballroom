@@ -560,9 +560,13 @@ func (m appModel) loadPractice() appModel {
 
 // loadDaily jumps straight to the language/style picker for today's
 // DailyPick -- the whole point of the entry is skipping the
-// category-and-problem navigation. The pick's category context is
-// still set up (categoryProblems, cursor on the pick) so backing out
-// with q lands in that category's list rather than an empty picker.
+// category-and-problem navigation. The whole back-navigation context
+// is still set up (category problems with the cursor on the pick, the
+// category list, and the DSA topic list when the pick is in a grouped
+// category) so backing out with q walks the normal picker screens
+// instead of empty ones -- a real gap found in review: the first
+// version populated only categoryProblems, and Daily -> q -> q
+// rendered an empty topic list and an empty category list.
 func (m appModel) loadDaily() appModel {
 	statuses, err := catalogListFn(m.cfg)
 	if err != nil {
@@ -578,6 +582,12 @@ func (m appModel) loadDaily() appModel {
 	}
 	m.selectedProblem = pick
 	m.category = pick.Category
+	m.categories = distinctCategories(m.problems)
+	m.categoryCursor = 0
+	if catalog.IsGroupedCategory(pick.Category) {
+		m.dsaCategories = distinctDSASubcategories(m.problems)
+		m.dsaCategoryCursor = 0
+	}
 	m.categoryProblems = filterByCategory(m.problems, pick.Category)
 	m.problemCursor = 0
 	for i, p := range m.categoryProblems {
