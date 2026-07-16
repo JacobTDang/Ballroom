@@ -65,6 +65,11 @@ const CategorySystemDesign = "system-design"
 // KindDesign -- grouped as their own top-level category.
 const CategoryOODesign = "oo-design"
 
+// CategoryBehavioral holds the behavioral-interview questions
+// ("tell me about a time..."): design-kind sessions whose solution.md
+// is a STAR story, graded against a STAR rubric on submit.
+const CategoryBehavioral = "behavioral"
+
 const (
 	LanguageGo     = "go"
 	LanguageCpp    = "cpp"
@@ -96,6 +101,16 @@ const (
 	TutorModeDesignCoach = "design-coach"
 )
 
+// Behavioral-session tutor personas: the same design-kind machinery
+// (solution.md, rubric reveal, LLM grading) with STAR stories instead
+// of architectures -- the behavioral interviewer asks the question and
+// probes for specifics, the story coach builds the story one STAR
+// section at a time. Only valid on design-kind exercises.
+const (
+	TutorModeBehavioralInterviewer = "behavioral-interviewer"
+	TutorModeStoryCoach            = "story-coach"
+)
+
 var validCategories = map[string]bool{
 	CategoryDSA:            true,
 	CategoryDebug:          true,
@@ -124,6 +139,7 @@ var validCategories = map[string]bool{
 
 	CategorySystemDesign: true,
 	CategoryOODesign:     true,
+	CategoryBehavioral:   true,
 }
 
 // The language and tutor-mode vocabularies are kind-gated: a coding
@@ -148,8 +164,10 @@ var validTutorModes = map[string]bool{
 }
 
 var validDesignTutorModes = map[string]bool{
-	TutorModeInterviewer: true,
-	TutorModeDesignCoach: true,
+	TutorModeInterviewer:           true,
+	TutorModeDesignCoach:           true,
+	TutorModeBehavioralInterviewer: true,
+	TutorModeStoryCoach:            true,
 }
 
 // Exercise is a parsed, validated exercise.json.

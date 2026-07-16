@@ -309,7 +309,7 @@ func turnMessages(mode string, helpRequestCount int, line string) []*schema.Mess
 // clock is unknown (zero startedAt or limit: sandbox runs, tests),
 // matching this package's degrade-to-nothing contract.
 func interviewClockNote(mode string, startedAt time.Time, limitMin int, now time.Time) *schema.Message {
-	if mode != exercise.TutorModeInterviewer || startedAt.IsZero() || limitMin <= 0 {
+	if !interviewerModes[mode] || startedAt.IsZero() || limitMin <= 0 {
 		return nil
 	}
 	elapsed := int(now.Sub(startedAt).Minutes())
@@ -317,7 +317,7 @@ func interviewClockNote(mode string, startedAt time.Time, limitMin int, now time
 		elapsed = 0
 	}
 	if elapsed >= limitMin {
-		return schema.SystemMessage(fmt.Sprintf("(interview clock: %d of %d minutes elapsed -- time is up, have the candidate wrap up and summarize their design)", limitMin, limitMin))
+		return schema.SystemMessage(fmt.Sprintf("(interview clock: %d of %d minutes elapsed -- time is up, have the candidate wrap up and summarize their answer)", limitMin, limitMin))
 	}
 	return schema.SystemMessage(fmt.Sprintf("(interview clock: %d of %d minutes elapsed -- pace the interview accordingly)", elapsed, limitMin))
 }

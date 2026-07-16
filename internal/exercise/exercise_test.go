@@ -111,6 +111,14 @@ func TestLoad_DesignValidationMatrix(t *testing.T) {
 			"id": "url-shortener-01-interviewer", "language": "interviewer",
 			"tutor_mode": "interviewer", "time_limit_min": 45,
 		}, ""},
+		{"behavioral interviewer variant loads", map[string]any{
+			"id": "disagreement-01-interviewer", "category": "behavioral", "language": "interviewer",
+			"tutor_mode": "behavioral-interviewer", "time_limit_min": 30,
+		}, ""},
+		{"story coach variant loads", map[string]any{
+			"id": "disagreement-01-coach", "category": "behavioral", "language": "coach",
+			"tutor_mode": "story-coach", "time_limit_min": 45,
+		}, ""},
 		{"coding language rejected for design", map[string]any{"language": "python"},
 			"invalid language"},
 		{"coding tutor mode rejected for design", map[string]any{"tutor_mode": "hints-first"},
@@ -156,6 +164,11 @@ func TestLoad_DesignStylesRejectedForCodingKind(t *testing.T) {
 	path = writeExercise(t, dir, map[string]any{"tutor_mode": "interviewer"})
 	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "invalid tutor_mode") {
 		t.Errorf("Load err = %v, want invalid-tutor_mode error for a coding exercise with interviewer mode", err)
+	}
+
+	path = writeExercise(t, dir, map[string]any{"tutor_mode": "behavioral-interviewer"})
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "invalid tutor_mode") {
+		t.Errorf("Load err = %v, want invalid-tutor_mode error for a coding exercise with behavioral-interviewer mode", err)
 	}
 }
 
