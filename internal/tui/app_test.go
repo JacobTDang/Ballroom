@@ -744,6 +744,35 @@ func TestAppModel_Language_EnterSetsOutcomeAndQuits(t *testing.T) {
 	}
 }
 
+func TestFilterByCategory_ListsDueProblemsFirst(t *testing.T) {
+	dueProblem := catalog.ProblemStatus{
+		ProblemID: "search-kv-store-01", Title: "Design a key-value store", Category: exercise.CategorySystemDesign,
+		Variants: []catalog.ExerciseStatus{
+			{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageCoach}, Attempts: 1, LastResult: tracker.ResultPass},
+			{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageInterviewer}},
+		},
+	}
+	notDue := catalog.ProblemStatus{
+		ProblemID: "mint-01", Title: "Design Mint.com", Category: exercise.CategorySystemDesign,
+		Variants: []catalog.ExerciseStatus{
+			{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageCoach}},
+			{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageInterviewer}},
+		},
+	}
+	otherCategory := catalog.ProblemStatus{ProblemID: "two-pointers-01", Category: exercise.CategoryDSA}
+
+	// The due problem sits alphabetically after the non-due one -- the
+	// exact shape that used to hide the "mock due" marker below the fold.
+	got := filterByCategory([]catalog.ProblemStatus{notDue, dueProblem, otherCategory}, exercise.CategorySystemDesign)
+
+	if len(got) != 2 {
+		t.Fatalf("got %d problems, want 2 (the other-category problem filtered out)", len(got))
+	}
+	if got[0].ProblemID != "search-kv-store-01" || got[1].ProblemID != "mint-01" {
+		t.Errorf("order = [%s, %s], want the due problem floated first", got[0].ProblemID, got[1].ProblemID)
+	}
+}
+
 func TestAppModel_Problems_MockDueMarker(t *testing.T) {
 	m := appModel{stage: stageProblems, category: exercise.CategorySystemDesign, categoryProblems: []catalog.ProblemStatus{
 		{
