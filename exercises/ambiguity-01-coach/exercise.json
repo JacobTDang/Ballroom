@@ -1,0 +1,11 @@
+{
+  "id": "ambiguity-01-coach",
+  "problem_id": "ambiguity-01",
+  "title": "Making Progress Under Ambiguity",
+  "kind": "design",
+  "category": "behavioral",
+  "language": "coach",
+  "time_limit_min": 45,
+  "tutor_mode": "story-coach",
+  "repo_path": "./repo"
+}

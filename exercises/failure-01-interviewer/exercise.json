@@ -1,0 +1,11 @@
+{
+  "id": "failure-01-interviewer",
+  "problem_id": "failure-01",
+  "title": "A Failure or Missed Commitment",
+  "kind": "design",
+  "category": "behavioral",
+  "language": "interviewer",
+  "time_limit_min": 30,
+  "tutor_mode": "behavioral-interviewer",
+  "repo_path": "./repo"
+}
