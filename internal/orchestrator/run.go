@@ -136,6 +136,12 @@ func exerciseRunArgs(cfg config.Config, ex exercise.Exercise, controlDir, worksp
 		// Same always-forwarded contract -- empty means design grading
 		// uses the worker model (cmd/ballroom's graderModelFromEnv).
 		"-e", "TUTOR_GRADER_MODEL=" + cfg.GraderModel,
+		// Host env, not a persisted setting: TUTOR_STREAM=on|off is the
+		// per-invocation escape hatch over internal/tutor's
+		// streamingEnabled default (stream OpenRouter replies, never
+		// Ollama's). Forwarded because the tutor process that reads it
+		// runs inside the container; empty means "use the default".
+		"-e", "TUTOR_STREAM=" + os.Getenv("TUTOR_STREAM"),
 		cfg.DockerImage,
 	}
 }
@@ -155,6 +161,8 @@ func sandboxRunArgs(cfg config.Config) []string {
 		"-e", "TUTOR_MODEL=" + cfg.TutorModel,
 		"-e", "OPENROUTER_API_KEY=" + cfg.OpenRouterAPIKey,
 		"-e", "TUTOR_ORCHESTRATOR_MODEL=" + cfg.OrchestratorModel,
+		// See exerciseRunArgs -- same host-env streaming override.
+		"-e", "TUTOR_STREAM=" + os.Getenv("TUTOR_STREAM"),
 		cfg.DockerImage,
 	}
 }
