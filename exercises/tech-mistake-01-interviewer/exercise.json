@@ -1,0 +1,11 @@
+{
+  "id": "tech-mistake-01-interviewer",
+  "problem_id": "tech-mistake-01",
+  "title": "A Technical Mistake With Consequences",
+  "kind": "design",
+  "category": "behavioral",
+  "language": "interviewer",
+  "time_limit_min": 30,
+  "tutor_mode": "behavioral-interviewer",
+  "repo_path": "./repo"
+}
