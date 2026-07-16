@@ -72,6 +72,20 @@ const (
 	// user instead of examining them.
 	designCoachPrompt = "You are a system-design coach walking the user through a design question using the 4-step method: 1) use cases, constraints, and back-of-envelope estimates, 2) high-level design, 3) core components in depth, 4) scaling the design. Work one step at a time and have the user write each step into solution.md themselves -- read it with read_solution_file before commenting, and give concrete feedback on what they wrote rather than writing the design for them. Explain concepts when they're stuck, and only move to the next step when the current one is solid."
 
+	// behavioralInterviewerPrompt is interviewerPrompt's behavioral-track
+	// sibling, with one structural difference: a behavioral interviewer
+	// opens by asking the question (the problem statement holds it),
+	// where the design interviewer must NOT restate the prompt -- there,
+	// scoping the problem is the candidate's own drill. Same
+	// single-sentence-per-constraint style as the design personas (this
+	// file's measured longer-prompts-regress-tool-calling history).
+	behavioralInterviewerPrompt = "You are the interviewer in a behavioral mock interview -- never the candidate. The problem statement holds the question; the candidate writes their story in solution.md. Open by asking them the question conversationally, nothing more. Probe their answer like a real interviewer, one follow-up at a time: the concrete situation, what they themselves did (push when they hide behind 'we'), measurable results, and what they learned. Never supply the story, suggest what they should have done, or let vague generalities pass without a probe. After they submit, a grading rubric becomes available to you via read_grading_rubric -- when they ask for a grade, read their solution.md and the rubric, then grade per rubric dimension with specific evidence from their story."
+
+	// storyCoachPrompt is behavioralInterviewerPrompt's collaborative
+	// counterpart, walking STAR one section at a time the way
+	// designCoachPrompt walks the 4-step method.
+	storyCoachPrompt = "You are a behavioral-interview coach helping the user build a strong STAR answer to the question in the problem statement. Work one section at a time -- Situation, Task, Action, Result, then what they learned -- and have the user write each into solution.md themselves; read it with read_solution_file before commenting. Push for specifics: a real named situation with stakes, their own actions ('I', not 'we'), quantified results, and an honest reflection. Call out vagueness and generic filler directly, and only move to the next section when the current one is concrete."
+
 	// toolsInstruction is prepended to every mode's prompt — unlike
 	// tutor/chat.sh's HIGHLIGHT_INSTRUCTIONS, this doesn't need to
 	// describe a text directive syntax; each tool's own JSON-schema
@@ -208,11 +222,13 @@ var toolsInstructions = map[toolCallingStrategy]string{
 // one-line map edit -- same pattern internal/exercise's validTutorModes
 // already uses for mode validation.
 var modePrompts = map[string]string{
-	exercise.TutorModeSyntaxOnly:  syntaxOnlyPrompt,
-	exercise.TutorModeHintsFirst:  hintsFirstPrompt,
-	exercise.TutorModeFullAssist:  fullAssistPrompt,
-	exercise.TutorModeInterviewer: interviewerPrompt,
-	exercise.TutorModeDesignCoach: designCoachPrompt,
+	exercise.TutorModeSyntaxOnly:            syntaxOnlyPrompt,
+	exercise.TutorModeHintsFirst:            hintsFirstPrompt,
+	exercise.TutorModeFullAssist:            fullAssistPrompt,
+	exercise.TutorModeInterviewer:           interviewerPrompt,
+	exercise.TutorModeDesignCoach:           designCoachPrompt,
+	exercise.TutorModeBehavioralInterviewer: behavioralInterviewerPrompt,
+	exercise.TutorModeStoryCoach:            storyCoachPrompt,
 }
 
 // personaPromptForMode returns mode's persona/rule text alone (no tools
@@ -264,12 +280,22 @@ func prependToolsPrompt(strategy toolCallingStrategy, toolCatalogText string, me
 // wantsComprehensionCheck reports whether mode runs the one-time
 // "restate the problem, ask clarifying questions" check before the
 // first real answer. syntax-only never discusses the problem at all, so
-// there's nothing to check comprehension of; the interviewer must not
-// restate the problem either, because in a design mock that restating
-// (plus asking the clarifying questions) is exactly the candidate's own
-// first step -- the model doing it would do the drill for them.
+// there's nothing to check comprehension of; neither interviewer
+// persona restates the problem either -- in a design mock that
+// restating is the candidate's own first step, and in a behavioral
+// mock the opener is the interviewer asking the question, not
+// summarizing it back.
 func wantsComprehensionCheck(mode string) bool {
-	return mode != exercise.TutorModeSyntaxOnly && mode != exercise.TutorModeInterviewer
+	return mode != exercise.TutorModeSyntaxOnly && !interviewerModes[mode]
+}
+
+// interviewerModes are the personas that run a timed mock: they skip
+// the comprehension check (above) and receive the per-turn interview
+// clock note (interviewClockNote, tutor.go). The coach personas are
+// deliberately in neither set -- coaching is untimed.
+var interviewerModes = map[string]bool{
+	exercise.TutorModeInterviewer:           true,
+	exercise.TutorModeBehavioralInterviewer: true,
 }
 
 // SystemPromptForMode is systemPromptForMode, exported for

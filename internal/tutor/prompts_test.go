@@ -167,6 +167,10 @@ func TestWantsComprehensionCheck(t *testing.T) {
 		// the design method, and doing it for them defeats the drill.
 		{exercise.TutorModeInterviewer, false},
 		{exercise.TutorModeDesignCoach, true},
+		// The behavioral interviewer opens by asking the question --
+		// a restate-and-clarify check would talk over that opener.
+		{exercise.TutorModeBehavioralInterviewer, false},
+		{exercise.TutorModeStoryCoach, true},
 		{"unrecognized-mode", true},
 	}
 	for _, c := range cases {

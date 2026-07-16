@@ -311,11 +311,26 @@ func TestInterviewClockNote_TimeUpMessageWhenPastLimit(t *testing.T) {
 	}
 }
 
+func TestInterviewClockNote_BehavioralInterviewerIsTimedToo(t *testing.T) {
+	started := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+	now := started.Add(12 * time.Minute)
+	note := interviewClockNote(exercise.TutorModeBehavioralInterviewer, started, 30, now)
+	if note == nil {
+		t.Fatal("interviewClockNote = nil for a behavioral mock with a live clock")
+	}
+	if !strings.Contains(note.Content, "12 of 30 minutes") {
+		t.Errorf("note = %q, want elapsed-over-limit minutes", note.Content)
+	}
+}
+
 func TestInterviewClockNote_OtherModesAndUnknownClockGetNothing(t *testing.T) {
 	started := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
 	now := started.Add(10 * time.Minute)
 	if note := interviewClockNote(exercise.TutorModeDesignCoach, started, 90, now); note != nil {
 		t.Errorf("design-coach got a clock note %q, want nil -- coaching is untimed", note.Content)
+	}
+	if note := interviewClockNote(exercise.TutorModeStoryCoach, started, 30, now); note != nil {
+		t.Errorf("story-coach got a clock note %q, want nil -- coaching is untimed", note.Content)
 	}
 	if note := interviewClockNote(exercise.TutorModeHintsFirst, started, 25, now); note != nil {
 		t.Errorf("hints-first got a clock note %q, want nil", note.Content)
