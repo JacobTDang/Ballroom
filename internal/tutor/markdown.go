@@ -38,29 +38,38 @@ var (
 // reset so it can't clobber styling an enclosing construct set up;
 // color spans close with 39 (default foreground) for the same reason.
 const (
-	mdBoldOn  = "\x1b[1m"
-	mdBoldOff = "\x1b[22m"
-	// Inline code and fenced code share the pane's teal accent (the
-	// same #2FA6A6 as the input box rule), so "code" reads as one
-	// consistent signal everywhere it appears.
-	mdCodeColor  = "\x1b[38;2;47;166;166m"
+	mdBoldOn     = "\x1b[1m"
+	mdBoldOff    = "\x1b[22m"
 	mdColorReset = "\x1b[39m"
+)
+
+var (
+	// Inline code and fenced code share the pane's teal accent (the
+	// same accent as the input prompt glyph), so "code" reads as one
+	// consistent signal everywhere it appears.
+	mdCodeColor = ansiFg(paneTeal)
 	// Fence labels ("python") render dim -- metadata, not content.
-	mdDimColor = "\x1b[38;2;150;145;135m"
+	mdDimColor = ansiFg(paneDimText)
 
 	// userEchoPrefix marks the user's own submitted lines in the
-	// transcript (display-only; history keeps the raw text). Dim, so the
-	// eye separates who said what without the prefix competing with the
-	// message itself.
-	userEchoPrefix = mdDimColor + "you › " + mdColorReset
+	// transcript (display-only; history keeps the raw text): a dim
+	// "you" so the speaker label never competes with the message, with
+	// the › glyph in the palette's pink -- the user's own accent color,
+	// distinct from the tutor's teal.
+	userEchoPrefix = mdDimColor + "you " + mdColorReset + mdBoldOn + ansiFg(panePink) + "› " + mdColorReset + mdBoldOff
 )
 
 // styleMarkdown renders the tutor's markdown constructs as terminal
-// styling: **bold**, `inline code`, #-headers, and ``` fenced blocks
-// (code lines in the accent color, fence markers replaced by a dim
-// language label / closing rule). Inside a fence nothing is
-// transformed -- code legitimately contains * and ` characters.
-func styleMarkdown(content string) string {
+// styling: **bold**, `inline code`, #-headers, and ``` fenced blocks.
+// Inside a fence nothing is transformed -- code legitimately contains
+// * and ` characters.
+//
+// width is the render-time pane width fenced blocks may size
+// themselves to -- threaded through since the display pipeline now
+// re-renders every block per frame at the viewport's current width
+// (see displayBlock, model.go). Prose ignores it entirely;
+// refreshViewport word-wraps prose after the fact, same as always.
+func styleMarkdown(content string, width int) string {
 	lines := strings.Split(content, "\n")
 	out := make([]string, 0, len(lines))
 	inFence := false

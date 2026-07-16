@@ -231,11 +231,11 @@ func TestTutorModel_PageUpScrollsViewportNotTextarea(t *testing.T) {
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
 	m = newM.(tutorModel)
 
-	lines := make([]string, 0, 40)
+	blocks := make([]displayBlock, 0, 40)
 	for i := 0; i < 40; i++ {
-		lines = append(lines, fmt.Sprintf("line %d", i))
+		blocks = append(blocks, displayBlock{kind: blockNote, raw: fmt.Sprintf("line %d", i)})
 	}
-	m.displayLines = lines
+	m.displayBlocks = blocks
 	m.refreshViewport()
 	if !m.viewport.AtBottom() {
 		t.Fatal("setup: expected viewport to start at the bottom (refreshViewport's GotoBottom)")
@@ -258,11 +258,11 @@ func TestTutorModel_PageDownScrollsViewportBackToBottom(t *testing.T) {
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
 	m = newM.(tutorModel)
 
-	lines := make([]string, 0, 40)
+	blocks := make([]displayBlock, 0, 40)
 	for i := 0; i < 40; i++ {
-		lines = append(lines, fmt.Sprintf("line %d", i))
+		blocks = append(blocks, displayBlock{kind: blockNote, raw: fmt.Sprintf("line %d", i)})
 	}
-	m.displayLines = lines
+	m.displayBlocks = blocks
 	m.refreshViewport()
 
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
@@ -283,11 +283,11 @@ func TestTutorModel_MouseWheelScrollsTheViewport(t *testing.T) {
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
 	m = newM.(tutorModel)
 
-	lines := make([]string, 0, 40)
+	blocks := make([]displayBlock, 0, 40)
 	for i := 0; i < 40; i++ {
-		lines = append(lines, fmt.Sprintf("line %d", i))
+		blocks = append(blocks, displayBlock{kind: blockNote, raw: fmt.Sprintf("line %d", i)})
 	}
-	m.displayLines = lines
+	m.displayBlocks = blocks
 	m.refreshViewport()
 
 	newM, _ = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
@@ -404,7 +404,7 @@ func submitAndRun(t *testing.T, m tutorModel, line string) tutorModel {
 	return m
 }
 
-func TestNewTutorModel_NoRoutingBannerAndHistorySeededWithSystemPrompt(t *testing.T) {
+func TestNewTutorModel_NoRoutingHeaderAndHistorySeededWithSystemPrompt(t *testing.T) {
 	mock := newSequencedOllama(t, "reply")
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
@@ -416,12 +416,16 @@ func TestNewTutorModel_NoRoutingBannerAndHistorySeededWithSystemPrompt(t *testin
 	if len(m.history) != 1 || m.history[0].Role != schema.System {
 		t.Fatalf("history = %+v, want exactly one System message seeded", m.history)
 	}
-	if !strings.Contains(m.banner, cfg.Model) || strings.Contains(m.banner, "orchestrator=") {
-		t.Errorf("banner = %q, want it to name the model and not mention routing", m.banner)
+	status := m.headerStatusText()
+	if !strings.Contains(status, cfg.Model) || !strings.Contains(status, cfg.Mode) || strings.Contains(status, "+") {
+		t.Errorf("header status = %q, want it to name the model and mode and not mention a second model", status)
+	}
+	if header := m.headerView(); strings.Contains(header, "orchestrator") {
+		t.Errorf("header = %q, want no routing mention without an orchestrator", header)
 	}
 }
 
-func TestNewTutorModel_RoutingEnabledBannerNamesBothModels(t *testing.T) {
+func TestNewTutorModel_RoutingEnabledHeaderNamesBothModels(t *testing.T) {
 	mock := newSequencedOllama(t, "reply")
 	cfg := testConfig(mock.URL)
 	cfg.Model = "worker-model"
@@ -431,8 +435,72 @@ func TestNewTutorModel_RoutingEnabledBannerNamesBothModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
-	if !strings.Contains(m.banner, "worker-model") || !strings.Contains(m.banner, "orchestrator-model") {
-		t.Errorf("banner = %q, want it to name both models", m.banner)
+	status := m.headerStatusText()
+	if !strings.Contains(status, "worker-model") || !strings.Contains(status, "orchestrator-model") {
+		t.Errorf("header status = %q, want it to name both models", status)
+	}
+}
+
+// TestTutorModel_HeaderPinnedAboveViewportWithEndpointAndExitHint pins
+// the header's contract: it renders at the top of every frame (not as
+// a transcript entry that scrolls away), shows the endpoint, and keeps
+// the exit hint the old banner used to carry.
+func TestTutorModel_HeaderPinnedAboveViewportWithEndpointAndExitHint(t *testing.T) {
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = newM.(tutorModel)
+
+	view := m.View()
+	topLine := strings.SplitN(view, "\n", 2)[0]
+	plainTop := stripAnsiTest(topLine)
+	if !strings.Contains(plainTop, "tutor") || !strings.Contains(plainTop, cfg.Model) {
+		t.Errorf("View's first line = %q, want the header status line pinned there", plainTop)
+	}
+	if !strings.Contains(plainTop, mock.URL) {
+		t.Errorf("View's first line = %q, want the endpoint (%s) shown on the right", plainTop, mock.URL)
+	}
+	if !strings.Contains(plainTop, "Ctrl-D") {
+		t.Errorf("View's first line = %q, want the Ctrl-D exit hint kept from the old banner", plainTop)
+	}
+	if len(m.displayBlocks) != 0 {
+		t.Errorf("displayBlocks = %+v, want the transcript to start empty -- no banner block", m.displayBlocks)
+	}
+}
+
+// TestTutorModel_HeaderTooNarrowDropsEndpointNotTheStatus: at widths
+// where both halves can't fit, the endpoint side gives way and the
+// header never wraps to a second row (which would corrupt the fixed
+// layout arithmetic).
+func TestTutorModel_HeaderTooNarrowDropsEndpointNotTheStatus(t *testing.T) {
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 24, Height: 24})
+	m = newM.(tutorModel)
+
+	header := m.headerView()
+	lines := strings.Split(header, "\n")
+	if len(lines) != headerHeight {
+		t.Fatalf("headerView has %d lines, want exactly %d", len(lines), headerHeight)
+	}
+	for _, line := range lines {
+		if w := lipgloss.Width(line); w > 24 {
+			t.Errorf("header line %q is %d cells wide, want it within the 24-wide pane", stripAnsiTest(line), w)
+		}
+	}
+	if !strings.Contains(stripAnsiTest(lines[0]), "tutor") {
+		t.Errorf("header first line = %q, want the status half kept", stripAnsiTest(lines[0]))
 	}
 }
 
@@ -1091,13 +1159,25 @@ func TestTutorModel_SubmitEchoCarriesStyledYouPrefix(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := newM.(tutorModel)
 
-	display := strings.Join(got.displayLines, "\n")
+	display := renderedBlocks(got)
 	if !strings.Contains(ansi.Strip(display), "you › what about sharding?") {
 		t.Errorf("echo missing the you › prefix:\n%s", ansi.Strip(display))
 	}
 	if !strings.Contains(display, "\x1b[") {
 		t.Error("the you › prefix should carry styling escapes")
 	}
+}
+
+// renderedBlocks renders m's transcript blocks the same way
+// refreshViewport does, for tests asserting display styling without
+// caring about viewport frame details.
+func renderedBlocks(m tutorModel) string {
+	w := m.viewport.Width - m.viewport.Style.GetHorizontalFrameSize()
+	rendered := make([]string, 0, len(m.displayBlocks))
+	for _, b := range m.displayBlocks {
+		rendered = append(rendered, renderBlock(b, w))
+	}
+	return strings.Join(rendered, "\n\n")
 }
 
 func TestTutorModel_TurnCompleteStylesReplyForDisplayButKeepsHistoryRaw(t *testing.T) {
@@ -1108,12 +1188,12 @@ func TestTutorModel_TurnCompleteStylesReplyForDisplayButKeepsHistoryRaw(t *testi
 	newM, _ := m.Update(turnCompleteMsg{reply: schema.AssistantMessage(raw, nil), userMessage: "how?"})
 	got := newM.(tutorModel)
 
-	display := strings.Join(got.displayLines, "\n")
+	display := renderedBlocks(got)
 	if strings.Contains(display, "**") || strings.Contains(display, "`") {
-		t.Errorf("displayLines still carry raw markdown markers:\n%s", display)
+		t.Errorf("rendered transcript still carries raw markdown markers:\n%s", display)
 	}
 	if !strings.Contains(display, "\x1b[1m") {
-		t.Error("displayLines have no bold escape -- reply wasn't styled for display")
+		t.Error("rendered transcript has no bold escape -- reply wasn't styled for display")
 	}
 	last := got.history[len(got.history)-1]
 	if last.Content != raw {
@@ -1222,7 +1302,7 @@ func TestTutorModel_ToolNameLeftBehindInHistoryAfterTurnCompletes(t *testing.T) 
 	}
 	newM2, _ := m2.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m2 = newM2.(tutorModel)
-	m2.displayLines = got.displayLines
+	m2.displayBlocks = got.displayBlocks
 	m2.refreshViewport()
 
 	got2 := submitAndRun(t, m2, "a follow-up question")
@@ -1330,8 +1410,8 @@ func TestTutorModel_OpenRouterModelShowsOpenRouterInBannerAndErrors(t *testing.T
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
-	if !strings.Contains(m.banner, "connected to OpenRouter") {
-		t.Errorf("banner = %q, want it to say \"connected to OpenRouter\"", m.banner)
+	if endpoint := m.headerEndpointText(); !strings.Contains(endpoint, "OpenRouter") {
+		t.Errorf("header endpoint = %q, want it to say \"OpenRouter\"", endpoint)
 	}
 
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
