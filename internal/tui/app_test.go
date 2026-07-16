@@ -704,6 +704,26 @@ func TestAppModel_DailyJumpsStraightToTheLanguagePicker(t *testing.T) {
 	if m.category != "two-pointers" || len(m.categoryProblems) != 1 {
 		t.Errorf("category context = (%q, %d problems), want the pick's category set up for backing out", m.category, len(m.categoryProblems))
 	}
+
+	// Backing out must walk populated picker screens, not empty ones --
+	// a real gap found in review: the first version populated only
+	// categoryProblems, so q -> q rendered an empty topic list and an
+	// empty category list.
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	m = newM.(appModel)
+	if m.stage != stageProblems {
+		t.Fatalf("stage after q = %v, want stageProblems", m.stage)
+	}
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	m = newM.(appModel)
+	if m.stage != stageDSACategories || len(m.dsaCategories) == 0 {
+		t.Fatalf("stage after q q = %v with %d topics, want a populated DSA topic list for a grouped-category pick", m.stage, len(m.dsaCategories))
+	}
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	m = newM.(appModel)
+	if m.stage != stageCategories || len(m.categories) == 0 {
+		t.Fatalf("stage after q q q = %v with %d categories, want the populated category list", m.stage, len(m.categories))
+	}
 }
 
 func TestAppModel_Problems_EnterAdvancesToLanguage(t *testing.T) {
