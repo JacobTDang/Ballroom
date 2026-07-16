@@ -14,6 +14,9 @@ var (
 	passStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#2FA6A6"))
 	failStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#F03C3C"))
 	sparkleStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8A93C")).Bold(true)
+	// dueMarkerStyle colors the picker's "· mock due" / "· review due"
+	// nudges -- gold, but not sparkleStyle's bold: a nudge, not an alert.
+	dueMarkerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8A93C"))
 )
 
 func truncateTitle(s string, n int) string {

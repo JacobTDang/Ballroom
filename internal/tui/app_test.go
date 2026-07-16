@@ -797,6 +797,32 @@ func TestAppModel_Problems_MockDueMarker(t *testing.T) {
 	}
 }
 
+func TestAppModel_Problems_ReviewDueMarker(t *testing.T) {
+	m := appModel{stage: stageProblems, category: exercise.CategoryDSA, categoryProblems: []catalog.ProblemStatus{
+		{
+			ProblemID: "two-pointers-01", Title: "Two Sum II", Category: exercise.CategoryDSA,
+			Attempts: 1,
+			Variants: []catalog.ExerciseStatus{
+				// Failed long ago -- review-due regardless of when the test runs.
+				{Exercise: exercise.Exercise{Language: "go"}, Attempts: 1, LastResult: tracker.ResultFail, LastAttemptDate: "2020-01-01"},
+			},
+		},
+		{
+			ProblemID: "off-by-one-01", Title: "Off by one", Category: exercise.CategoryDSA,
+			Variants: []catalog.ExerciseStatus{
+				{Exercise: exercise.Exercise{Language: "go"}},
+			},
+		},
+	}}
+	view := m.View()
+	if strings.Count(view, "review due") != 1 {
+		t.Errorf("want exactly one review-due marker (stale fail yes, untouched problem no), view:\n%s", view)
+	}
+	if strings.Contains(view, "mock due") {
+		t.Errorf("a review-due coding problem must not claim to be mock due, view:\n%s", view)
+	}
+}
+
 func TestAppModel_Language_DesignProblemSaysSessionStyle(t *testing.T) {
 	// A design problem's "language" variants are session styles
 	// (coach/interviewer) -- calling them a language on screen would be
