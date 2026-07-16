@@ -1,0 +1,11 @@
+{
+  "id": "ambiguity-01-interviewer",
+  "problem_id": "ambiguity-01",
+  "title": "Making Progress Under Ambiguity",
+  "kind": "design",
+  "category": "behavioral",
+  "language": "interviewer",
+  "time_limit_min": 30,
+  "tutor_mode": "behavioral-interviewer",
+  "repo_path": "./repo"
+}
