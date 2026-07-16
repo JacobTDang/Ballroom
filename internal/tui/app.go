@@ -694,6 +694,12 @@ func categoryCounts(problems []catalog.ProblemStatus, category string) (solved, 
 	return solved, total
 }
 
+// filterByCategory builds the picker's problem list for one category:
+// the category's problems in List's order, except problems that are
+// due (catalog.MockDue) float to the top -- the "mock due" marker is
+// useless on a problem sitting below the fold of an alphabetical list.
+// Every categoryProblems assignment goes through here, so the ordering
+// can't diverge between the category, DSA-subcategory, and resume paths.
 func filterByCategory(problems []catalog.ProblemStatus, category string) []catalog.ProblemStatus {
 	var out []catalog.ProblemStatus
 	for _, p := range problems {
@@ -701,7 +707,7 @@ func filterByCategory(problems []catalog.ProblemStatus, category string) []catal
 			out = append(out, p)
 		}
 	}
-	return out
+	return catalog.SortDueFirst(out, catalog.MockDue)
 }
 
 // --- stageCategories ---
