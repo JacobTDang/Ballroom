@@ -32,6 +32,22 @@ BOTTOM_LINES=$((REAL_ROWS / 4))
 
 tmux -f "$TMUX_CONF" new-session -d -s "$SESSION" -n MAIN -c "$WORKDIR" -x "$REAL_COLS" -y "$REAL_ROWS"
 
+# Visible countdown clock: timed exercise sessions carry the same two
+# env vars the tutor's own interview-clock note reads (forwarded by the
+# host's orchestrator), so the status bar can show the user the clock
+# the model already sees. Appended to status-right at the far-right
+# edge; refreshes on the conf's status-interval. Sandbox sessions set
+# neither var and keep the plain status bar. The numeric guard matters
+# under set -e: a bare `[ ... -gt 0 ]` on a non-numeric value would
+# abort the whole entrypoint.
+if [ -n "${PRACTICE_STARTED_AT:-}" ] \
+  && [[ "${PRACTICE_TIME_LIMIT_MIN:-}" =~ ^[0-9]+$ ]] \
+  && [ "$PRACTICE_TIME_LIMIT_MIN" -gt 0 ] \
+  && START_EPOCH=$(date -d "$PRACTICE_STARTED_AT" +%s 2>/dev/null); then
+  DEADLINE=$((START_EPOCH + PRACTICE_TIME_LIMIT_MIN * 60))
+  tmux set -g status-right "$(tmux show -gv status-right)#[fg=#E0468C]·#[default]  #(/etc/practice/clock.sh $DEADLINE) "
+fi
+
 # pane 0 (top, full width): editor. Open directly into the solution file
 # to implement, not the netrw directory listing — glob rather than
 # hardcode an extension, since it varies by language (.go/.py/.cpp/.hpp).
