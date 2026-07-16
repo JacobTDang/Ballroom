@@ -177,7 +177,7 @@ func TestAppModel_EnterOnPractice_CatalogErrorStaysOnMainAndSetsErr(t *testing.T
 // --- stageMain -> outcome (Sandbox) ---
 
 func TestAppModel_EnterOnSandbox_SetsOutcomeAndQuits(t *testing.T) {
-	m := appModel{cursor: 1}
+	m := appModel{cursor: int(menuSandbox)}
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected enter on Sandbox to return a quit command — it hands the terminal to docker")
@@ -195,7 +195,7 @@ func TestAppModel_EnterOnStats_LoadsStatsInline(t *testing.T) {
 	recent := []tracker.Attempt{{ExerciseID: "two-pointers-01", Result: tracker.ResultPass}}
 	defer fakeRecentAttempts(recent, nil)()
 
-	m := appModel{cursor: 2}
+	m := appModel{cursor: int(menuStats)}
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil {
 		t.Error("expected no external command for Stats")
@@ -258,7 +258,7 @@ func TestAppModel_EnterOnSettings_GoesToStageSettingsNoAsyncLoadYet(t *testing.T
 	// straight into a provider choice or the Ollama picker — no async
 	// load should happen until Local is chosen several levels in (see
 	// TestAppModel_ProviderChoice_SelectingLocal...).
-	m := appModel{cursor: 3}
+	m := appModel{cursor: int(menuSettings)}
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil {
 		t.Error("expected no command yet — the role choice itself needs no data")
@@ -671,6 +671,39 @@ func problemsFixture(t *testing.T) appModel {
 	m := dsaCategoriesFixture(t)
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	return newM.(appModel)
+}
+
+// TestAppModel_DailyJumpsStraightToTheLanguagePicker drives the new
+// main-menu entry end to end: "2" jumps the cursor to Daily, enter
+// picks today's problem deterministically and lands on stageLanguage
+// with the pick's category context set up for backing out.
+func TestAppModel_DailyJumpsStraightToTheLanguagePicker(t *testing.T) {
+	restore := fakeCatalogList([]catalog.ExerciseStatus{
+		{Exercise: exercise.Exercise{ID: "two-pointers-01-go", ProblemID: "two-pointers-01", Title: "Two Sum II", Category: "two-pointers", Language: "go"}},
+	}, nil)
+	defer restore()
+
+	m := newAppModel(config.Config{}, appResume{})
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	m = newM.(appModel)
+	if menuChoice(m.cursor) != menuDaily {
+		t.Fatalf("cursor = %d after pressing 2, want the Daily entry", m.cursor)
+	}
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(appModel)
+
+	if m.err != nil {
+		t.Fatalf("daily load error: %v", m.err)
+	}
+	if m.stage != stageLanguage {
+		t.Fatalf("stage = %v, want stageLanguage -- Daily skips category/problem navigation", m.stage)
+	}
+	if m.selectedProblem.ProblemID != "two-pointers-01" {
+		t.Errorf("selectedProblem = %q, want the only available problem", m.selectedProblem.ProblemID)
+	}
+	if m.category != "two-pointers" || len(m.categoryProblems) != 1 {
+		t.Errorf("category context = (%q, %d problems), want the pick's category set up for backing out", m.category, len(m.categoryProblems))
+	}
 }
 
 func TestAppModel_Problems_EnterAdvancesToLanguage(t *testing.T) {
