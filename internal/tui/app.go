@@ -243,15 +243,17 @@ type menuChoice int
 
 const (
 	menuPractice menuChoice = iota
+	menuDaily
 	menuSandbox
 	menuStats
 	menuSettings
 )
 
-var menuLabels = []string{"Practice", "Sandbox", "Stats", "Settings"}
+var menuLabels = []string{"Practice", "Daily", "Sandbox", "Stats", "Settings"}
 
 var menuDescriptions = []string{
 	"Pick a category and work through exercises",
+	"Today's pick — due or unsolved, same one all day",
 	"Free practice, no grading, persists across sessions",
 	"See your progress across categories",
 	"Choose your worker and orchestrator models — local (Ollama) or API (OpenRouter)",
@@ -508,7 +510,7 @@ func (m appModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor < len(menuLabels)-1 {
 			m.cursor++
 		}
-	case "1", "2", "3", "4":
+	case "1", "2", "3", "4", "5":
 		n, _ := strconv.Atoi(msg.String())
 		m.cursor = n - 1
 	case "enter":
@@ -524,6 +526,8 @@ func (m appModel) chooseMain() (tea.Model, tea.Cmd) {
 	switch menuChoice(m.cursor) {
 	case menuPractice:
 		return m.loadPractice(), nil
+	case menuDaily:
+		return m.loadDaily(), nil
 	case menuSandbox:
 		m.outcome = outcomeRunSandbox
 		return m, tea.Quit
@@ -551,6 +555,39 @@ func (m appModel) loadPractice() appModel {
 	m.categories = distinctCategories(m.problems)
 	m.categoryCursor = 0
 	m.stage = stageCategories
+	return m
+}
+
+// loadDaily jumps straight to the language/style picker for today's
+// DailyPick -- the whole point of the entry is skipping the
+// category-and-problem navigation. The pick's category context is
+// still set up (categoryProblems, cursor on the pick) so backing out
+// with q lands in that category's list rather than an empty picker.
+func (m appModel) loadDaily() appModel {
+	statuses, err := catalogListFn(m.cfg)
+	if err != nil {
+		m.err = err
+		return m
+	}
+	m.err = nil
+	m.problems = catalog.GroupByProblem(statuses)
+	pick, ok := catalog.DailyPick(m.problems, time.Now())
+	if !ok {
+		m.err = fmt.Errorf("tui: no problems available for a daily pick")
+		return m
+	}
+	m.selectedProblem = pick
+	m.category = pick.Category
+	m.categoryProblems = filterByCategory(m.problems, pick.Category)
+	m.problemCursor = 0
+	for i, p := range m.categoryProblems {
+		if p.ProblemID == pick.ProblemID {
+			m.problemCursor = i
+			break
+		}
+	}
+	m.langCursor = 0
+	m.stage = stageLanguage
 	return m
 }
 
@@ -1289,7 +1326,7 @@ func (m appModel) renderMain() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(menuSubtitleStyle.Render("↑/↓ or j/k move · 1-4 jump · enter select · q quit"))
+	b.WriteString(menuSubtitleStyle.Render("↑/↓ or j/k move · 1-5 jump · enter select · q quit"))
 	return b.String()
 }
 
