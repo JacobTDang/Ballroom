@@ -221,6 +221,8 @@ func submitCmd() error {
 
 	if cfg.Kind == exercise.KindDesign {
 		cfg.Grade = designGraderFromEnv(cfg.WorkspaceDir)
+	} else {
+		cfg.CheckComplexity = complexityCheckerFromEnv(cfg.WorkspaceDir)
 	}
 
 	attempt, err := session.Submit(cfg, os.Stdin, os.Stdout)
@@ -269,6 +271,29 @@ func designGraderFromEnv(workDir string) func() (string, string, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		return tutor.GradeDesign(ctx, cfg)
+	}
+}
+
+// complexityCheckerFromEnv wires session.Config.CheckComplexity to
+// tutor.CheckComplexity for coding submits -- same shape and same
+// grader-model chain as designGraderFromEnv: a verdict is a judgment
+// call, so it runs on the dedicated grader when one is configured.
+func complexityCheckerFromEnv(workDir string) func(string) (string, error) {
+	ollamaHost := os.Getenv("OLLAMA_HOST")
+	if ollamaHost == "" {
+		ollamaHost = "http://host.docker.internal:11434"
+	}
+	cfg := tutor.Config{
+		OllamaHost:      ollamaHost,
+		Model:           graderModelFromEnv(),
+		APIKey:          os.Getenv("OPENROUTER_API_KEY"),
+		WorkDir:         workDir,
+		MaxContextBytes: 8000,
+	}
+	return func(claim string) (string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		return tutor.CheckComplexity(ctx, cfg, claim)
 	}
 }
 
