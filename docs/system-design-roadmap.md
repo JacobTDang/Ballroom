@@ -142,3 +142,12 @@ Goal: consistency under pressure and depth where you're weak.
   invalidation twice in a row means a caching deep-dive study block.
 - Read real-world architectures from the primer's company-blog list and map
   each back to the building blocks.
+
+## Sibling roadmaps
+
+The boxes you draw here have build-them-yourself counterparts:
+`docs/implementation-roadmap.md` (bloom filters, consistent hashing,
+rate limiters, caches — the components inside the boxes) and
+`docs/concurrency-roadmap.md` (what breaks inside those components
+when threads arrive). Interleaving them turns "I'd put a cache here"
+into "I've built that cache."
