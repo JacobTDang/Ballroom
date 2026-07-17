@@ -1,0 +1,11 @@
+{
+  "id": "graceful-shutdown-01-cpp",
+  "problem_id": "graceful-shutdown-01",
+  "title": "Graceful Shutdown",
+  "category": "concurrency",
+  "language": "cpp",
+  "time_limit_min": 40,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "clang++ -std=c++17 -fsanitize=thread -g -O0 -o /tmp/t hidden_test.cpp && /tmp/t"
+}

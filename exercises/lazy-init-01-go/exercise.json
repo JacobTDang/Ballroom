@@ -1,0 +1,11 @@
+{
+  "id": "lazy-init-01-go",
+  "problem_id": "lazy-init-01",
+  "title": "Once-Only Lazy Initialization",
+  "category": "concurrency",
+  "language": "go",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test -race ./..."
+}

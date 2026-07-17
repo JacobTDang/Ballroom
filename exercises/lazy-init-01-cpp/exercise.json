@@ -1,0 +1,11 @@
+{
+  "id": "lazy-init-01-cpp",
+  "problem_id": "lazy-init-01",
+  "title": "Once-Only Lazy Initialization",
+  "category": "concurrency",
+  "language": "cpp",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "clang++ -std=c++17 -fsanitize=thread -g -O0 -o /tmp/t hidden_test.cpp && /tmp/t"
+}
