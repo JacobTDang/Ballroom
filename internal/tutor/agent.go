@@ -129,3 +129,12 @@ func newAgent(ctx context.Context, cm model.ToolCallingChatModel, tools []tool.B
 	}
 	return a, nil
 }
+
+// NewChatModel builds a chat model for modelName exactly the way a
+// real session does -- Ollama by default, OpenRouter for
+// OpenRouterModelPrefix-prefixed names. Exported for cmd/tutor-eval,
+// which used to construct a raw Ollama client directly and therefore
+// couldn't evaluate the OpenRouter models real sessions actually run.
+func NewChatModel(ctx context.Context, modelName, ollamaHost, apiKey string) (model.ToolCallingChatModel, error) {
+	return newChatModel(ctx, modelName, ollamaHost, apiKey)
+}
