@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 )
@@ -16,7 +17,11 @@ import (
 // reusable source of truth for the exercise, and anything written into a
 // running session (edits, or hidden tests revealed on submit) must land
 // somewhere disposable instead of leaking back into it.
-func PrepareWorkspace(repoPath string) (workspaceDir string, cleanup func(), err error) {
+//
+// videoURL, when non-empty, is appended to the rendered problem.txt as
+// a dim one-line footer -- the user's chosen placement ("problem footer
+// + submit"): always visible, spoiler-control left to them.
+func PrepareWorkspace(repoPath, videoURL string) (workspaceDir string, cleanup func(), err error) {
 	dir, err := os.MkdirTemp("", "practice-workspace-")
 	if err != nil {
 		return "", nil, fmt.Errorf("orchestrator: create workspace dir: %w", err)
@@ -38,6 +43,9 @@ func PrepareWorkspace(repoPath string) (workspaceDir string, cleanup func(), err
 	md, err := os.ReadFile(filepath.Join(dir, "problem.md"))
 	if err == nil {
 		text := exercise.RenderProblemText(string(md))
+		if videoURL != "" {
+			text = strings.TrimRight(text, "\n") + "\n\n─────\nsolution video (spoilers!): " + videoURL + "\n"
+		}
 		if err := os.WriteFile(filepath.Join(dir, "problem.txt"), []byte(text), 0o644); err != nil {
 			cleanup()
 			return "", nil, fmt.Errorf("orchestrator: write problem.txt: %w", err)
