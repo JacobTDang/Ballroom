@@ -108,6 +108,9 @@ func RunSandbox(cfg config.Config) error {
 func exerciseRunArgs(cfg config.Config, ex exercise.Exercise, controlDir, workspaceDir string, startedAt time.Time) []string {
 	return []string{
 		"run", "-it", "--rm",
+		// Labeled so host-side tooling (ballroom voice) can find the
+		// running session container to docker-exec into.
+		"--label", sessionContainerLabel + "=1",
 		"-v", workspaceDir + ":/workspace",
 		"-v", cfg.DataDir + ":/data",
 		"-v", controlDir + ":/control",
@@ -155,6 +158,9 @@ func exerciseRunArgs(cfg config.Config, ex exercise.Exercise, controlDir, worksp
 func sandboxRunArgs(cfg config.Config) []string {
 	return []string{
 		"run", "-it", "--rm",
+		// Same session label as exerciseRunArgs -- ballroom voice works
+		// in sandbox sessions too.
+		"--label", sessionContainerLabel + "=1",
 		"-v", sandboxVolume + ":/workspace",
 		// Sandbox sessions set none of the exercise PRACTICE_* vars, so
 		// they carry their own marker -- isSessionContext
@@ -169,3 +175,13 @@ func sandboxRunArgs(cfg config.Config) []string {
 		cfg.DockerImage,
 	}
 }
+
+// SessionContainerLabel marks running practice containers so host-side
+// tooling (ballroom voice) can discover them via
+// `docker ps --filter label=...` -- containers are otherwise anonymous
+// (--rm, no --name).
+const sessionContainerLabel = "com.ballroom.session"
+
+// SessionContainerFilter is the docker ps filter that finds running
+// practice session containers.
+const SessionContainerFilter = "label=" + sessionContainerLabel
