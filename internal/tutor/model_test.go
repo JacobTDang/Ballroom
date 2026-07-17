@@ -1691,3 +1691,29 @@ func TestTutorModel_RetainsConversationHistoryAcrossTurns(t *testing.T) {
 		t.Errorf("second request messages[4] (user2) = %q, want %q", second[4].Content, "second line")
 	}
 }
+
+// TestHeaderStatusText_HintsFirstShowsTheHintBudget: hints-first's
+// whole contract revolves around "first ask vs repeat ask", but the
+// count lived only in model state the user couldn't see. The header is
+// the always-visible place for it.
+func TestHeaderStatusText_HintsFirstShowsTheHintBudget(t *testing.T) {
+	m := newTutorLayoutOnly()
+	m.cfg = Config{Model: "test-model", Mode: exercise.TutorModeHintsFirst}
+
+	if got := m.headerStatusText(); !strings.Contains(got, "hints: 0") {
+		t.Errorf("headerStatusText() = %q, want the zero hint count shown before any request", got)
+	}
+	m.helpRequestCount = 3
+	if got := m.headerStatusText(); !strings.Contains(got, "hints: 3") {
+		t.Errorf("headerStatusText() = %q, want the live hint count", got)
+	}
+}
+
+func TestHeaderStatusText_OtherModesShowNoHintCount(t *testing.T) {
+	m := newTutorLayoutOnly()
+	m.cfg = Config{Model: "test-model", Mode: exercise.TutorModeFullAssist}
+	m.helpRequestCount = 2
+	if got := m.headerStatusText(); strings.Contains(got, "hints") {
+		t.Errorf("headerStatusText() = %q, want no hint count outside hints-first", got)
+	}
+}

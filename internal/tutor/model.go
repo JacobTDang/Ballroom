@@ -13,6 +13,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/JacobTDang/Ballroom/internal/exercise"
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
@@ -305,7 +307,15 @@ func (m tutorModel) headerStatusText() string {
 	if m.routingEnabled {
 		model = m.cfg.Model + " +" + m.cfg.OrchestratorModel
 	}
-	return " tutor · " + model + " · " + m.cfg.Mode
+	status := " tutor · " + model + " · " + m.cfg.Mode
+	// hints-first's whole drill is "first ask vs repeat ask" -- surface
+	// the count the mode's prompt machinery already tracks
+	// (helpRequestCount, adopted from each turnCompleteMsg) instead of
+	// keeping it model-only state the user can't see.
+	if m.cfg.Mode == exercise.TutorModeHintsFirst {
+		status += fmt.Sprintf(" · hints: %d", m.helpRequestCount)
+	}
+	return status
 }
 
 // headerEndpointText is the header's right side: where requests go,
