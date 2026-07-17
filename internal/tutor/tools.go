@@ -23,9 +23,12 @@ type readFileOutput struct {
 // newReadSolutionFileTool lets the model read the exercise's active
 // solution file on demand instead of having it stuffed into every
 // request whether needed or not. Port of tutor/chat.sh's per-turn
-// build_file_context injection, now an explicit tool call.
-func newReadSolutionFileTool(cfg Config) (tool.InvokableTool, error) {
+// build_file_context injection, now an explicit tool call. Also
+// advances the shared snapshot so a later read_solution_diff answers
+// "since you last looked", whichever tool looked.
+func newReadSolutionFileTool(cfg Config, snap *solutionSnapshot) (tool.InvokableTool, error) {
 	fn := func(_ context.Context, _ noInput) (readFileOutput, error) {
+		snap.swap(rawSolutionContent(cfg.WorkDir, cfg.MaxContextBytes))
 		content := buildFileContext(cfg.WorkDir, cfg.MaxContextBytes)
 		if content == "" {
 			return readFileOutput{Content: "(no solution file exists yet)"}, nil
@@ -35,6 +38,29 @@ func newReadSolutionFileTool(cfg Config) (tool.InvokableTool, error) {
 	t, err := utils.InferTool("read_solution_file", "Read the current contents of the exercise's solution file the user is editing right now.", fn)
 	if err != nil {
 		return nil, fmt.Errorf("tutor: infer read_solution_file tool: %w", err)
+	}
+	return t, nil
+}
+
+// newReadSolutionDiffTool answers "what changed since you last looked"
+// as a unified diff -- much cheaper context than re-reading the whole
+// file, and it focuses the model on the edit instead of the file.
+func newReadSolutionDiffTool(cfg Config, snap *solutionSnapshot) (tool.InvokableTool, error) {
+	fn := func(_ context.Context, _ noInput) (readFileOutput, error) {
+		current := rawSolutionContent(cfg.WorkDir, cfg.MaxContextBytes)
+		previous := snap.swap(current)
+		if current == "" {
+			return readFileOutput{Content: "(no solution file exists yet)"}, nil
+		}
+		diff := diffUnified(previous, current)
+		if diff == "" {
+			return readFileOutput{Content: "(no changes since the last read)"}, nil
+		}
+		return readFileOutput{Content: diff}, nil
+	}
+	t, err := utils.InferTool("read_solution_diff", "Show what changed in the user's solution file since you last looked at it (via read_solution_file or this tool), as a unified diff. Prefer this over re-reading the whole file when the user says they changed or added something.", fn)
+	if err != nil {
+		return nil, fmt.Errorf("tutor: infer read_solution_diff tool: %w", err)
 	}
 	return t, nil
 }
@@ -230,7 +256,14 @@ func newReadCursorPositionTool(cfg Config) (tool.InvokableTool, error) {
 
 // buildTools assembles every tool the tutor agent has access to.
 func buildTools(cfg Config) ([]tool.BaseTool, error) {
-	readSolution, err := newReadSolutionFileTool(cfg)
+	// The diff tool's session-start baseline: taken here, once, so the
+	// first read_solution_diff shows everything changed since launch.
+	snap := &solutionSnapshot{last: rawSolutionContent(cfg.WorkDir, cfg.MaxContextBytes)}
+	readSolution, err := newReadSolutionFileTool(cfg, snap)
+	if err != nil {
+		return nil, err
+	}
+	readSolutionDiff, err := newReadSolutionDiffTool(cfg, snap)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +293,7 @@ func buildTools(cfg Config) ([]tool.BaseTool, error) {
 	// somehow still errors, ...) becomes a string result fed back to the
 	// model instead of aborting the whole turn — replaces
 	// tutor/chat.sh's process_highlights bash-level fallthrough case.
-	raw := []tool.BaseTool{readSolution, readProblem, readTestOutput, highlightLines, readCursorPosition, readGradingRubric}
+	raw := []tool.BaseTool{readSolution, readSolutionDiff, readProblem, readTestOutput, highlightLines, readCursorPosition, readGradingRubric}
 	wrapped := make([]tool.BaseTool, len(raw))
 	for i, t := range raw {
 		wrapped[i] = utils.WrapToolWithErrorHandler(t, toolErrorHandler)
