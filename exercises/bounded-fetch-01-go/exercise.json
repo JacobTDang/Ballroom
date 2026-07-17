@@ -1,0 +1,11 @@
+{
+  "id": "bounded-fetch-01-go",
+  "problem_id": "bounded-fetch-01",
+  "title": "Semaphore-Bounded Parallel Runner",
+  "category": "concurrency",
+  "language": "go",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test -race ./..."
+}
