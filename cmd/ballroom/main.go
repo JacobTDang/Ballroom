@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -336,8 +337,28 @@ func tutorCmd() error {
 		WorkDir:         workDir,
 		NvimSocket:      os.Getenv("NVIM_SOCKET"),
 		MaxContextBytes: maxContextBytes,
+		TranscriptPaths: transcriptPaths(workDir),
 	}
 	return tutor.Run(context.Background(), cfg, os.Stdin, os.Stdout)
+}
+
+// transcriptPaths is where the tutor's conversation export lands: the
+// workspace copy (readable mid-session, but the workspace temp dir dies
+// with the session), plus -- for graded exercise sessions, which carry
+// PRACTICE_DB_PATH and PRACTICE_EXERCISE_ID -- a mirror under the same
+// persistent /data mount the tracker lives on, surviving on the host as
+// data/transcripts/. Sandbox sessions set neither var and get only the
+// workspace copy, which for them persists anyway (the sandbox workspace
+// is a named volume, not a temp dir).
+func transcriptPaths(workDir string) []string {
+	paths := []string{filepath.Join(workDir, "transcript.md")}
+	dbPath := os.Getenv("PRACTICE_DB_PATH")
+	exerciseID := os.Getenv("PRACTICE_EXERCISE_ID")
+	if dbPath != "" && exerciseID != "" {
+		name := fmt.Sprintf("%s-%s.md", exerciseID, time.Now().Format("2006-01-02"))
+		paths = append(paths, filepath.Join(filepath.Dir(dbPath), "transcripts", name))
+	}
+	return paths
 }
 
 // checkToolCallingFn is a var (not a direct call) so tests can
