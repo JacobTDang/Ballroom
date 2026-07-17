@@ -1,0 +1,11 @@
+{
+  "id": "event-emitter-01-python",
+  "problem_id": "event-emitter-01",
+  "title": "Event Emitter",
+  "category": "implementation",
+  "language": "python",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}
