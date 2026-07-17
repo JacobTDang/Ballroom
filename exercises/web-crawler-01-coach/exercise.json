@@ -7,5 +7,6 @@
   "language": "coach",
   "time_limit_min": 90,
   "tutor_mode": "design-coach",
-  "repo_path": "./repo"
+  "repo_path": "./repo",
+  "video_url": "https://youtu.be/krsuaUp__pM"
 }
