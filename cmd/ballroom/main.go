@@ -224,6 +224,7 @@ func submitCmd() error {
 	} else {
 		cfg.CheckComplexity = complexityCheckerFromEnv(cfg.WorkspaceDir)
 	}
+	cfg.Recap = recapFromEnv(cfg.WorkspaceDir)
 
 	attempt, err := session.Submit(cfg, os.Stdin, os.Stdout)
 	if err != nil {
@@ -294,6 +295,32 @@ func complexityCheckerFromEnv(workDir string) func(string) (string, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		return tutor.CheckComplexity(ctx, cfg, claim)
+	}
+}
+
+// recapFromEnv wires session.Config.Recap to tutor.SessionRecap for
+// every submit -- summarization is the worker model's job (TUTOR_MODEL,
+// not the grader chain): it's prose, not a judgment call.
+func recapFromEnv(workDir string) func(string, string) (string, error) {
+	ollamaHost := os.Getenv("OLLAMA_HOST")
+	if ollamaHost == "" {
+		ollamaHost = "http://host.docker.internal:11434"
+	}
+	model := os.Getenv("TUTOR_MODEL")
+	if model == "" {
+		model = config.DefaultTutorModel
+	}
+	cfg := tutor.Config{
+		OllamaHost:      ollamaHost,
+		Model:           model,
+		APIKey:          os.Getenv("OPENROUTER_API_KEY"),
+		WorkDir:         workDir,
+		MaxContextBytes: 8000,
+	}
+	return func(result, output string) (string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		return tutor.SessionRecap(ctx, cfg, result, output)
 	}
 }
 
