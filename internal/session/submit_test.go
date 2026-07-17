@@ -490,3 +490,19 @@ func TestSubmit_RecapErrorDegradesQuietly(t *testing.T) {
 		t.Errorf("Notes = %q, want just the user's notes when the recap fails", attempt.Notes)
 	}
 }
+
+func TestSubmit_PrintsSolutionVideoWithResults(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.TestCommand = "true"
+	cfg.VideoURL = "https://youtu.be/abc123"
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	var out bytes.Buffer
+	if _, err := Submit(cfg, strings.NewReader("\n"), &out); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if !strings.Contains(out.String(), "solution video: https://youtu.be/abc123") {
+		t.Errorf("output missing the video line:\n%s", out.String())
+	}
+}

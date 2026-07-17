@@ -66,7 +66,11 @@ type Config struct {
 	// printed and appended to the attempt's notes tagged "[recap]".
 	// Same injected-function decoupling as Grade/CheckComplexity; nil
 	// disables it, an error degrades to a notice.
-	Recap         func(result, output string) (string, error)
+	Recap func(result, output string) (string, error)
+	// VideoURL, when non-empty, is the exercise's solution walkthrough
+	// video, printed alongside the results (the problem statement's
+	// footer carries it too -- see orchestrator.PrepareWorkspace).
+	VideoURL      string
 	StartedAt     time.Time
 	DBPath        string
 	PollInterval  time.Duration
@@ -101,6 +105,11 @@ func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, err
 	} else {
 		result, output = runTestCommand(cfg)
 		fmt.Fprintf(stdout, "\nresult: %s\n%s\n", result, output)
+	}
+
+	if cfg.VideoURL != "" {
+		// After the verdict, when watching it can't spoil the attempt.
+		fmt.Fprintf(stdout, "solution video: %s\n", cfg.VideoURL)
 	}
 
 	if err := writeLastTestResult(cfg, result, output); err != nil {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -182,6 +183,10 @@ type Exercise struct {
 	TutorMode    string
 	RepoPath     string // resolved to an absolute path
 	TestCommand  string // empty for design kind (nothing to run)
+	// VideoURL optionally links a solution walkthrough video, shown in
+	// the problem statement footer and with submit results. Empty means
+	// none.
+	VideoURL string
 }
 
 // raw mirrors the on-disk JSON shape before validation/path resolution.
@@ -196,6 +201,7 @@ type raw struct {
 	TutorMode    string `json:"tutor_mode"`
 	RepoPath     string `json:"repo_path"`
 	TestCommand  string `json:"test_command"`
+	VideoURL     string `json:"video_url"`
 }
 
 // Load reads and validates the exercise definition at path (exercise.json).
@@ -264,6 +270,10 @@ func Load(path string) (Exercise, error) {
 		return Exercise{}, fmt.Errorf("exercise: %s: repo_path %q does not exist or is not a directory", path, repoPath)
 	}
 
+	if r.VideoURL != "" && !strings.HasPrefix(r.VideoURL, "https://") {
+		return Exercise{}, fmt.Errorf("exercise: %s: video_url must be https, got %q", path, r.VideoURL)
+	}
+
 	problemID := r.ProblemID
 	if problemID == "" {
 		// Standalone exercises with no language siblings don't need to
@@ -282,5 +292,6 @@ func Load(path string) (Exercise, error) {
 		TutorMode:    r.TutorMode,
 		RepoPath:     repoPath,
 		TestCommand:  r.TestCommand,
+		VideoURL:     r.VideoURL,
 	}, nil
 }
