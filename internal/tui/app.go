@@ -309,6 +309,13 @@ type appModel struct {
 	categories     []string
 	categoryCursor int
 
+	// The home dashboard's data (renderHomeboard) -- problems above is
+	// shared with the pickers; homeAttempts is the full attempt history,
+	// loaded once at construction. homeLoadErr keeps a load failure
+	// visible as a dim notice instead of silently hiding the dashboard.
+	homeAttempts []tracker.Attempt
+	homeLoadErr  error
+
 	// stageDSACategories — second-level picker shown when the top-level
 	// selection is the grouped DSA entry, listing the NeetCode roadmap
 	// subcategories (Arrays & Hashing, Two Pointers, ...) it collapses.
@@ -383,6 +390,21 @@ type appModel struct {
 // to the main menu.
 func newAppModel(cfg config.Config, resume appResume) appModel {
 	m := appModel{cfg: cfg}
+	// The home dashboard's data: local disk + sqlite reads, same work
+	// loadPractice does on Enter -- done once up front so the menu is a
+	// status page from the first frame (and fresh again after every
+	// session, since the launcher rebuilds the model on return). Errors
+	// don't block the menu; renderMain shows them as a dim notice.
+	if statuses, err := catalogListFn(m.cfg); err != nil {
+		m.homeLoadErr = err
+	} else {
+		m.problems = catalog.GroupByProblem(statuses)
+	}
+	if attempts, err := allAttemptsFn(m.cfg); err != nil {
+		m.homeLoadErr = err
+	} else {
+		m.homeAttempts = attempts
+	}
 	if resume.stage == stageProblems {
 		m = m.loadPractice()
 		if m.err == nil {
@@ -1280,7 +1302,14 @@ func (m appModel) View() string {
 	if m.width == 0 || m.height == 0 {
 		return right
 	}
-	panel := renderDashboardPanel(m.width, m.height, m.phase, right, layoutCentered)
+	// Only the main menu gets the panel footer -- its key hints used to
+	// float inside the body. Every other stage still carries its own
+	// in-body hint line.
+	footer := ""
+	if m.stage == stageMain {
+		footer = "↑/↓ or j/k move · 1-5 jump · enter select · q quit"
+	}
+	panel := renderDashboardPanel(m.width, m.height, m.phase, right, layoutCentered, footer)
 	return placeBlock(m.width, m.height, panel)
 }
 
@@ -1335,8 +1364,16 @@ func (m appModel) renderMain() string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString("\n")
-	b.WriteString(menuSubtitleStyle.Render("↑/↓ or j/k move · 1-5 jump · enter select · q quit"))
+	// The dashboard block; the key hints that used to float here live
+	// in the panel footer now (see View's footer for stageMain).
+	if board := renderHomeboard(m.problems, m.homeAttempts, time.Now()); board != "" {
+		b.WriteString("\n")
+		b.WriteString(board)
+	}
+	if m.homeLoadErr != nil {
+		b.WriteString("\n")
+		b.WriteString(checkDimStyle.Render("progress unavailable: " + m.homeLoadErr.Error()))
+	}
 	return b.String()
 }
 

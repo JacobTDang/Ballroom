@@ -169,6 +169,11 @@ const (
 	layoutCentered
 )
 
+// dashboardFooterStyle renders the footer's key hints -- same dim
+// voice as menuSubtitleStyle, defined here since the footer belongs to
+// the panel, not any one screen.
+var dashboardFooterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B8680"))
+
 // renderDashboardPanel joins a ball grid (sized to the panel — see
 // ballDimensions) and an animated banner (sized to fit) with the given
 // right-column body into the shared bordered two-column panel, sized to
@@ -177,7 +182,11 @@ const (
 // left-hugging the gap — on a wide terminal the banner+body block
 // otherwise sits flush against the ball with a large dead gap between
 // it and the panel's right edge.
-func renderDashboardPanel(termW, termH, phase int, rightBody string, layout dashboardLayout) string {
+//
+// A non-empty footer is pinned to the panel's bottom row under a dim
+// rule -- replacing the key-hint lines that used to float inside each
+// screen's own body. Screens that keep in-body hints pass "".
+func renderDashboardPanel(termW, termH, phase int, rightBody string, layout dashboardLayout, footer string) string {
 	panelW, panelH := panelDimensions(termW, termH)
 	innerW := panelW - dashboardBorderPadW
 	innerH := panelH - dashboardBorderPadH
@@ -187,6 +196,14 @@ func renderDashboardPanel(termW, termH, phase int, rightBody string, layout dash
 	right := dashboardBanner(phase, rightAvail) + "\n\n" + rightBody
 	right = centerRightColumn(right, rightAvail)
 
+	contentH := innerH
+	var footerBlock string
+	if footer != "" {
+		rule := lipgloss.NewStyle().Foreground(lipgloss.Color("#3A3D4D")).Render(strings.Repeat("─", max(innerW, 0)))
+		footerBlock = rule + "\n" + lipgloss.PlaceHorizontal(innerW, lipgloss.Center, dashboardFooterStyle.Render(footer))
+		contentH = innerH - 2
+	}
+
 	ball := renderDiscoBall(ballGridFor(ballH), phase)
 	colAlign := lipgloss.Top
 	if layout == layoutCentered {
@@ -194,7 +211,12 @@ func renderDashboardPanel(termW, termH, phase int, rightBody string, layout dash
 	}
 	content := lipgloss.JoinHorizontal(colAlign, ball, dashboardGap, right)
 	if layout == layoutCentered {
-		content = lipgloss.PlaceVertical(innerH, lipgloss.Center, content)
+		content = lipgloss.PlaceVertical(contentH, lipgloss.Center, content)
+	} else if footer != "" {
+		content = lipgloss.PlaceVertical(contentH, lipgloss.Top, content)
+	}
+	if footerBlock != "" {
+		content += "\n" + footerBlock
 	}
 	// Width/Height set the box excluding the border, so subtract it here
 	// to make the final rendered panel exactly panelW x panelH.
