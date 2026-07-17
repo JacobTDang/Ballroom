@@ -1,0 +1,11 @@
+{
+  "id": "consistent-hash-01-python",
+  "problem_id": "consistent-hash-01",
+  "title": "Consistent-Hash Ring",
+  "category": "implementation",
+  "language": "python",
+  "time_limit_min": 45,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}
