@@ -213,6 +213,7 @@ func submitCmd() error {
 		Category:      os.Getenv("PRACTICE_CATEGORY"),
 		Language:      os.Getenv("PRACTICE_LANGUAGE"),
 		Kind:          os.Getenv("PRACTICE_KIND"),
+		VideoURL:      os.Getenv("PRACTICE_VIDEO_URL"),
 		StartedAt:     startedAt,
 		DBPath:        os.Getenv("PRACTICE_DB_PATH"),
 		PollInterval:  200 * time.Millisecond,

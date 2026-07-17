@@ -13,7 +13,7 @@ func TestPrepareWorkspace_CopiesRepoContents(t *testing.T) {
 		t.Fatalf("seed repo: %v", err)
 	}
 
-	workspace, cleanup, err := PrepareWorkspace(repo)
+	workspace, cleanup, err := PrepareWorkspace(repo, "")
 	if err != nil {
 		t.Fatalf("PrepareWorkspace: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestPrepareWorkspace_RendersProblemTextAlongsideProblemMd(t *testing.T) {
 		t.Fatalf("seed repo: %v", err)
 	}
 
-	workspace, cleanup, err := PrepareWorkspace(repo)
+	workspace, cleanup, err := PrepareWorkspace(repo, "")
 	if err != nil {
 		t.Fatalf("PrepareWorkspace: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestPrepareWorkspace_NoProblemTxtWhenExerciseHasNoProblemMd(t *testing.T) {
 		t.Fatalf("seed repo: %v", err)
 	}
 
-	workspace, cleanup, err := PrepareWorkspace(repo)
+	workspace, cleanup, err := PrepareWorkspace(repo, "")
 	if err != nil {
 		t.Fatalf("PrepareWorkspace: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestPrepareWorkspace_CleanupRemovesDir(t *testing.T) {
 	repo := t.TempDir()
 	os.WriteFile(filepath.Join(repo, "f.go"), []byte("x"), 0o644)
 
-	workspace, cleanup, err := PrepareWorkspace(repo)
+	workspace, cleanup, err := PrepareWorkspace(repo, "")
 	if err != nil {
 		t.Fatalf("PrepareWorkspace: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestPrepareWorkspace_SourceRepoUnaffectedByWorkspaceEdits(t *testing.T) {
 		t.Fatalf("seed repo: %v", err)
 	}
 
-	workspace, cleanup, err := PrepareWorkspace(repo)
+	workspace, cleanup, err := PrepareWorkspace(repo, "")
 	if err != nil {
 		t.Fatalf("PrepareWorkspace: %v", err)
 	}
@@ -130,5 +130,36 @@ func TestPrepareWorkspace_SourceRepoUnaffectedByWorkspaceEdits(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repo, "solution_test.go")); !os.IsNotExist(err) {
 		t.Error("hidden test leaked into source repo — this is exactly the bug this fix is for")
+	}
+}
+
+func TestPrepareWorkspace_VideoFooterOnProblemTxt(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "problem.md"), []byte("# T\n\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dir, cleanup, err := PrepareWorkspace(repo, "https://youtu.be/abc123")
+	if err != nil {
+		t.Fatalf("PrepareWorkspace: %v", err)
+	}
+	defer cleanup()
+	b, err := os.ReadFile(filepath.Join(dir, "problem.txt"))
+	if err != nil {
+		t.Fatalf("read problem.txt: %v", err)
+	}
+	if !strings.Contains(string(b), "solution video (spoilers!): https://youtu.be/abc123") {
+		t.Errorf("problem.txt missing the video footer:\n%s", b)
+	}
+
+	// No URL: no footer.
+	dir2, cleanup2, err := PrepareWorkspace(repo, "")
+	if err != nil {
+		t.Fatalf("PrepareWorkspace: %v", err)
+	}
+	defer cleanup2()
+	b2, _ := os.ReadFile(filepath.Join(dir2, "problem.txt"))
+	if strings.Contains(string(b2), "solution video") {
+		t.Errorf("problem.txt has a footer with no URL:\n%s", b2)
 	}
 }

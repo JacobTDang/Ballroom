@@ -177,3 +177,13 @@ func TestSandboxRunArgs_ForwardsOrchestratorModelFromConfig(t *testing.T) {
 		t.Errorf("expected TUTOR_ORCHESTRATOR_MODEL=nemotron to be passed as an -e flag, got %v", args)
 	}
 }
+
+func TestExerciseRunArgs_ForwardsVideoURL(t *testing.T) {
+	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
+	ex := exercise.Exercise{ID: "two-pointers-01-go", Category: "pattern", Language: "go", TutorMode: "hint", TestCommand: "go test ./...", VideoURL: "https://youtu.be/abc123"}
+
+	args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now())
+	if !containsFlag(args, "PRACTICE_VIDEO_URL=https://youtu.be/abc123") {
+		t.Errorf("expected the video url forwarded, got %v", args)
+	}
+}

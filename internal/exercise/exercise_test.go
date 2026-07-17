@@ -343,3 +343,29 @@ func TestLoad_EmptyTestCommand(t *testing.T) {
 		t.Fatal("expected error for empty test_command, got nil")
 	}
 }
+
+func TestLoad_VideoURLOptionalAndValidated(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "repo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	path := writeExercise(t, dir, map[string]any{"video_url": "https://youtu.be/abc123"})
+	ex, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load with video_url: %v", err)
+	}
+	if ex.VideoURL != "https://youtu.be/abc123" {
+		t.Errorf("VideoURL = %q, want it carried through", ex.VideoURL)
+	}
+
+	path = writeExercise(t, dir, map[string]any{})
+	if ex, err = Load(path); err != nil || ex.VideoURL != "" {
+		t.Errorf("absent video_url: ex.VideoURL=%q err=%v, want empty and no error", ex.VideoURL, err)
+	}
+
+	path = writeExercise(t, dir, map[string]any{"video_url": "http://insecure.example"})
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "video_url") {
+		t.Errorf("Load err = %v, want an https validation error", err)
+	}
+}

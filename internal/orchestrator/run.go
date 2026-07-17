@@ -34,7 +34,7 @@ func RunExercise(cfg config.Config, ex exercise.Exercise) error {
 		return fmt.Errorf("orchestrator: create data dir: %w", err)
 	}
 
-	workspaceDir, cleanupWorkspace, err := PrepareWorkspace(ex.RepoPath)
+	workspaceDir, cleanupWorkspace, err := PrepareWorkspace(ex.RepoPath, ex.VideoURL)
 	if err != nil {
 		return err
 	}
@@ -136,6 +136,9 @@ func exerciseRunArgs(cfg config.Config, ex exercise.Exercise, controlDir, worksp
 		// Same always-forwarded contract -- empty means design grading
 		// uses the worker model (cmd/ballroom's graderModelFromEnv).
 		"-e", "TUTOR_GRADER_MODEL=" + cfg.GraderModel,
+		// exercise.json never enters the container, so the submit-time
+		// solution-video line rides an env var; empty means none.
+		"-e", "PRACTICE_VIDEO_URL=" + ex.VideoURL,
 		// Host env, not a persisted setting: TUTOR_STREAM=on|off is the
 		// per-invocation escape hatch over internal/tutor's
 		// streamingEnabled default (stream OpenRouter replies, never
