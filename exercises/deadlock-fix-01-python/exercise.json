@@ -1,0 +1,11 @@
+{
+  "id": "deadlock-fix-01-python",
+  "problem_id": "deadlock-fix-01",
+  "title": "Fix the Deadlock",
+  "category": "concurrency",
+  "language": "python",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}
