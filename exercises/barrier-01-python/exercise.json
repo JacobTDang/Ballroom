@@ -1,0 +1,11 @@
+{
+  "id": "barrier-01-python",
+  "problem_id": "barrier-01",
+  "title": "Reusable Barrier",
+  "category": "concurrency",
+  "language": "python",
+  "time_limit_min": 35,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}

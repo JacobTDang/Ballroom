@@ -1,0 +1,11 @@
+{
+  "id": "graceful-shutdown-01-go",
+  "problem_id": "graceful-shutdown-01",
+  "title": "Graceful Shutdown",
+  "category": "concurrency",
+  "language": "go",
+  "time_limit_min": 40,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test -race ./..."
+}
