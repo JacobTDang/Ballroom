@@ -72,6 +72,11 @@ type Config struct {
 	// MaxContextBytes caps how much of the solution file gets sent to the
 	// model per read_solution_file call.
 	MaxContextBytes int
+	// TranscriptPaths are files every completed turn is appended to as
+	// the session runs (see transcript.go). Empty means no export --
+	// tests and headless callers. A real session gets the workspace
+	// copy plus a mirror under the persistent /data mount.
+	TranscriptPaths []string
 }
 
 // providerEndpoint returns a human-readable description of where a

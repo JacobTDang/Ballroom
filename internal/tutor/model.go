@@ -166,6 +166,10 @@ type tutorModel struct {
 	// visibly arriving, so the "thinking" glow should already be dying.
 	streamingText  string
 	streamPainting bool
+
+	// transcriptWarned makes transcript-export failures warn exactly
+	// once (see the turnCompleteMsg case) instead of once per turn.
+	transcriptWarned bool
 }
 
 // displayBlock is one transcript entry, held raw and styled per frame
@@ -595,6 +599,15 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// because that goes back to the model as context and escape
 		// codes there would pollute every later turn's prompt.
 		m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockTutor, raw: msg.reply.Content})
+		if len(m.cfg.TranscriptPaths) > 0 {
+			if err := appendTranscriptTurn(m.cfg.TranscriptPaths, msg.userMessage, msg.reply.Content); err != nil && !m.transcriptWarned {
+				// Warn once, then stay quiet -- a broken transcript disk
+				// must not turn every turn into an error banner, and the
+				// session itself is unaffected.
+				m.transcriptWarned = true
+				m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockNote, raw: activityErrorNote(fmt.Sprintf("transcript export failed (turns continue unrecorded): %v", err))})
+			}
+		}
 		m.refreshViewport()
 		return m, nil
 	}
