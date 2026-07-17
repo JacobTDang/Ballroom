@@ -14,3 +14,6 @@ data/settings.json
 
 # OS
 .DS_Store
+
+# Whisper model for ballroom voice (downloaded on first use, ~142 MB)
+data/whisper/
