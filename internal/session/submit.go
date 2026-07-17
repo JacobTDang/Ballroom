@@ -60,10 +60,17 @@ type Config struct {
 	// injected-function decoupling as Grade. Nil disables the quiz; an
 	// error degrades to a notice and never blocks recording the attempt.
 	CheckComplexity func(claim string) (string, error)
-	StartedAt       time.Time
-	DBPath          string
-	PollInterval    time.Duration
-	RevealTimeout   time.Duration
+	// Recap, when set, writes the post-session recap: it receives the
+	// attempt's result and raw grading output and returns a short
+	// summary (see tutor.SessionRecap, wired by cmd/ballroom), which is
+	// printed and appended to the attempt's notes tagged "[recap]".
+	// Same injected-function decoupling as Grade/CheckComplexity; nil
+	// disables it, an error degrades to a notice.
+	Recap         func(result, output string) (string, error)
+	StartedAt     time.Time
+	DBPath        string
+	PollInterval  time.Duration
+	RevealTimeout time.Duration
 }
 
 // Submit requests the hidden content be revealed, waits for it, grades
@@ -125,6 +132,23 @@ func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, err
 	}
 
 	notes := promptNotes(scanner, stdout)
+
+	// The model-written recap lands in the same notes column, tagged so
+	// it never masquerades as something the user wrote. After the notes
+	// prompt on purpose: the user's own reflection comes uncontaminated
+	// by the model's.
+	if cfg.Recap != nil {
+		recap, err := cfg.Recap(result, output)
+		if err != nil {
+			fmt.Fprintf(stdout, "recap unavailable: %v\n", err)
+		} else {
+			fmt.Fprintf(stdout, "\nsession recap:\n%s\n", recap)
+			if notes != "" {
+				notes += "\n\n"
+			}
+			notes += "[recap] " + recap
+		}
+	}
 
 	attempt := tracker.Attempt{
 		ExerciseID:   cfg.ExerciseID,

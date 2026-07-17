@@ -443,3 +443,50 @@ func TestSubmit_ComplexityQuizErrorDegradesToNoticeAndStillLogs(t *testing.T) {
 		t.Errorf("attempt = %+v -- a quiz failure must not affect recording", attempt)
 	}
 }
+
+func TestSubmit_RecapPrintedAndAppendedToNotes(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.TestCommand = "true"
+	var gotResult string
+	cfg.Recap = func(result, output string) (string, error) {
+		gotResult = result
+		return "You solved two-sum with a hash map on the first try; the conversation focused on complement lookups.", nil
+	}
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	var out bytes.Buffer
+	attempt, err := Submit(cfg, strings.NewReader("my own notes\n"), &out)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if gotResult != tracker.ResultPass {
+		t.Errorf("recap got result %q, want pass", gotResult)
+	}
+	if !strings.Contains(out.String(), "session recap:") {
+		t.Errorf("output missing the recap print:\n%s", out.String())
+	}
+	if !strings.Contains(attempt.Notes, "my own notes") || !strings.Contains(attempt.Notes, "[recap]") || !strings.Contains(attempt.Notes, "hash map") {
+		t.Errorf("Notes = %q, want the user's notes plus the tagged recap", attempt.Notes)
+	}
+}
+
+func TestSubmit_RecapErrorDegradesQuietly(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.TestCommand = "true"
+	cfg.Recap = func(string, string) (string, error) { return "", fmt.Errorf("model asleep") }
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	var out bytes.Buffer
+	attempt, err := Submit(cfg, strings.NewReader("kept\n"), &out)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if !strings.Contains(out.String(), "recap unavailable") {
+		t.Errorf("output missing the degraded notice:\n%s", out.String())
+	}
+	if attempt.Notes != "kept" {
+		t.Errorf("Notes = %q, want just the user's notes when the recap fails", attempt.Notes)
+	}
+}
