@@ -1280,7 +1280,7 @@ func (m appModel) View() string {
 	if m.width == 0 || m.height == 0 {
 		return right
 	}
-	panel := renderDashboardPanel(m.width, m.height, m.phase, right)
+	panel := renderDashboardPanel(m.width, m.height, m.phase, right, layoutCentered)
 	return placeBlock(m.width, m.height, panel)
 }
 

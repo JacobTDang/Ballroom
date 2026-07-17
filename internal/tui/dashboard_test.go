@@ -90,3 +90,84 @@ func TestCenterRightColumn_PreservesRelativeAlignmentAcrossLines(t *testing.T) {
 		t.Errorf("expected both lines to share the same left margin, got %d and %d", left0, left1)
 	}
 }
+
+func TestBallDimensions_FloorOnSmallPanelsGrowthOnLarge(t *testing.T) {
+	cases := []struct {
+		name           string
+		innerW, innerH int
+		wantH          int
+	}{
+		// A small terminal gets exactly the old fixed ball.
+		{"small panel keeps the 24-row floor", 100, 22, discoBallHeight},
+		// Plenty of both dimensions: capped at the max.
+		{"huge panel caps at discoBallMaxHeight", 250, 60, discoBallMaxHeight},
+		// Tall but narrow: width is the binding constraint --
+		// (innerW - gap - menu col - slack) / 2, rounded down to even.
+		{"narrow panel is width-bound", 124, 60, (124 - dashboardGapWidth - menuRightColWidth - 4) / 2 / 2 * 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h, w := ballDimensions(c.innerW, c.innerH)
+			if h != c.wantH {
+				t.Errorf("ballDimensions(%d, %d) h = %d, want %d", c.innerW, c.innerH, h, c.wantH)
+			}
+			if w != 2*h {
+				t.Errorf("w = %d, want the 2:1 terminal-cell aspect (%d)", w, 2*h)
+			}
+			if h%2 != 0 {
+				t.Errorf("h = %d, want an even row count", h)
+			}
+		})
+	}
+}
+
+func TestBallGridFor_CachesAStableGridPerSize(t *testing.T) {
+	a := ballGridFor(28)
+	b := ballGridFor(28)
+	if &a[0] != &b[0] {
+		t.Error("two calls for the same height built different grids -- the shape must stay stable across frames")
+	}
+	if len(a) != 28 || len(a[0]) != 56 {
+		t.Errorf("grid is %dx%d, want 28x56", len(a), len(a[0]))
+	}
+}
+
+// TestRenderDashboardPanel_CenteredLayoutFillsTallPanels pins the fix
+// for a real complaint (screenshot, 2026-07-16): at a large window the
+// menu content pinned to the panel's top-left corner over a sea of
+// empty space. Centered layout must put blank rows above the content;
+// the boot screen's top layout must not (its streaming log lines would
+// jiggle a centered composition).
+func TestRenderDashboardPanel_CenteredLayoutFillsTallPanels(t *testing.T) {
+	body := "1. Practice\n2. Daily"
+
+	centered := renderDashboardPanel(200, 60, 0, body, layoutCentered)
+	lines := strings.Split(centered, "\n")
+	// Row 1 is the border; rows 2-3 are padding+slack. Find the first
+	// row with real content and require it to sit well below the top.
+	firstContent := -1
+	for i, l := range lines {
+		inner := strings.Trim(stripAnsiTUI(l), "│╭╮╰╯─ ")
+		if inner != "" {
+			firstContent = i
+			break
+		}
+	}
+	if firstContent < 5 {
+		t.Errorf("centered layout's first content row is %d, want it pushed down by vertical centering:\n%s", firstContent, stripAnsiTUI(centered))
+	}
+
+	top := renderDashboardPanel(200, 60, 0, body, layoutTop)
+	lines = strings.Split(top, "\n")
+	firstContent = -1
+	for i, l := range lines {
+		inner := strings.Trim(stripAnsiTUI(l), "│╭╮╰╯─ ")
+		if inner != "" {
+			firstContent = i
+			break
+		}
+	}
+	if firstContent > 4 {
+		t.Errorf("top layout's first content row is %d, want it near the top (boot log stability)", firstContent)
+	}
+}

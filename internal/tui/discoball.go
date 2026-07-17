@@ -6,13 +6,18 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// discoBallHeight/Width are fixed — the ball is a consistent, modest
-// size on every screen rather than scaling with the terminal, so it
-// stays proportionate next to the animated banner instead of dominating
-// the panel.
+// discoBallHeight/Width are the ball's floor size — what every
+// terminal used to get unconditionally, and still the guaranteed
+// minimum the panel arithmetic (minPanelWidth) is sized around. Large
+// terminals now scale the ball up from here (see ballDimensions,
+// dashboard.go) after a real complaint that the fixed ball left the
+// home screen looking like everything was crammed into one corner.
+// discoBallMaxHeight caps the growth: past ~36 rows the ball stops
+// reading as an accent and starts dominating the panel.
 const (
-	discoBallHeight = 24
-	discoBallWidth  = 48
+	discoBallHeight    = 24
+	discoBallWidth     = 48
+	discoBallMaxHeight = 36
 )
 
 // discoShades goes dim -> bright; the full set of characters a rendered
