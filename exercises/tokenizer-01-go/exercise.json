@@ -1,0 +1,11 @@
+{
+  "id": "tokenizer-01-go",
+  "problem_id": "tokenizer-01",
+  "title": "Arithmetic Tokenizer",
+  "category": "implementation",
+  "language": "go",
+  "time_limit_min": 35,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./..."
+}
