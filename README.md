@@ -56,20 +56,34 @@ JSON-fallback mode; models with native support get the full agent,
 and OpenRouter models stream their replies progressively.
 `TUTOR_STREAM=on|off` overrides streaming per invocation.
 
-## The three tracks
+## The tracks
 
-**Coding** — DSA (the NeetCode 150, by topic), debugging,
-concurrency, implementation, and OO-design exercises in Python, Go,
-and C++. Hidden tests are mounted only when you submit: the visible
-starter must fail them, your job is to make them pass.
+**Coding** — DSA (the NeetCode 150, by topic), debugging, and
+OO-design exercises in Python, Go, and C++. Hidden tests are mounted
+only when you submit: the visible starter must fail them, your job is
+to make them pass. Every NeetCode problem links its official solution
+video (a spoiler-marked footer on the problem statement, and again
+with your results).
+
+**Concurrency** — a ten-rung ladder (bounded queues, worker pools,
+barriers, graceful shutdown, a deadlock to fix) in all three
+languages, with hidden tests running under the race detector
+(`go test -race`) and ThreadSanitizer — "it usually works" never
+passes. Curriculum: `docs/concurrency-roadmap.md`.
+
+**Implementation** — eleven build-it-from-scratch components: rate
+limiters, a bloom filter, a consistent-hash ring, a TTL cache, retry
+with backoff, plus a parsers half (tokenizer, glob matcher, INI and
+JSON parsers, event emitter). Injectable clocks make every test
+exact. Curriculum: `docs/implementation-roadmap.md`.
 
 **System design** — the
 [system-design-primer](https://github.com/donnemartin/system-design-primer)
 questions as guided **coach** sessions (the 4-step method, one step at
 a time) and timed **interviewer** mocks (bare prompt, you scope it,
 45 minutes). A hidden per-question rubric grades your `solution.md`
-on submit. `docs/system-design-roadmap.md` is the full curriculum,
-start there.
+on submit, and most questions link a curated walkthrough video.
+`docs/system-design-roadmap.md` is the full curriculum, start there.
 
 **Behavioral** — eight classic "tell me about a time…" questions as
 **story-coach** sessions (build a STAR answer one section at a time)
@@ -84,16 +98,24 @@ specificity, stakes, ownership, evidence, reflection.
    (coding exercises choose syntax-only / hints-first / full-assist
    per exercise; design and behavioral sessions choose coach or
    interviewer per session).
-3. Submit with `M-q`. Coding: hidden tests run. Design/behavioral:
-   the rubric (and, for solved primer questions, a reference design)
-   appears in your workspace and the grader model grades your
-   solution dimension by dimension — pass/fail plus a summary, both
-   recorded.
-4. The picker resurfaces what needs attention: **mock due** (coach
+3. Submit with `M-q`. Coding: hidden tests run, and a green run ends
+   with a complexity quiz — state your time/space complexity and the
+   grader model checks it against your actual code.
+   Design/behavioral: the rubric (and, for solved primer questions, a
+   reference design) appears in your workspace and the grader model
+   grades your solution dimension by dimension — pass/fail plus a
+   summary, both recorded.
+4. Every submit ends with a model-written recap of the session —
+   what you attempted, what the tutor conversation got stuck on, how
+   it ended — appended to the attempt's notes (your own note comes
+   first, untouched). The full tutor conversation also survives:
+   `transcript.md` in the workspace during the session, and a copy
+   under `data/transcripts/` afterward.
+5. The picker resurfaces what needs attention: **mock due** (coach
    pass whose interviewer mock is untouched), **review due** (a
    failure ≥3 days old, or anything solved but untouched for 30
    days) — due problems float to the top.
-5. **Stats → Rubric weak spots** ranks the rubric dimensions you keep
+6. **Stats → Rubric weak spots** ranks the rubric dimensions you keep
    losing points on; when one keeps showing up, that's your next
    study block.
 
@@ -113,10 +135,20 @@ PgUp/PgDn or the mouse wheel, renders code as editor cards, and shows
 the tools the model calls in real time. Estimation help for design
 sessions: `less ~/back-of-envelope.md` in the terminal pane.
 
-**Voice input**: macOS built-in dictation works directly into the
-tutor pane — press the dictation shortcut (default: `fn` twice) with
-the tutor pane focused and speak. Nothing to configure; the container
-never needs microphone access.
+The tutor's fixed header shows the model, mode, and — in hints-first
+sessions — a live count of the hints you've used.
+
+**Voice input**, two ways (the container never needs mic access):
+
+- Zero setup: macOS built-in dictation types straight into the tutor
+  pane — press the dictation shortcut (default: `fn` twice) with the
+  pane focused and speak.
+- `ballroom voice` (run on the host while a session is active):
+  records until you press Enter, transcribes locally with
+  whisper-cpp, and types the text into the tutor pane for you to
+  review and send. Needs `brew install ffmpeg whisper-cpp`; the
+  ~142 MB model downloads on first use after an explicit yes.
+  `--from-wav <file>` transcribes an existing recording.
 
 ## Development
 
