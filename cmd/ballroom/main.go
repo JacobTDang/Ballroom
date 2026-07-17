@@ -41,6 +41,8 @@ func main() {
 		exitOnErr(returnCmd())
 	case "tutor":
 		exitOnErr(tutorCmd())
+	case "voice":
+		exitOnErr(voiceCmd(args[1:]))
 	case "config":
 		exitOnErr(configCmd(args[1:]))
 	default:
@@ -68,6 +70,8 @@ Usage:
   ballroom submit              Submit your solution (run this inside an active session)
   ballroom tutor               Start the tutor chat (run this inside an active session)
   ballroom return              Return to the host homepage (run this inside an active session)
+  ballroom voice               Speak a message into the tutor pane (run on the host while a
+                               session is active; needs ffmpeg + whisper-cpp via Homebrew)
   ballroom config set-model <tag>   Set the tutor (worker) model (a local Ollama tag, or
                                      an openrouter:<slug> API model) without opening the TUI
   ballroom config set-orchestrator-model <tag|none>
