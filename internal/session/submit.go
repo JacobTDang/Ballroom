@@ -52,11 +52,18 @@ type Config struct {
 	// Injected as a function rather than imported so this package stays
 	// decoupled from the tutor's model plumbing and tests can fake it.
 	// Nil, or any error from it, falls back to explicit self-assessment.
-	Grade         func() (verdict, summary string, err error)
-	StartedAt     time.Time
-	DBPath        string
-	PollInterval  time.Duration
-	RevealTimeout time.Duration
+	Grade func() (verdict, summary string, err error)
+	// CheckComplexity, when set, powers the post-pass complexity quiz on
+	// coding submits: it receives the user's claimed time/space
+	// complexity and returns the model's verdict text (see
+	// tutor.CheckComplexity, wired by cmd/ballroom). Same
+	// injected-function decoupling as Grade. Nil disables the quiz; an
+	// error degrades to a notice and never blocks recording the attempt.
+	CheckComplexity func(claim string) (string, error)
+	StartedAt       time.Time
+	DBPath          string
+	PollInterval    time.Duration
+	RevealTimeout   time.Duration
 }
 
 // Submit requests the hidden content be revealed, waits for it, grades
@@ -94,6 +101,27 @@ func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, err
 		// Not fatal — same graceful-degradation philosophy as the rest of
 		// the tutor-adjacent code. A submission should still get logged
 		// to the tracker DB even if this write fails.
+	}
+
+	// The complexity quiz: only after a green coding run (a failing
+	// submit has more urgent things to think about, and design answers
+	// have no complexity), and only when the checker is wired. Entirely
+	// optional and entirely non-blocking -- empty answer skips, a model
+	// error becomes a notice, the attempt records regardless.
+	if cfg.Kind != exercise.KindDesign && result == tracker.ResultPass && cfg.CheckComplexity != nil {
+		fmt.Fprint(stdout, "\nTime/space complexity of your solution? (enter to skip): ")
+		claim := ""
+		if scanner.Scan() {
+			claim = strings.TrimSpace(scanner.Text())
+		}
+		if claim != "" {
+			verdict, err := cfg.CheckComplexity(claim)
+			if err != nil {
+				fmt.Fprintf(stdout, "complexity check unavailable: %v\n", err)
+			} else {
+				fmt.Fprintf(stdout, "\ncomplexity check:\n%s\n", verdict)
+			}
+		}
 	}
 
 	notes := promptNotes(scanner, stdout)

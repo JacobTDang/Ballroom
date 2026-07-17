@@ -364,3 +364,82 @@ func TestSubmit_WritesAttemptToTrackerDB(t *testing.T) {
 		t.Errorf("logged ExerciseID = %q, want %q", attempts[0].ExerciseID, cfg.ExerciseID)
 	}
 }
+
+func TestSubmit_ComplexityQuizOnGreenCodingSubmit(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.TestCommand = "true"
+	var gotClaim string
+	cfg.CheckComplexity = func(claim string) (string, error) {
+		gotClaim = claim
+		return "AGREE\nO(n) time, O(n) space -- single pass with a map.", nil
+	}
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	var out bytes.Buffer
+	// First line answers the quiz, second the notes prompt.
+	if _, err := Submit(cfg, strings.NewReader("O(n) time O(n) space\nmy notes\n"), &out); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if gotClaim != "O(n) time O(n) space" {
+		t.Errorf("checker got claim %q, want the typed answer", gotClaim)
+	}
+	if !strings.Contains(out.String(), "complexity") || !strings.Contains(out.String(), "AGREE") {
+		t.Errorf("output missing the quiz verdict:\n%s", out.String())
+	}
+}
+
+func TestSubmit_ComplexityQuizSkippedOnEmptyAnswerFailsAndDesign(t *testing.T) {
+	// Empty answer: prompt shown, checker never called, notes still read.
+	cfg := baseConfig(t)
+	cfg.TestCommand = "true"
+	called := false
+	cfg.CheckComplexity = func(string) (string, error) { called = true; return "x", nil }
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+	attempt, err := Submit(cfg, strings.NewReader("\nkept notes\n"), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if called {
+		t.Error("checker called despite an empty (skip) answer")
+	}
+	if attempt.Notes != "kept notes" {
+		t.Errorf("Notes = %q -- the skip must not eat the notes line", attempt.Notes)
+	}
+
+	// Failing tests: no quiz at all (nothing to be proud of yet).
+	cfg2 := baseConfig(t)
+	cfg2.TestCommand = "false"
+	prompted := false
+	cfg2.CheckComplexity = func(string) (string, error) { prompted = true; return "x", nil }
+	mkdirs(t, cfg2)
+	simulateHostReveal(t, cfg2.ControlDir)
+	var out2 bytes.Buffer
+	if _, err := Submit(cfg2, strings.NewReader("\n"), &out2); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if prompted || strings.Contains(out2.String(), "complexity") {
+		t.Error("quiz ran on a failing submit")
+	}
+}
+
+func TestSubmit_ComplexityQuizErrorDegradesToNoticeAndStillLogs(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.TestCommand = "true"
+	cfg.CheckComplexity = func(string) (string, error) { return "", fmt.Errorf("model unreachable") }
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	var out bytes.Buffer
+	attempt, err := Submit(cfg, strings.NewReader("O(1)\nnotes here\n"), &out)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if !strings.Contains(out.String(), "complexity check unavailable") {
+		t.Errorf("output missing the degraded notice:\n%s", out.String())
+	}
+	if attempt.Notes != "notes here" || attempt.Result != tracker.ResultPass {
+		t.Errorf("attempt = %+v -- a quiz failure must not affect recording", attempt)
+	}
+}
