@@ -263,3 +263,31 @@ func TestGenerateWithLeakRetry_ExportedWrapperProtectsAgainstLeaks(t *testing.T)
 		t.Errorf("requests = %d, want exactly 2 (original + one retry)", n)
 	}
 }
+
+// TestNewChatModel_ExportedConstructorRoutesOpenRouter pins the
+// exported constructor to the same provider dispatch newChatModel
+// does -- cmd/tutor-eval depends on it to evaluate openrouter: models.
+func TestNewChatModel_ExportedConstructorRoutesOpenRouter(t *testing.T) {
+	gotRequest := false
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRequest = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"c","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	t.Cleanup(mock.Close)
+	orig := openRouterBaseURL
+	openRouterBaseURL = mock.URL
+	t.Cleanup(func() { openRouterBaseURL = orig })
+
+	ctx := context.Background()
+	cm, err := NewChatModel(ctx, OpenRouterModelPrefix+"some/model", "", "sk-test")
+	if err != nil {
+		t.Fatalf("NewChatModel: %v", err)
+	}
+	if _, err := cm.Generate(ctx, []*schema.Message{schema.UserMessage("hi")}); err != nil {
+		t.Fatalf("Generate through the exported constructor: %v", err)
+	}
+	if !gotRequest {
+		t.Fatal("the openrouter mock never saw a request -- wrong provider dispatch")
+	}
+}
