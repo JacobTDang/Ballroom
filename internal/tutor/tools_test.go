@@ -82,7 +82,7 @@ func TestReadSolutionFileTool_ReturnsFileContents(t *testing.T) {
 		t.Fatalf("write solution file: %v", err)
 	}
 
-	tl, err := newReadSolutionFileTool(Config{WorkDir: dir, MaxContextBytes: 8000})
+	tl, err := newReadSolutionFileTool(Config{WorkDir: dir, MaxContextBytes: 8000}, &solutionSnapshot{})
 	if err != nil {
 		t.Fatalf("newReadSolutionFileTool: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestReadSolutionFileTool_ReturnsFileContents(t *testing.T) {
 func TestReadSolutionFileTool_NoFileReturnsFriendlyNote(t *testing.T) {
 	dir := t.TempDir()
 
-	tl, err := newReadSolutionFileTool(Config{WorkDir: dir, MaxContextBytes: 8000})
+	tl, err := newReadSolutionFileTool(Config{WorkDir: dir, MaxContextBytes: 8000}, &solutionSnapshot{})
 	if err != nil {
 		t.Fatalf("newReadSolutionFileTool: %v", err)
 	}
@@ -355,13 +355,13 @@ func TestReadCursorPositionTool_NoEditorReturnsUnavailable(t *testing.T) {
 	}
 }
 
-func TestBuildTools_ReturnsAllSixTools(t *testing.T) {
+func TestBuildTools_ReturnsAllSevenTools(t *testing.T) {
 	tools, err := buildTools(Config{WorkDir: t.TempDir(), MaxContextBytes: 8000})
 	if err != nil {
 		t.Fatalf("buildTools: %v", err)
 	}
-	if len(tools) != 6 {
-		t.Fatalf("buildTools returned %d tools, want 6", len(tools))
+	if len(tools) != 7 {
+		t.Fatalf("buildTools returned %d tools, want 7", len(tools))
 	}
 
 	names := make(map[string]bool)
@@ -373,7 +373,7 @@ func TestBuildTools_ReturnsAllSixTools(t *testing.T) {
 		names[info.Name] = true
 	}
 	for _, want := range []string{
-		"read_solution_file", "read_problem_statement", "read_test_output",
+		"read_solution_file", "read_solution_diff", "read_problem_statement", "read_test_output",
 		"highlight_lines", "read_cursor_position", "read_grading_rubric",
 	} {
 		if !names[want] {
