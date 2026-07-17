@@ -30,7 +30,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cloudwego/eino-ext/components/model/ollama"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/react"
@@ -51,15 +50,22 @@ const (
 	// verify real sample size before trusting a small-n clean run.
 	repeats = 8
 
-	// evalRequestTimeout bounds each HTTP request runScenario's own
-	// chat model makes. This tool builds its own ollama.ChatModelConfig
-	// independently of internal/tutor/agent.go's newChatModel (which
-	// carries its own ollamaRequestTimeout) — a real gap found live: a
-	// full eval run genuinely hung for over an hour on a single stuck
-	// request with ~0% CPU while Ollama itself was still reachable,
-	// with nothing to time it out and recover.
-	evalRequestTimeout = 120 * time.Second
+	// openRouterPacing spaces out repeats when the model under
+	// evaluation is an OpenRouter one -- free-tier models enforce a
+	// per-minute cap, and 8 back-to-back agent runs blow straight
+	// through it, turning later repeats into 429 noise instead of
+	// behavior data (observed live: two whole scenarios reported 0/8
+	// on nothing but rate-limit errors).
+	openRouterPacing = 15 * time.Second
 )
+
+// paceForModel sleeps between repeats for rate-limited providers; m is
+// whichever model that check runs on (worker or grader).
+func paceForModel(m string) {
+	if strings.HasPrefix(m, tutor.OpenRouterModelPrefix) {
+		time.Sleep(openRouterPacing)
+	}
+}
 
 // model is the Ollama model tag every scenario runs against. Resolved
 // once at startup by resolveModel — never a hardcoded literal here, so
@@ -795,7 +801,12 @@ func runScenario(ctx context.Context, sc scenario, nvimSocket string) (bool, str
 		tools[i] = &recordingTool{InvokableTool: t.(tool.InvokableTool), name: info.Name, recorder: rec}
 	}
 
-	cm, err := ollama.NewChatModel(ctx, &ollama.ChatModelConfig{BaseURL: ollamaHost, Model: model, Timeout: evalRequestTimeout})
+	// The tutor's own constructor, so TUTOR_EVAL_MODEL=openrouter:<slug>
+	// evaluates the exact provider path a real session runs -- the raw
+	// Ollama client this used to build couldn't reach OpenRouter models
+	// at all. (Request timeouts ride the constructor's own per-request
+	// bound, the same one real sessions get.)
+	cm, err := tutor.NewChatModel(ctx, model, ollamaHost, os.Getenv("OPENROUTER_API_KEY"))
 	if err != nil {
 		return false, "", fmt.Errorf("new chat model: %w", err)
 	}
@@ -901,6 +912,9 @@ func main() {
 		pass := 0
 		var lastDetail string
 		for i := 0; i < repeats; i++ {
+			if i > 0 {
+				paceForModel(model)
+			}
 			ok, detail, err := runScenario(ctx, sc, nvimSocket)
 			if err != nil {
 				lastDetail = fmt.Sprintf("error: %v", err)
@@ -1084,6 +1098,9 @@ func runGradeDesignConsistencyCheck(ctx context.Context) (totalPass, totalRun in
 		pass, parseFailures := 0, 0
 		var lastDetail string
 		for i := 0; i < repeats; i++ {
+			if i > 0 {
+				paceForModel(graderModel)
+			}
 			cfg := tutor.Config{
 				OllamaHost: ollamaHost, Model: graderModel, APIKey: apiKey,
 				WorkDir: dir, MaxContextBytes: 16000,
@@ -1179,6 +1196,9 @@ func runComprehensionCheckGroundingCheckCase(ctx context.Context, label, firstMe
 
 	var lastDetail string
 	for i := 0; i < repeats; i++ {
+		if i > 0 {
+			paceForModel(model)
+		}
 		cfg := tutor.Config{
 			OllamaHost: ollamaHost, Model: model, Mode: "hints-first",
 			WorkDir: dir, MaxContextBytes: 8000,
