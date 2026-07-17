@@ -1,0 +1,11 @@
+{
+  "id": "sliding-window-limiter-01-python",
+  "problem_id": "sliding-window-limiter-01",
+  "title": "Sliding-Window Rate Limiter",
+  "category": "implementation",
+  "language": "python",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q"
+}

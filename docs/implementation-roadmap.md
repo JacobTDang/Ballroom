@@ -28,7 +28,7 @@ purpose — build the component here, then the Concurrency ladder
 
 - [ ] **Fixed-window rate limiter** (`rate-limiter-01`) — the warm-up:
       windowed counting with a clock.
-- [ ] **Sliding-window rate limiter** (`sliding-window-01`) — the
+- [ ] **Sliding-window rate limiter** (`sliding-window-limiter-01`) — the
       fixed window's burst-at-the-boundary flaw, fixed; injectable
       time, precise eviction.
 - [ ] **Bloom filter** (`bloom-filter-01`) — bit array + k hashes; the
