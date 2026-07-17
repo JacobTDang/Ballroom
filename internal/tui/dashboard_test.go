@@ -141,7 +141,7 @@ func TestBallGridFor_CachesAStableGridPerSize(t *testing.T) {
 func TestRenderDashboardPanel_CenteredLayoutFillsTallPanels(t *testing.T) {
 	body := "1. Practice\n2. Daily"
 
-	centered := renderDashboardPanel(200, 60, 0, body, layoutCentered)
+	centered := renderDashboardPanel(200, 60, 0, body, layoutCentered, "")
 	lines := strings.Split(centered, "\n")
 	// Row 1 is the border; rows 2-3 are padding+slack. Find the first
 	// row with real content and require it to sit well below the top.
@@ -157,7 +157,7 @@ func TestRenderDashboardPanel_CenteredLayoutFillsTallPanels(t *testing.T) {
 		t.Errorf("centered layout's first content row is %d, want it pushed down by vertical centering:\n%s", firstContent, stripAnsiTUI(centered))
 	}
 
-	top := renderDashboardPanel(200, 60, 0, body, layoutTop)
+	top := renderDashboardPanel(200, 60, 0, body, layoutTop, "")
 	lines = strings.Split(top, "\n")
 	firstContent = -1
 	for i, l := range lines {
