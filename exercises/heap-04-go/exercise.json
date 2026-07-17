@@ -7,5 +7,6 @@
   "time_limit_min": 20,
   "tutor_mode": "hints-first",
   "repo_path": "./repo",
-  "test_command": "go test ./..."
+  "test_command": "go test ./...",
+  "video_url": "https://youtu.be/XEmy13g1Qxc"
 }
