@@ -1,5 +1,5 @@
 // Package draft persists in-progress solution files somewhere that
-// survives session exit: data/drafts/<exercise-id>/, written host-side
+// survives session exit: data/.drafts/<exercise-id>/, written host-side
 // while a session runs (see internal/orchestrator.RunExercise and its
 // SnapshotLoop), independent of the disposable per-session workspace
 // temp dir that gets deleted the moment the session ends (issue #221 --
@@ -57,11 +57,19 @@ type Draft struct {
 	Preview    []string
 }
 
+// draftsDirName is dot-prefixed deliberately: drafts of Go exercises are
+// real .go files, and a visible data/drafts/ would put a package main
+// with no func main() into the module tree -- enough to break a plain
+// `go build ./...` from the repo root as soon as any Go exercise has
+// been practiced. Go's tooling skips dot-directories, so the drafts stay
+// invisible to it while remaining ordinary files for everything else.
+const draftsDirName = ".drafts"
+
 // Dir returns the directory under dataDir where exerciseID's solution
 // draft is stored. The directory itself is created lazily by the first
 // successful Snapshot; callers must not assume it exists.
 func Dir(dataDir, exerciseID string) string {
-	return filepath.Join(dataDir, "drafts", exerciseID)
+	return filepath.Join(dataDir, draftsDirName, exerciseID)
 }
 
 // Snapshot copies workspaceDir's current solution.* files (the same

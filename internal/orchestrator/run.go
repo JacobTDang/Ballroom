@@ -19,7 +19,7 @@ import (
 const revealPollInterval = 200 * time.Millisecond
 
 // draftSnapshotInterval is how often SnapshotLoop polls the workspace
-// for solution.* changes to persist to data/drafts/ -- cheap enough
+// for solution.* changes to persist to data/.drafts/ -- cheap enough
 // (a short-circuiting hash compare on a no-op tick) to run for the
 // whole session without any noticeable cost.
 const draftSnapshotInterval = 2 * time.Second
@@ -34,7 +34,7 @@ const sandboxVolume = "ballroom-sandbox"
 // — see WaitAndReveal) can leak back into the source repo.
 //
 // The workspace is disposable but the user's in-progress code must not
-// be: SnapshotLoop polls it into data/drafts/<exercise-id>/ every
+// be: SnapshotLoop polls it into data/.drafts/<exercise-id>/ every
 // draftSnapshotInterval while the session runs, and a final
 // draft.Snapshot call (deferred below, before cleanupWorkspace) catches
 // whatever was last saved on every exit path -- normal completion,

@@ -236,7 +236,7 @@ func TestPrepareWorkspace_EmptyDraftDirIsByteIdenticalToNoOverlay(t *testing.T) 
 	}
 	defer cleanup1()
 
-	neverSnapshotted := filepath.Join(t.TempDir(), "drafts", "some-exercise-id")
+	neverSnapshotted := filepath.Join(t.TempDir(), ".drafts", "some-exercise-id")
 	withRealButEmptyDraftDir, cleanup2, err := PrepareWorkspace(repo, "", neverSnapshotted)
 	if err != nil {
 		t.Fatalf("PrepareWorkspace (real but empty draftDir): %v", err)

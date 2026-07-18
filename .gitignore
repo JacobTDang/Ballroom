@@ -20,4 +20,4 @@ data/whisper/
 data/transcripts/
 
 # Local in-progress solution drafts (see internal/draft), not shared
-data/drafts/
+data/.drafts/

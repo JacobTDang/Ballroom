@@ -11,7 +11,7 @@ import (
 
 func TestDir(t *testing.T) {
 	got := Dir("/data", "two-pointers-01-go")
-	want := filepath.Join("/data", "drafts", "two-pointers-01-go")
+	want := filepath.Join("/data", ".drafts", "two-pointers-01-go")
 	if got != want {
 		t.Errorf("Dir(...) = %q, want %q", got, want)
 	}
