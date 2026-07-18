@@ -12,9 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
-	"github.com/JacobTDang/Ballroom/internal/exercise"
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
@@ -33,32 +31,6 @@ const (
 	minTextareaRows = 1
 	minViewportRows = 3
 )
-
-// textareaBoxStyle separates the input from the scrolling conversation
-// above it with a single top rule, styled closer to Claude Code's own
-// CLI input — replacing an earlier full rounded box on all four sides.
-// The full box's colored left edge read visually as a persistent
-// vertical "sidebar" running down the pane, a real complaint from live
-// use ("remove the side bar ... it will look a lot nicer"); a lone top
-// border keeps the same visual separation from the conversation above
-// without that vertical bar. PaddingLeft(1) keeps the prompt roughly
-// aligned with the conversation's own left inset
-// (viewportContentStyle's PaddingLeft(2)) instead of sitting flush
-// against the pane's bare left edge. The rule is the palette's dimmed
-// teal, not the full accent -- structure, not content: the bright rule
-// visibly competed with the prompt glyph, which now carries the
-// accent instead.
-var textareaBoxStyle = lipgloss.NewStyle().
-	Border(lipgloss.NormalBorder(), true, false, false, false).
-	BorderForeground(lipgloss.Color(paneInputRule)).
-	PaddingLeft(1)
-
-// viewportContentStyle left-pads the scrolling conversation area — a
-// real readability complaint found live: text printed flush against the
-// pane's own left edge read as cramped. A lipgloss primitive instead of
-// prefixing every print call site by hand (the old architecture's only
-// option).
-var viewportContentStyle = lipgloss.NewStyle().PaddingLeft(2)
 
 // tutorModel is the tutor pane's bubbletea Model — replaces
 // internal/tutor/scrollbox.go's hand-rolled ANSI positioning entirely.
@@ -297,65 +269,6 @@ func newTutorModel(ctx context.Context, cfg Config) (tutorModel, error) {
 	m.refreshViewport()
 
 	return m, nil
-}
-
-// headerHeight is headerView's row count: the status line plus its
-// rule. recomputeLayout subtracts it from the viewport's budget.
-const headerHeight = 2
-
-// headerStatusText is the header's left side, without the leading dot:
-// what session this is. Split out from headerView so tests can assert
-// content without caring about width arithmetic.
-func (m tutorModel) headerStatusText() string {
-	model := m.cfg.Model
-	if m.routingEnabled {
-		model = m.cfg.Model + " +" + m.cfg.OrchestratorModel
-	}
-	status := " tutor · " + model + " · " + m.cfg.Mode
-	// hints-first's whole drill is "first ask vs repeat ask" -- surface
-	// the count the mode's prompt machinery already tracks
-	// (helpRequestCount, adopted from each turnCompleteMsg) instead of
-	// keeping it model-only state the user can't see.
-	if m.cfg.Mode == exercise.TutorModeHintsFirst {
-		status += fmt.Sprintf(" · hints: %d", m.helpRequestCount)
-	}
-	return status
-}
-
-// headerEndpointText is the header's right side: where requests go,
-// and how to leave (the old banner's "Ctrl-D to exit", kept visible
-// permanently now instead of scrolling away).
-func (m tutorModel) headerEndpointText() string {
-	endpoint := m.workerEndpoint
-	if m.routingEnabled && m.orchestratorEndpoint != endpoint {
-		endpoint = endpoint + " / " + m.orchestratorEndpoint
-	}
-	return endpoint + " · Ctrl-D exit "
-}
-
-// headerView is the fixed status line pinned above the viewport -- the
-// session's identity (live dot, model, mode on the left; endpoint and
-// exit hint on the right) over a dim rule. Replaces the old
-// banner-in-transcript, which scrolled out of sight with the first
-// long conversation.
-func (m tutorModel) headerView() string {
-	dot := lipgloss.NewStyle().Foreground(lipgloss.Color(paneTeal)).Render(" ●")
-	left := dot + m.headerStatusText()
-	right := lipgloss.NewStyle().Foreground(lipgloss.Color(paneDimText)).Render(m.headerEndpointText())
-
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		// Too narrow for both: the endpoint is the more dispensable
-		// half. Truncate what's left to the pane.
-		right = ""
-		left = ansi.Truncate(left, max(m.width, 0), "…")
-		gap = m.width - lipgloss.Width(left)
-		if gap < 0 {
-			gap = 0
-		}
-	}
-	rule := lipgloss.NewStyle().Foreground(lipgloss.Color(paneRule)).Render(strings.Repeat("─", max(m.width, 0)))
-	return left + strings.Repeat(" ", gap) + right + "\n" + rule
 }
 
 // RunOneTurn builds a tutor session and submits exactly one message,
@@ -659,7 +572,7 @@ func (m *tutorModel) recomputeLayout() {
 	}
 
 	m.viewport.Width = m.width
-	m.viewport.Height = max(m.height-headerHeight-taRows-textareaBoxStyle.GetVerticalFrameSize()-activityRows, minViewportRows)
+	m.viewport.Height = max(m.height-statusBarHeight-taRows-textareaBoxStyle.GetVerticalFrameSize()-activityRows, minViewportRows)
 }
 
 // activityContentWidth is the actual text width available inside the
@@ -1058,11 +971,11 @@ func (m tutorModel) activityView() string {
 }
 
 func (m tutorModel) View() string {
-	parts := []string{m.headerView(), m.viewport.View()}
+	parts := []string{m.viewport.View()}
 	if av := m.activityView(); av != "" {
 		parts = append(parts, av)
 	}
-	parts = append(parts, textareaBoxStyle.Render(m.textarea.View()))
+	parts = append(parts, textareaBoxStyle.Render(m.textarea.View()), m.statusBarView())
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	fade := m.auroraFade()
 	if fade <= 0 {

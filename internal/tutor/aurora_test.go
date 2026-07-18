@@ -305,12 +305,20 @@ func TestView_AuroraBehindContentWhileThinkingAndAbsentAtRest(t *testing.T) {
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
 	m = newM.(tutorModel)
 
-	if rest := m.View(); strings.Contains(rest, "\x1b[48;2;") {
-		t.Error("View() at rest contains background escapes -- the aurora must be completely absent when idle")
+	// The status bar (the frame's last row) legitimately carries
+	// background escapes at all times — the mode pill and row fill —
+	// so the aurora-absence assertion applies to everything above it.
+	body := func(view string) string {
+		rows := strings.Split(view, "\n")
+		return strings.Join(rows[:len(rows)-1], "\n")
+	}
+
+	if rest := body(m.View()); strings.Contains(rest, "\x1b[48;2;") {
+		t.Error("View() at rest contains background escapes above the status bar -- the aurora must be completely absent when idle")
 	}
 
 	m.turnInFlight = true
-	if thinking := m.View(); !strings.Contains(thinking, "\x1b[48;2;") {
-		t.Error("View() while thinking has no background escapes -- the aurora isn't rendering")
+	if thinking := body(m.View()); !strings.Contains(thinking, "\x1b[48;2;") {
+		t.Error("View() while thinking has no background escapes above the status bar -- the aurora isn't rendering")
 	}
 }
