@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/JacobTDang/Ballroom/internal/palette"
 )
 
 // The thinking aurora: while a turn is in flight, drifting blooms of
@@ -45,17 +47,33 @@ type auroraBlob struct {
 // rad/s was imperceptible, a real complaint) -- and are deliberately
 // non-harmonic so the composition never visibly repeats.
 var auroraBlobs = []auroraBlob{
-	{0x19 / 255.0, 0xE3 / 255.0, 0xF0 / 255.0, 0.60, 0.55, 0.90, 1.40, 0.0, 1.0, 0.35, 1.4}, // cyan
-	{0x6C / 255.0, 0x7B / 255.0, 0xE0 / 255.0, 0.70, 0.50, 0.55, 1.05, 2.1, 3.9, 0.40, 1.0}, // periwinkle
-	{0xC1 / 255.0, 0x3F / 255.0, 0xD0 / 255.0, 0.55, 0.65, 1.10, 0.70, 4.2, 1.3, 0.28, 0.9}, // magenta
-	{0xBF / 255.0, 0xE8 / 255.0, 0xE0 / 255.0, 0.65, 0.55, 0.75, 1.25, 1.0, 5.2, 0.33, 0.8}, // mint
-	{0x19 / 255.0, 0xE3 / 255.0, 0xF0 / 255.0, 0.58, 0.68, 1.30, 0.45, 3.3, 2.6, 0.30, 0.7}, // second cyan
+	blobColor(palette.AuroraCyan, 0.60, 0.55, 0.90, 1.40, 0.0, 1.0, 0.35, 1.4),
+	blobColor(palette.AuroraPeriwinkle, 0.70, 0.50, 0.55, 1.05, 2.1, 3.9, 0.40, 1.0),
+	blobColor(palette.AuroraMagenta, 0.55, 0.65, 1.10, 0.70, 4.2, 1.3, 0.28, 0.9),
+	blobColor(palette.AuroraMint, 0.65, 0.55, 0.75, 1.25, 1.0, 5.2, 0.33, 0.8),
+	blobColor(palette.AuroraCyan, 0.58, 0.68, 1.30, 0.45, 3.3, 2.6, 0.30, 0.7),
+}
+
+// blobColor builds a blob from a palette color plus its motion
+// parameters, so the colors stay readable as names instead of hex
+// triples spread across the literal.
+func blobColor(hex string, rest ...float64) auroraBlob {
+	r, g, b := palette.RGB(hex)
+	blob := auroraBlob{r: float64(r) / 255.0, g: float64(g) / 255.0, b: float64(b) / 255.0}
+	fields := []*float64{&blob.ax, &blob.ay, &blob.fx, &blob.fy, &blob.px, &blob.py, &blob.radius, &blob.weight}
+	for i := range fields {
+		*fields[i] = rest[i]
+	}
+	return blob
 }
 
 // auroraBase is the deep blue the blobs float over -- the border glow
 // keeps a quiet blue presence even where no bloom is passing, so the
 // frame never flickers fully dark mid-turn.
-var auroraBase = [3]float64{0x1E / 255.0, 0x50 / 255.0, 0xA2 / 255.0}
+var auroraBase = func() [3]float64 {
+	r, g, b := palette.RGB(palette.AuroraBase)
+	return [3]float64{float64(r) / 255.0, float64(g) / 255.0, float64(b) / 255.0}
+}()
 
 // auroraBaseWeight is how strongly the base holds its ground against
 // the blobs -- kept low so passing blooms saturate the border with

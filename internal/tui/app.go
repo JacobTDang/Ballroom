@@ -15,6 +15,7 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/config"
 	"github.com/JacobTDang/Ballroom/internal/draft"
 	"github.com/JacobTDang/Ballroom/internal/exercise"
+	"github.com/JacobTDang/Ballroom/internal/palette"
 	"github.com/JacobTDang/Ballroom/internal/preflight"
 	"github.com/JacobTDang/Ballroom/internal/tracker"
 	"github.com/JacobTDang/Ballroom/internal/tutor"
@@ -285,7 +286,7 @@ const menuRightColWidth = 54
 // selected row and every other stage's selected row read as the same
 // highlight — reused directly instead of redefining an identical style.
 var (
-	menuSubtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B8680"))
+	menuSubtitleStyle = lipgloss.NewStyle().Foreground(palette.Lip(palette.MidGray))
 	menuRowHighlight  = cursorRowStyle
 )
 

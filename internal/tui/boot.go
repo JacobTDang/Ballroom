@@ -13,6 +13,7 @@ import (
 
 	"github.com/JacobTDang/Ballroom/internal/config"
 	"github.com/JacobTDang/Ballroom/internal/orchestrator"
+	"github.com/JacobTDang/Ballroom/internal/palette"
 	"github.com/JacobTDang/Ballroom/internal/preflight"
 	"github.com/JacobTDang/Ballroom/internal/tutor"
 )
@@ -36,11 +37,11 @@ const maxOutputLines = 3
 var checkStartDelay = 250 * time.Millisecond
 
 var (
-	checkOKStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#2FA6A6")).Bold(true)
-	checkFailStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F03C3C")).Bold(true)
-	checkDimStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#D9D3C4"))
-	hintStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8A93C")).Bold(true)
-	buildLogStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#D9D3C4")).Faint(true)
+	checkOKStyle   = lipgloss.NewStyle().Foreground(palette.Lip(palette.Teal)).Bold(true)
+	checkFailStyle = lipgloss.NewStyle().Foreground(palette.Lip(palette.Red)).Bold(true)
+	checkDimStyle  = lipgloss.NewStyle().Foreground(palette.Lip(palette.PaleGray))
+	hintStyle      = lipgloss.NewStyle().Foreground(palette.Lip(palette.Gold)).Bold(true)
+	buildLogStyle  = lipgloss.NewStyle().Foreground(palette.Lip(palette.PaleGray)).Faint(true)
 )
 
 type checkDoneMsg preflight.Check
