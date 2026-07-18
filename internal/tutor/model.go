@@ -2,7 +2,10 @@ package tutor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +25,48 @@ import (
 	"github.com/cloudwego/eino/schema"
 	template "github.com/cloudwego/eino/utils/callbacks"
 )
+
+// tutorStateFile is the well-known dotfile the tutor pane writes into
+// the workspace so internal/session's submit/reference commands can
+// attach this session's tutor-assistance footprint to a tracker
+// attempt without talking to this package directly -- same file-based
+// handoff lastTestResultFile (filecontext.go) uses in the other
+// direction (session writing, tutor reading). Duplicated as a literal
+// in internal/session rather than imported, matching this codebase's
+// established local-duplication convention (see filecontext.go's own
+// doc comment on lastTestResultFile).
+const tutorStateFile = ".ballroom-tutor-state.json"
+
+// tutorState is the JSON shape written to tutorStateFile.
+type tutorState struct {
+	HintsUsed int    `json:"hints_used"`
+	TutorMode string `json:"tutor_mode"`
+	Model     string `json:"model"`
+}
+
+// writeTutorState persists the session's current tutor-assistance
+// counters to workDir -- best-effort and silent: a write failure is
+// not something a mid-conversation turn should ever fail or even
+// visibly warn about (the user is mid-flow), matching this file's
+// other silent-degradation paths (e.g. remoteExpr's own no-editor-
+// attached case). A missing/malformed read on the session side already
+// degrades to zero/empty, so a failed write here just means the
+// eventual attempt records nothing extra, never a broken submit.
+//
+// An empty workDir (most of this package's own tests, which build a
+// Config via testConfig without setting WorkDir) is a deliberate no-op
+// rather than writing into the process's current working directory --
+// see TestWriteTutorState_EmptyWorkDirIsANoOp.
+func writeTutorState(workDir string, s tutorState) {
+	if workDir == "" {
+		return
+	}
+	data, err := json.Marshal(s)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(workDir, tutorStateFile), data, 0o644)
+}
 
 // minTextareaRows/minViewportRows are floors, not targets — the textarea
 // always shows at least one row even when empty, and the viewport always
@@ -330,6 +375,13 @@ func newTutorModel(ctx context.Context, cfg Config) (tutorModel, error) {
 	m.comprehensionCheckPending = wantsComprehensionCheck(cfg.Mode)
 	m.refreshViewport()
 
+	// Written once here (hints_used at its true starting value, zero)
+	// so a submit or `ballroom reference` that happens before the user
+	// ever asks the tutor anything still finds real tutor_mode/model
+	// values instead of nothing at all -- see writeTutorState's doc
+	// comment.
+	writeTutorState(cfg.WorkDir, tutorState{TutorMode: cfg.Mode, Model: cfg.Model})
+
 	return m, nil
 }
 
@@ -580,6 +632,12 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		calls := m.activeCalls
 		m.activeCalls = nil
 		m.helpRequestCount = msg.helpRequestCount
+		// Kept in sync with helpRequestCount every turn (success or
+		// failure -- msg.helpRequestCount already reflects either
+		// outcome, see startTurn) so session.Submit/session.Reference
+		// always see this session's latest count, not just its value
+		// at startup.
+		writeTutorState(m.cfg.WorkDir, tutorState{HintsUsed: m.helpRequestCount, TutorMode: m.cfg.Mode, Model: m.cfg.Model})
 		m.recomputeLayout()
 		// toolUsageSummary leaves a permanent record of which tools this
 		// turn used -- the live activity region above is about to

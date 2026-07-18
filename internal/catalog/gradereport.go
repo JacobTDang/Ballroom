@@ -95,7 +95,10 @@ func CodingWeakSpots(attempts []tracker.Attempt, minAttempts int) []CategoryWeak
 			order = append(order, a.Category)
 		}
 		c.Attempts++
-		if a.Result == tracker.ResultFail {
+		// A gave-up attempt (issue #238: asking to see the reference
+		// before solving it) is a miss just like an outright fail -- it
+		// must weigh on the same side of the ratio, not vanish.
+		if a.Result == tracker.ResultFail || a.Result == tracker.ResultGaveUp {
 			c.Fails++
 		}
 	}

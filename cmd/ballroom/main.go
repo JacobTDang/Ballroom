@@ -79,7 +79,8 @@ Usage:
   ballroom sandbox             Free practice, no grading, persists across sessions
   ballroom submit              Submit your solution (run this inside an active session)
   ballroom reference           Reveal and open the reference solution (run this inside an
-                               active session; also bound to M-g)
+                               active session; also bound to M-g -- records the attempt as
+                               given up)
   ballroom tutor               Start the tutor chat (run this inside an active session)
   ballroom return              Return to the host homepage (run this inside an active session)
   ballroom voice               Speak a message into the tutor pane (run on the host while a
@@ -262,9 +263,11 @@ func submitCmd() error {
 // requests the exercise's reference solution be revealed (the same
 // control-directory handshake submitCmd's reveal uses, against a
 // different pair of files -- see internal/orchestrator.WaitAndRevealReference),
-// then opens it in a new nvim split next to the user's own solution file
-// via the editor pane's NVIM_SOCKET RPC. Guarded the same way submitCmd
-// is: this is only meaningful inside a graded exercise session.
+// records the attempt as given up (asking to see the answer IS the
+// outcome -- issue #238), then opens it in a new nvim split next to the
+// user's own solution file via the editor pane's NVIM_SOCKET RPC.
+// Guarded the same way submitCmd is: this is only meaningful inside a
+// graded exercise session.
 func referenceCmd() error {
 	startedAtRaw := os.Getenv("PRACTICE_STARTED_AT")
 	if startedAtRaw == "" {
@@ -290,7 +293,7 @@ func referenceCmd() error {
 		RevealTimeout:  30 * time.Second,
 	}
 
-	if err := session.Reference(cfg, os.Stdout); err != nil {
+	if _, err := session.Reference(cfg, os.Stdout); err != nil {
 		return err
 	}
 

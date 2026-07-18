@@ -71,6 +71,21 @@ func TestGroupByProblem_NotSolvedIfNoVariantPassed(t *testing.T) {
 	}
 }
 
+// TestGroupByProblem_GaveUpDoesNotCountAsSolved is issue #238's core
+// tracker.ProblemStatus.Solved guarantee: asking to see the reference
+// solution must never register as having solved the problem, even
+// though it's a "real" logged attempt (unlike an untouched variant).
+func TestGroupByProblem_GaveUpDoesNotCountAsSolved(t *testing.T) {
+	statuses := []ExerciseStatus{
+		fakeVariant("p1", "p1-go", "pattern", "go", "P1", 1, tracker.ResultGaveUp),
+	}
+
+	problems := GroupByProblem(statuses)
+	if problems[0].Solved {
+		t.Error("expected Solved=false after giving up -- gave-up must never count as solved")
+	}
+}
+
 func TestGroupByProblem_AttemptsSummedAcrossVariants(t *testing.T) {
 	statuses := []ExerciseStatus{
 		fakeVariant("p1", "p1-go", "pattern", "go", "P1", 2, tracker.ResultFail),
@@ -156,5 +171,24 @@ func TestMockDue_FalseCases(t *testing.T) {
 	}
 	if MockDue(p) {
 		t.Error("MockDue = true for a coding problem, want false")
+	}
+}
+
+// TestMockDue_GaveUpOnInterviewerCountsAsAttempted confirms issue #238
+// needs no MockDue change: a gave-up interviewer attempt is still an
+// attempt (Attempts > 0), so it stops the mock-due nudge exactly the
+// same way a fail already does -- ReviewDue's date-based resurfacing
+// takes over from there instead.
+func TestMockDue_GaveUpOnInterviewerCountsAsAttempted(t *testing.T) {
+	p := ProblemStatus{
+		ProblemID: "url-shortener-01",
+		Category:  exercise.CategorySystemDesign,
+		Variants: []ExerciseStatus{
+			{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageCoach}, Attempts: 1, LastResult: tracker.ResultPass},
+			{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageInterviewer}, Attempts: 1, LastResult: tracker.ResultGaveUp},
+		},
+	}
+	if MockDue(p) {
+		t.Error("MockDue = true after giving up on the interviewer pass, want false -- it's no longer untouched")
 	}
 }

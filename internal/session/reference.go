@@ -6,25 +6,64 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
 
-// Reference requests the exercise's reference solution be revealed and
-// waits for it to land in the workspace -- the in-container side of
-// `ballroom reference` (bound to M-g). Mirrors Submit's own request/wait
-// shape (requestReveal/waitForReady), reusing the same control-directory
-// handshake pattern against a different pair of files so the host's
-// reveal watcher (orchestrator.WaitAndRevealReference) can run
-// independently of the submit watcher and this can be requested before,
-// after, or without ever submitting.
-func Reference(cfg Config, stdout io.Writer) error {
+// Reference requests the exercise's reference solution be revealed,
+// waits for it to land in the workspace, and records the attempt as
+// given up -- the in-container side of `ballroom reference` (bound to
+// M-g). Asking to see the answer before solving it IS the outcome
+// (issue #238): recording it here, before the caller ever opens the
+// file, keeps the stats honest instead of leaving the row for a submit
+// that may never come. A reveal that times out records nothing --
+// there was no real "give up" moment, just a broken handshake.
+//
+// Mirrors Submit's own request/wait/log shape (requestReveal/
+// waitForReady, then building and logging a tracker.Attempt), reusing
+// the same control-directory handshake pattern against a different
+// pair of files so the host's reveal watcher
+// (orchestrator.WaitAndRevealReference) can run independently of the
+// submit watcher and this can be requested before, after, or without
+// ever submitting.
+func Reference(cfg Config, stdout io.Writer) (tracker.Attempt, error) {
 	if err := requestReferenceReveal(cfg); err != nil {
-		return err
+		return tracker.Attempt{}, err
 	}
 	if err := waitForReferenceReady(cfg); err != nil {
-		return err
+		return tracker.Attempt{}, err
 	}
-	fmt.Fprintln(stdout, "reference solution revealed at reference/solution.*")
-	return nil
+
+	// The tutor pane's assistance counters for this session -- same
+	// graceful degradation as Submit's own use of this (see
+	// readTutorState's doc comment).
+	ts := readTutorState(cfg.WorkspaceDir)
+	attempt := tracker.Attempt{
+		ExerciseID:   cfg.ExerciseID,
+		Category:     cfg.Category,
+		Language:     cfg.Language,
+		Date:         time.Now().Format("2006-01-02"),
+		TimeSpentMin: elapsedMinutes(cfg),
+		Result:       tracker.ResultGaveUp,
+		HintsUsed:    &ts.HintsUsed,
+		TutorMode:    &ts.TutorMode,
+		Model:        &ts.Model,
+	}
+
+	tr, err := tracker.Open(cfg.DBPath)
+	if err != nil {
+		return tracker.Attempt{}, fmt.Errorf("session: open tracker: %w", err)
+	}
+	defer tr.Close()
+
+	id, err := tr.LogAttempt(attempt)
+	if err != nil {
+		return tracker.Attempt{}, fmt.Errorf("session: log attempt: %w", err)
+	}
+	attempt.ID = id
+
+	fmt.Fprintf(stdout, "reference solution revealed at reference/solution.* -- recorded as given up (attempt #%d)\n", id)
+	return attempt, nil
 }
 
 func requestReferenceReveal(cfg Config) error {

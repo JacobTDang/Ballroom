@@ -429,6 +429,99 @@ func TestNewTutorModel_NoRoutingHeaderAndHistorySeededWithSystemPrompt(t *testin
 // frame (not as a transcript entry that scrolls away), shows the
 // session's identity and endpoint, and keeps the exit hint the old
 // header carried.
+// TestNewTutorModel_WritesTutorStateDotfileAtStartup covers the initial,
+// pre-any-turn write: session/submit.go and session/reference.go read
+// this file to attach hints_used/tutor_mode/model to an attempt, and
+// must see real (zero, not missing) values even for a submit or
+// reference reveal that happens before the user ever asks the tutor
+// anything.
+func TestNewTutorModel_WritesTutorStateDotfileAtStartup(t *testing.T) {
+	mock := newSequencedOllama(t, "hi")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+	cfg.Model = "llama3.1:8b"
+	cfg.WorkDir = t.TempDir()
+
+	if _, err := newTutorModel(context.Background(), cfg); err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(cfg.WorkDir, tutorStateFile))
+	if err != nil {
+		t.Fatalf("read tutor state dotfile: %v", err)
+	}
+	var got tutorState
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal tutor state: %v", err)
+	}
+	if got.HintsUsed != 0 {
+		t.Errorf("HintsUsed = %d, want 0 before any turn", got.HintsUsed)
+	}
+	if got.TutorMode != exercise.TutorModeSyntaxOnly {
+		t.Errorf("TutorMode = %q, want %q", got.TutorMode, exercise.TutorModeSyntaxOnly)
+	}
+	if got.Model != "llama3.1:8b" {
+		t.Errorf("Model = %q, want %q", got.Model, "llama3.1:8b")
+	}
+}
+
+// TestTutorModel_TurnCompleteUpdatesTutorStateDotfileWithHintsUsed covers
+// the live-updating half: the count session/submit.go and
+// session/reference.go pick up must track m.helpRequestCount as it
+// actually grows, not just the startup snapshot.
+func TestTutorModel_TurnCompleteUpdatesTutorStateDotfileWithHintsUsed(t *testing.T) {
+	mock := newSequencedOllama(t, "reply one", "reply two")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly // skips the comprehension check
+	cfg.WorkDir = t.TempDir()
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	m = submitAndRun(t, m, "first question")
+
+	readState := func() tutorState {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(cfg.WorkDir, tutorStateFile))
+		if err != nil {
+			t.Fatalf("read tutor state dotfile: %v", err)
+		}
+		var s tutorState
+		if err := json.Unmarshal(data, &s); err != nil {
+			t.Fatalf("unmarshal tutor state: %v", err)
+		}
+		return s
+	}
+
+	if got := readState(); got.HintsUsed != 1 {
+		t.Errorf("HintsUsed after one turn = %d, want 1", got.HintsUsed)
+	}
+
+	m = submitAndRun(t, m, "second question")
+	if got := readState(); got.HintsUsed != 2 {
+		t.Errorf("HintsUsed after two turns = %d, want 2", got.HintsUsed)
+	}
+}
+
+// TestWriteTutorState_EmptyWorkDirIsANoOp guards against a real
+// footgun: most of this package's tests build a Config via testConfig,
+// which leaves WorkDir empty, and newTutorModel now writes on every
+// construction -- without this guard, every one of those tests would
+// litter a stray dotfile into the process's current working directory
+// (the package source tree under `go test`) instead of a real
+// exercise workspace.
+func TestWriteTutorState_EmptyWorkDirIsANoOp(t *testing.T) {
+	writeTutorState("", tutorState{HintsUsed: 3, TutorMode: "hints-first", Model: "x"})
+	if _, err := os.Stat(tutorStateFile); err == nil {
+		os.Remove(tutorStateFile)
+		t.Fatal("writeTutorState with an empty workDir wrote into the current directory")
+	}
+}
+
 func TestTutorModel_StatusBarPinnedBelowInputWithEndpointAndExitHint(t *testing.T) {
 	mock := newSequencedOllama(t, "reply")
 	cfg := testConfig(mock.URL)

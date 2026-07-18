@@ -455,6 +455,73 @@ func TestSubmit_WritesAttemptToTrackerDB(t *testing.T) {
 	}
 }
 
+func TestSubmit_RecordsHintsUsedTutorModeAndModelFromDotfile(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.TestCommand = "true"
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+	writeTutorStateFixture(t, cfg.WorkspaceDir, tutorState{HintsUsed: 3, TutorMode: "hints-first", Model: "llama3.1:8b"})
+
+	attempt, err := Submit(cfg, strings.NewReader("\n"), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	if attempt.HintsUsed == nil || *attempt.HintsUsed != 3 {
+		t.Errorf("HintsUsed = %v, want 3", attempt.HintsUsed)
+	}
+	if attempt.TutorMode == nil || *attempt.TutorMode != "hints-first" {
+		t.Errorf("TutorMode = %v, want %q", attempt.TutorMode, "hints-first")
+	}
+	if attempt.Model == nil || *attempt.Model != "llama3.1:8b" {
+		t.Errorf("Model = %v, want %q", attempt.Model, "llama3.1:8b")
+	}
+
+	// Round-trip through the DB too, not just the in-memory return value.
+	tr, err := tracker.Open(cfg.DBPath)
+	if err != nil {
+		t.Fatalf("tracker.Open: %v", err)
+	}
+	defer tr.Close()
+	attempts, err := tr.ListAttempts()
+	if err != nil {
+		t.Fatalf("ListAttempts: %v", err)
+	}
+	if len(attempts) != 1 || attempts[0].HintsUsed == nil || *attempts[0].HintsUsed != 3 {
+		t.Errorf("logged attempts = %+v, want HintsUsed 3 round-tripped through the DB", attempts)
+	}
+}
+
+// TestSubmit_MissingTutorStateDotfileDegradesToZeroValue covers a
+// submit that happens before the tutor pane has ever written its state
+// dotfile (or a workspace with no tutor pane at all, e.g. an older
+// image) -- must never fail or warn, just degrade to zero/empty.
+func TestSubmit_MissingTutorStateDotfileDegradesToZeroValue(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.TestCommand = "true"
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+	// Deliberately no tutor-state dotfile written.
+
+	var out bytes.Buffer
+	attempt, err := Submit(cfg, strings.NewReader("\n"), &out)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if attempt.HintsUsed == nil || *attempt.HintsUsed != 0 {
+		t.Errorf("HintsUsed = %v, want a non-nil 0", attempt.HintsUsed)
+	}
+	if attempt.TutorMode == nil || *attempt.TutorMode != "" {
+		t.Errorf("TutorMode = %v, want a non-nil empty string", attempt.TutorMode)
+	}
+	if attempt.Model == nil || *attempt.Model != "" {
+		t.Errorf("Model = %v, want a non-nil empty string", attempt.Model)
+	}
+	if strings.Contains(out.String(), "warn") || strings.Contains(out.String(), "error") {
+		t.Errorf("output %q should not warn about a missing tutor-state dotfile", out.String())
+	}
+}
+
 func TestSubmit_ComplexityQuizOnGreenCodingSubmit(t *testing.T) {
 	cfg := baseConfig(t)
 	cfg.TestCommand = "true"

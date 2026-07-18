@@ -13,7 +13,12 @@ var (
 	langStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#9B5FB0"))
 	passStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#2FA6A6"))
 	failStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#F03C3C"))
-	sparkleStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8A93C")).Bold(true)
+	// gaveUpStyle marks a tracker.ResultGaveUp attempt (issue #238) --
+	// orange, distinct from passStyle's teal and failStyle's red, and
+	// deliberately not gold: sparkleStyle/dueMarkerStyle already own
+	// gold for "a nudge to do something", not a recorded outcome.
+	gaveUpStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#F0862E"))
+	sparkleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8A93C")).Bold(true)
 	// dueMarkerStyle colors the picker's "· mock due" / "· review due"
 	// nudges -- gold, but not sparkleStyle's bold: a nudge, not an alert.
 	dueMarkerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8A93C"))

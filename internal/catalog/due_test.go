@@ -93,6 +93,15 @@ func TestReviewDue_Table(t *testing.T) {
 			false,
 		},
 		{
+			// issue #238: giving up (Solved stays false -- see
+			// problems_test.go's GaveUpDoesNotCountAsSolved) resurfaces on
+			// the same unsolved 3-day cadence a fail does, not the
+			// solved-only 30-day one.
+			"gave up 3 days ago is due for a retry",
+			ProblemStatus{Variants: []ExerciseStatus{attemptedVariant("go", "2026-07-13", tracker.ResultGaveUp)}},
+			true,
+		},
+		{
 			"solved 30 days ago is due for a refresh",
 			ProblemStatus{Solved: true, Variants: []ExerciseStatus{attemptedVariant("go", "2026-06-16", tracker.ResultPass)}},
 			true,

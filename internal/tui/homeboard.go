@@ -142,8 +142,11 @@ func renderHomeboard(problems []catalog.ProblemStatus, attempts []tracker.Attemp
 		for i := len(attempts) - 1; i >= start; i-- {
 			a := attempts[i]
 			mark := failStyle.Render("✗")
-			if a.Result == tracker.ResultPass {
+			switch a.Result {
+			case tracker.ResultPass:
 				mark = passStyle.Render("✓")
+			case tracker.ResultGaveUp:
+				mark = gaveUpStyle.Render("~")
 			}
 			parts = append(parts, mark+" "+a.ExerciseID)
 		}

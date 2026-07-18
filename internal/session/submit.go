@@ -182,6 +182,11 @@ func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, err
 		}
 	}
 
+	// The tutor pane's assistance counters for this session, degrading
+	// silently to the zero value if it never wrote anything (sandbox
+	// mode, or a submit that races ahead of the tutor pane's own
+	// startup write) -- see readTutorState's doc comment.
+	ts := readTutorState(cfg.WorkspaceDir)
 	attempt := tracker.Attempt{
 		ExerciseID:   cfg.ExerciseID,
 		Category:     cfg.Category,
@@ -191,6 +196,9 @@ func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, err
 		Result:       result,
 		Notes:        notes,
 		GradeSummary: gradeSummary,
+		HintsUsed:    &ts.HintsUsed,
+		TutorMode:    &ts.TutorMode,
+		Model:        &ts.Model,
 	}
 
 	tr, err := tracker.Open(cfg.DBPath)
