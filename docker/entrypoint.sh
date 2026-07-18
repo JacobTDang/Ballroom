@@ -5,7 +5,7 @@ set -euo pipefail
 # panes: editor (nvim) full-width across the top, with tutor chat and a
 # terminal below it side by side — tutor under the problem statement,
 # terminal under the editor. Switch panes with M-1/M-2/M-3 or Ctrl-Tab
-# (see tmux.conf). See interview_prep_mvp_spec.md Section 3.1.
+# (see tmux.conf).
 
 SESSION="${SESSION_NAME:-practice}"
 WORKDIR="${WORKDIR:-/workspace}"
