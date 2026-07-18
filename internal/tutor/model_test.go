@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -1706,5 +1707,296 @@ func TestTutorModel_RetainsConversationHistoryAcrossTurns(t *testing.T) {
 	}
 	if second[4].Content != "second line" {
 		t.Errorf("second request messages[4] (user2) = %q, want %q", second[4].Content, "second line")
+	}
+}
+
+// --- Stage 5: per-turn cancellation (Esc/Ctrl-C) and a bounded per-turn
+// timeout, issue #239 -- before this, the key handler covered exactly
+// Ctrl-D (quit)/Enter (submit)/PgUp/PgDn (scroll); Ctrl-C reached the
+// textarea unhandled, a turn had no bound of its own (only
+// ollamaRequestTimeout's PER-REQUEST 120s, and a react.Agent turn can
+// make several requests), and a cancelled or failed turn discarded the
+// user's message outright.
+
+func TestTutorModel_CtrlCWhileTurnInFlightCancelsAndDoesNotQuit(t *testing.T) {
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+	m = detectAndApply(t, m)
+
+	m.textarea.SetValue("a question")
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(tutorModel)
+	if !m.turnInFlight {
+		t.Fatal("setup: expected turnInFlight after submit")
+	}
+
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	got := newM.(tutorModel)
+
+	if got.turnInFlight {
+		t.Error("turnInFlight = true after Ctrl-C mid-turn, want false -- Ctrl-C should cancel the turn")
+	}
+	if cmd != nil {
+		if _, isQuit := cmd().(tea.QuitMsg); isQuit {
+			t.Error("Ctrl-C mid-turn produced tea.Quit, want the turn cancelled instead of the program exiting")
+		}
+	}
+}
+
+func TestTutorModel_CtrlCWhileIdleQuits(t *testing.T) {
+	m := newTutorLayoutOnly()
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("Ctrl-C while idle produced no command, want tea.Quit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Error("Ctrl-C while idle did not quit -- matching every other program in this codebase")
+	}
+}
+
+func TestTutorModel_EscWhileTurnInFlightCancels(t *testing.T) {
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+	m = detectAndApply(t, m)
+
+	m.textarea.SetValue("a question")
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(tutorModel)
+	if !m.turnInFlight {
+		t.Fatal("setup: expected turnInFlight after submit")
+	}
+
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := newM.(tutorModel)
+
+	if got.turnInFlight {
+		t.Error("turnInFlight = true after Esc mid-turn, want false")
+	}
+	if cmd != nil {
+		t.Error("expected Esc cancellation to return no further command -- it must not wait on the turn's own goroutine")
+	}
+	if !strings.Contains(ansi.Strip(got.viewport.View()), "cancelled") {
+		t.Errorf("viewport view %q, want a cancellation note", ansi.Strip(got.viewport.View()))
+	}
+}
+
+func TestTutorModel_CancelledTurnRestoresTextIntoEmptyTextarea(t *testing.T) {
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+	m = detectAndApply(t, m)
+
+	m.textarea.SetValue("please explain recursion")
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(tutorModel)
+	if m.textarea.Value() != "" {
+		t.Fatal("setup: expected submit to clear the textarea")
+	}
+
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := newM.(tutorModel)
+
+	if got.textarea.Value() != "please explain recursion" {
+		t.Errorf("textarea.Value() = %q after cancel, want the original message restored verbatim", got.textarea.Value())
+	}
+}
+
+// TestTutorModel_CancelledTurnWithTypedAheadTextSurfacesOldTextInsteadOfClobbering
+// covers the "they may have typed ahead" case the issue calls out
+// explicitly: a cancel must never overwrite a fresh, unsent draft the
+// user has already started typing while the old turn was in flight.
+func TestTutorModel_CancelledTurnWithTypedAheadTextSurfacesOldTextInsteadOfClobbering(t *testing.T) {
+	mock := newSequencedOllama(t, "reply")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+	m = detectAndApply(t, m)
+
+	m.textarea.SetValue("please explain recursion")
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(tutorModel)
+
+	// Typed ahead while the turn was in flight -- a fresh, unsent draft
+	// that a cancel must not clobber.
+	m.textarea.SetValue("actually never mind, something else")
+
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := newM.(tutorModel)
+
+	if got.textarea.Value() != "actually never mind, something else" {
+		t.Errorf("textarea.Value() = %q after cancel, want the typed-ahead draft left untouched", got.textarea.Value())
+	}
+	if !strings.Contains(ansi.Strip(got.viewport.View()), "please explain recursion") {
+		t.Errorf("viewport view %q, want the cancelled message surfaced in the note since it couldn't go back in the textarea", ansi.Strip(got.viewport.View()))
+	}
+}
+
+func TestTutorModel_FailedTurnRestoresText(t *testing.T) {
+	cfg := testConfig("http://127.0.0.1:1") // refuses immediately
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "please explain recursion")
+
+	if got.textarea.Value() != "please explain recursion" {
+		t.Errorf("textarea.Value() = %q after a failed turn, want the original message restored instead of discarded", got.textarea.Value())
+	}
+}
+
+// TestTutorModel_FailedTurnWithTypedAheadTextSurfacesOldText is the
+// failure-path counterpart of the cancel-path test above -- the same
+// "never clobber a fresh draft" contract applies regardless of why the
+// turn didn't complete.
+func TestTutorModel_FailedTurnWithTypedAheadTextSurfacesOldText(t *testing.T) {
+	cfg := testConfig("http://127.0.0.1:1") // refuses immediately
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+	m = detectAndApply(t, m)
+
+	m.textarea.SetValue("please explain recursion")
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(tutorModel)
+	if cmd == nil {
+		t.Fatal("submit produced no command")
+	}
+	m.textarea.SetValue("a fresh draft typed while waiting")
+
+	for i := 0; i < 100; i++ {
+		msg := cmd()
+		newM, cmd = m.Update(msg)
+		m = newM.(tutorModel)
+		if _, ok := msg.(turnCompleteMsg); ok {
+			break
+		}
+		if cmd == nil {
+			t.Fatal("turn ended without a turnCompleteMsg")
+		}
+	}
+
+	if m.textarea.Value() != "a fresh draft typed while waiting" {
+		t.Errorf("textarea.Value() = %q, want the fresh draft left untouched", m.textarea.Value())
+	}
+	if !strings.Contains(ansi.Strip(m.viewport.View()), "please explain recursion") {
+		t.Errorf("viewport view %q, want the failed message surfaced in the note", ansi.Strip(m.viewport.View()))
+	}
+}
+
+// TestTutorModel_PerTurnTimeoutProducesTimeoutFlavoredNote proves
+// turnTimeout (not just ollamaRequestTimeout's per-REQUEST bound) is
+// actually wired to the whole turn, and that hitting it reads
+// differently from a plain connectivity failure -- a timeout genuinely
+// reached the model, it just never got a reply back in time.
+func TestTutorModel_PerTurnTimeoutProducesTimeoutFlavoredNote(t *testing.T) {
+	hang := make(chan struct{})
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-hang // never respond until the test cleans up
+	}))
+	t.Cleanup(func() {
+		close(hang)
+		mock.Close()
+	})
+
+	origTimeout := turnTimeout
+	turnTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { turnTimeout = origTimeout })
+
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "a question that will hang forever")
+
+	view := ansi.Strip(got.viewport.View())
+	if !strings.Contains(view, "timed out") {
+		t.Errorf("viewport view %q, want a timeout-flavored note", view)
+	}
+	if strings.Contains(view, "could not reach") {
+		t.Errorf("viewport view %q, want the timeout note, not the generic connectivity wording", view)
+	}
+}
+
+// TestTutorModel_StaleTurnCompleteMsgAfterCancelIsIgnored locks in
+// turnSeq's whole reason for existing: bubbletea's runtime starts a
+// turn's waitForActivityEvent goroutine the moment submit returns it,
+// independent of anything Update does afterward -- cancelling can't
+// un-start it. That goroutine WILL eventually deliver the cancelled
+// turn's own result (ctx cancellation aborts the request, but not
+// instantly), tagged with the seq it was started under. Without the
+// seq guard, that late delivery would silently flip turnInFlight back
+// on (or off, stomping a NEW turn already running by then) and leak a
+// stray note into the transcript.
+func TestTutorModel_StaleTurnCompleteMsgAfterCancelIsIgnored(t *testing.T) {
+	m := newTutorLayoutOnly()
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+	m.turnInFlight = true
+	m.turnSeq = 5 // this generation is the one currently tracked
+
+	// A result tagged with an earlier (already-retired, e.g. by a
+	// cancel) generation must not touch state that belongs to 5.
+	newM, cmd := m.Update(turnCompleteMsg{seq: 4, err: fmt.Errorf("stale failure"), userMessage: "old message"})
+	got := newM.(tutorModel)
+
+	if !got.turnInFlight {
+		t.Error("a stale turnCompleteMsg (old seq) changed turnInFlight, want the current turn's state left untouched")
+	}
+	if cmd != nil {
+		t.Error("a stale turnCompleteMsg re-armed a wait, want it dropped outright")
+	}
+	if strings.Contains(ansi.Strip(got.viewport.View()), "stale failure") {
+		t.Error("a stale turnCompleteMsg's error note leaked into the transcript")
+	}
+	if len(got.displayBlocks) != 0 {
+		t.Errorf("displayBlocks = %+v, want untouched by a stale message", got.displayBlocks)
 	}
 }
