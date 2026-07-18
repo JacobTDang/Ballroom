@@ -1,0 +1,13 @@
+{
+  "id": "dropbox-01-coach",
+  "problem_id": "dropbox-01",
+  "title": "Design Dropbox",
+  "kind": "design",
+  "category": "system-design",
+  "language": "coach",
+  "time_limit_min": 90,
+  "tutor_mode": "design-coach",
+  "repo_path": "./repo",
+  "video_url": "https://youtu.be/_UZ1ngy-kOI",
+  "difficulty": "medium"
+}

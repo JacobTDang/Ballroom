@@ -1,6 +1,8 @@
 package catalog
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/JacobTDang/Ballroom/internal/exercise"
@@ -190,5 +192,49 @@ func TestMockDue_GaveUpOnInterviewerCountsAsAttempted(t *testing.T) {
 	}
 	if MockDue(p) {
 		t.Error("MockDue = true after giving up on the interviewer pass, want false -- it's no longer untouched")
+	}
+}
+
+// TestDesignProblems_EveryInterviewerVariantHasACoachVariant guards issue
+// #256: MockDue (above) can only ever fire for a design problem that has
+// both a coach and an interviewer variant -- the roadmap does every
+// question coach-first, then interviewer as the timed mock. A design
+// problem shipped with an interviewer variant and no coach sibling can
+// never surface the "mock due" nudge, silently breaking the method for
+// that question exactly the way the seven system-design mocks did before
+// issue #256. This walks the real exercises/ tree on disk (not a
+// fixture) so a future problem added without its coach pair fails this
+// test instead of quietly shipping broken.
+func TestDesignProblems_EveryInterviewerVariantHasACoachVariant(t *testing.T) {
+	exercisesDir := filepath.Join("..", "..", "exercises")
+	entries, err := os.ReadDir(exercisesDir)
+	if err != nil {
+		t.Fatalf("read %s: %v", exercisesDir, err)
+	}
+
+	languagesByProblem := make(map[string]map[string]bool)
+	titleByProblem := make(map[string]string)
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == "_template" {
+			continue
+		}
+		ex, err := exercise.Load(filepath.Join(exercisesDir, entry.Name(), "exercise.json"))
+		if err != nil {
+			t.Fatalf("load exercise %s: %v", entry.Name(), err)
+		}
+		if ex.Kind != exercise.KindDesign {
+			continue
+		}
+		if languagesByProblem[ex.ProblemID] == nil {
+			languagesByProblem[ex.ProblemID] = make(map[string]bool)
+		}
+		languagesByProblem[ex.ProblemID][ex.Language] = true
+		titleByProblem[ex.ProblemID] = ex.Title
+	}
+
+	for problemID, languages := range languagesByProblem {
+		if languages[exercise.LanguageInterviewer] && !languages[exercise.LanguageCoach] {
+			t.Errorf("%s (%q) has an interviewer variant but no coach variant -- MockDue can never fire for it", problemID, titleByProblem[problemID])
+		}
 	}
 }
