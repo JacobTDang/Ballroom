@@ -183,6 +183,9 @@ const (
 	// or a picker) -- see search.go. The pickers' own filter only sees
 	// one category, which is the step this skips.
 	stageSearch
+	// stageRecommend is the "next up" picker -- the dashboard's
+	// recommendations, made launchable (see recommend.go).
+	stageRecommend
 	stageStats
 	// stageSettings is the Settings menu entry's landing screen: a
 	// Worker model / Orchestrator model role choice (see settingsTarget)
@@ -370,6 +373,10 @@ type appModel struct {
 	searchQuery  string
 	searchCursor int
 
+	// stageRecommend — what to work on next, recomputed on entry.
+	recommendations []catalog.Recommendation
+	recommendCursor int
+
 	// stageStats
 	statsStatuses   []catalog.ExerciseStatus
 	statsRecent     []tracker.Attempt
@@ -553,6 +560,8 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateResumeDraft(msg)
 		case stageSearch:
 			return m.updateSearch(msg)
+		case stageRecommend:
+			return m.updateRecommend(msg)
 		case stageStats:
 			return m.updateStats(msg)
 		case stageSettings:
@@ -591,6 +600,9 @@ func (m appModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searchQuery = ""
 		m.searchCursor = 0
 		m.stage = stageSearch
+	case "n":
+		m.refreshRecommendations()
+		m.stage = stageRecommend
 	case "?":
 		return m.openHelp()
 	case "enter":
@@ -1487,6 +1499,8 @@ func (m appModel) renderRight() string {
 		return m.renderResumeDraft()
 	case stageSearch:
 		return m.renderSearch()
+	case stageRecommend:
+		return m.renderRecommend()
 	case stageStats:
 		return m.renderStats()
 	case stageSettings:
