@@ -605,20 +605,16 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockNote, raw: activityErrorNote(msg.routingWarning)})
 		}
 		if msg.err != nil {
-			// A per-turn timeout (turnTimeout, distinct from
-			// ollamaRequestTimeout's per-REQUEST scope) gets its own
+			// classifyTurnError (history.go) gives a context-window
+			// overflow, a per-turn timeout, or a cancellation their own
 			// wording instead of the generic connectivity phrasing below
-			// -- a timeout genuinely reached the model, it just never got
-			// a reply back in time, which "could not reach" describes
-			// badly. Matched by substring, not errors.Is: eino/its
-			// underlying provider clients don't reliably preserve the
-			// error chain (see fallback.go's isEmptyChoicesErr for the
-			// same reasoning applied to a different provider failure),
-			// but the deadline error's own message text survives any
-			// amount of %v/%w wrapping either way.
-			detail := fmt.Sprintf("could not reach %s: %v", msg.endpoint, msg.err)
-			if strings.Contains(msg.err.Error(), context.DeadlineExceeded.Error()) {
-				detail = fmt.Sprintf("turn timed out after %v with no reply -- please try again", turnTimeout)
+			// -- none of those three actually failed to REACH the model
+			// the way "could not reach" implies. Empty means none of
+			// those matched, so this keeps today's original wording for
+			// a genuine connectivity/provider-rejection failure.
+			detail := classifyTurnError(msg.err)
+			if detail == "" {
+				detail = fmt.Sprintf("could not reach %s: %v", msg.endpoint, msg.err)
 			}
 			m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockNote, raw: turnFailedFallbackReply})
 			m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockNote, raw: activityErrorNote(m.recoverPendingText(detail))})
@@ -626,7 +622,15 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.pendingUserText = ""
-		m.history = append(m.history, schema.UserMessage(msg.userMessage), schema.AssistantMessage(msg.reply.Content, nil))
+		// trimHistory (history.go) keeps history from growing without
+		// bound across a long session -- resent in full every turn, it
+		// would both slow every request down and, eventually, exceed the
+		// provider's own hard context-length limit outright. Applied
+		// here, right as a new pair is added, rather than only at
+		// request-build time, so m.history itself never carries more
+		// than the budget either -- there's no other reason to keep the
+		// untrimmed tail around once a pair has aged out of it.
+		m.history = trimHistory(append(m.history, schema.UserMessage(msg.userMessage), schema.AssistantMessage(msg.reply.Content, nil)), historyBudgetChars)
 		// The block keeps the raw reply -- styleMarkdown runs per frame
 		// in renderBlock, and history above keeps the raw text too,
 		// because that goes back to the model as context and escape
