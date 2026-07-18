@@ -1,0 +1,12 @@
+{
+  "id": "cursor-pagination-01-cpp",
+  "problem_id": "cursor-pagination-01",
+  "title": "Cursor Pagination",
+  "category": "implementation",
+  "language": "cpp",
+  "time_limit_min": 45,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "clang++ -std=c++17 -g -O0 -o /tmp/t hidden_test.cpp && /tmp/t",
+  "difficulty": "medium"
+}
