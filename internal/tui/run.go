@@ -46,7 +46,7 @@ func Run(cfg config.Config) error {
 
 		switch final.outcome {
 		case outcomeRunExercise:
-			if runErr := orchestrator.RunExercise(cfg, final.exerciseToRun); runErr != nil {
+			if runErr := orchestrator.RunExercise(cfg, final.exerciseToRun, final.draftDirToUse); runErr != nil {
 				fmt.Fprintf(os.Stderr, "ballroom: %v\n", runErr)
 			}
 			resume = appResume{stage: stageProblems, category: final.category}

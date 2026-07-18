@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/JacobTDang/Ballroom/internal/config"
+	"github.com/JacobTDang/Ballroom/internal/draft"
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 	"github.com/JacobTDang/Ballroom/internal/orchestrator"
 	"github.com/JacobTDang/Ballroom/internal/session"
@@ -188,7 +189,10 @@ func runExercise(cfg config.Config, id string) error {
 	if err != nil {
 		return fmt.Errorf("unknown exercise %q — run `ballroom help` for usage: %w", id, err)
 	}
-	return orchestrator.RunExercise(cfg, ex)
+	// The CLI has no prompt to ask with, so it resumes any saved draft
+	// -- the same thing the TUI's default choice does, and never a
+	// silent discard.
+	return orchestrator.RunExercise(cfg, ex, draft.Dir(cfg.DataDir, ex.ID))
 }
 
 func sandboxCmd() error {
