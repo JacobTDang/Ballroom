@@ -596,3 +596,78 @@ func TestSubmit_PrintsSolutionVideoWithResults(t *testing.T) {
 		t.Errorf("output missing the video line:\n%s", out.String())
 	}
 }
+
+func TestSubmit_PassingCodingSubmitRevealsReferenceAndPrintsLocation(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.TestCommand = "true"
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+	simulateHostReferenceReveal(t, cfg.ControlDir)
+
+	var out bytes.Buffer
+	if _, err := Submit(cfg, strings.NewReader("\n"), &out); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(cfg.ControlDir, "reference.request")); err != nil {
+		t.Errorf("expected a passing submit to also request the reference reveal: %v", err)
+	}
+	if !strings.Contains(out.String(), "reference") {
+		t.Errorf("output %q should tell the user where the reference solution is", out.String())
+	}
+}
+
+func TestSubmit_FailingCodingSubmitDoesNotRequestReference(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.TestCommand = "false"
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	if _, err := Submit(cfg, strings.NewReader("\n"), &bytes.Buffer{}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(cfg.ControlDir, "reference.request")); err == nil {
+		t.Error("a failing submit must not reveal the reference solution")
+	}
+}
+
+func TestSubmit_DesignPassDoesNotRequestReference(t *testing.T) {
+	cfg := designConfig(t)
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	if _, err := Submit(cfg, strings.NewReader("p\n\n"), &bytes.Buffer{}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(cfg.ControlDir, "reference.request")); err == nil {
+		t.Error("a design pass has no reference solution and must not request one")
+	}
+}
+
+func TestSubmit_ReferenceRevealTimeoutDegradesToWarningNotFailure(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.TestCommand = "true"
+	// Short enough to keep the test fast, generous enough (30x the 5ms
+	// poll interval) that the real submit.request/tests.ready round trip
+	// below isn't itself at risk of tripping this same timeout.
+	cfg.RevealTimeout = 150 * time.Millisecond
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+	// Deliberately no simulateHostReferenceReveal call: the reference
+	// reveal never completes, which must degrade to a warning, not fail
+	// the whole submit -- the graded result already stands on its own.
+
+	var out bytes.Buffer
+	attempt, err := Submit(cfg, strings.NewReader("\n"), &out)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if attempt.Result != tracker.ResultPass {
+		t.Errorf("Result = %q, want pass despite the reference reveal timing out", attempt.Result)
+	}
+	if !strings.Contains(out.String(), "could not reveal the reference solution") {
+		t.Errorf("output %q missing the degraded notice", out.String())
+	}
+}

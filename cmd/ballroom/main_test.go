@@ -30,7 +30,7 @@ func captureUsage(t *testing.T) string {
 func TestPrintUsage_MentionsEverySubcommand(t *testing.T) {
 	out := captureUsage(t)
 	for _, want := range []string{
-		"ballroom", "home", "practice <id>", "sandbox", "submit", "tutor", "return", "help", "config",
+		"ballroom", "home", "practice <id>", "sandbox", "submit", "tutor", "return", "help", "config", "reference",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("usage output missing %q:\n%s", want, out)
@@ -177,6 +177,15 @@ func TestReturnCmd_ErrorsOutsideSession(t *testing.T) {
 	err := returnCmd()
 	if err == nil || !strings.Contains(err.Error(), "not running inside an active practice session") {
 		t.Errorf("returnCmd() outside a session = %v, want an error about not being in a session", err)
+	}
+}
+
+func TestReferenceCmd_ErrorsOutsideSession(t *testing.T) {
+	clearSessionEnv(t)
+
+	err := referenceCmd()
+	if err == nil || !strings.Contains(err.Error(), "not running inside a graded exercise session") {
+		t.Errorf("referenceCmd() outside a session = %v, want an error about not being in a session", err)
 	}
 }
 

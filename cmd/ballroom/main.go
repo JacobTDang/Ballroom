@@ -38,6 +38,8 @@ func main() {
 		exitOnErr(sandboxCmd())
 	case "submit":
 		exitOnErr(submitCmd())
+	case "reference":
+		exitOnErr(referenceCmd())
 	case "return":
 		exitOnErr(returnCmd())
 	case "tutor":
@@ -69,6 +71,8 @@ Usage:
   ballroom practice <id>       Practice a specific exercise by id
   ballroom sandbox             Free practice, no grading, persists across sessions
   ballroom submit              Submit your solution (run this inside an active session)
+  ballroom reference           Reveal and open the reference solution (run this inside an
+                               active session; also bound to M-g)
   ballroom tutor               Start the tutor chat (run this inside an active session)
   ballroom return              Return to the host homepage (run this inside an active session)
   ballroom voice               Speak a message into the tutor pane (run on the host while a
@@ -243,6 +247,58 @@ func submitCmd() error {
 		return err
 	}
 	fmt.Printf("logged attempt #%d\n", attempt.ID)
+	return nil
+}
+
+// referenceCmd is `ballroom reference`, bound to M-g (docker/tmux.conf)
+// and also reachable by typing it directly in the terminal pane: it
+// requests the exercise's reference solution be revealed (the same
+// control-directory handshake submitCmd's reveal uses, against a
+// different pair of files -- see internal/orchestrator.WaitAndRevealReference),
+// then opens it in a new nvim split next to the user's own solution file
+// via the editor pane's NVIM_SOCKET RPC. Guarded the same way submitCmd
+// is: this is only meaningful inside a graded exercise session.
+func referenceCmd() error {
+	startedAtRaw := os.Getenv("PRACTICE_STARTED_AT")
+	if startedAtRaw == "" {
+		return fmt.Errorf("reference: not running inside a graded exercise session")
+	}
+	startedAt, err := time.Parse(time.RFC3339, startedAtRaw)
+	if err != nil {
+		return fmt.Errorf("reference: parse PRACTICE_STARTED_AT: %w", err)
+	}
+	startUptime, hasStartUptime := startUptimeFromEnv()
+
+	cfg := session.Config{
+		ControlDir:     os.Getenv("PRACTICE_CONTROL_DIR"),
+		WorkspaceDir:   os.Getenv("PRACTICE_WORKSPACE_DIR"),
+		ExerciseID:     os.Getenv("PRACTICE_EXERCISE_ID"),
+		Category:       os.Getenv("PRACTICE_CATEGORY"),
+		Language:       os.Getenv("PRACTICE_LANGUAGE"),
+		StartedAt:      startedAt,
+		StartUptime:    startUptime,
+		HasStartUptime: hasStartUptime,
+		DBPath:         os.Getenv("PRACTICE_DB_PATH"),
+		PollInterval:   200 * time.Millisecond,
+		RevealTimeout:  30 * time.Second,
+	}
+
+	if err := session.Reference(cfg, os.Stdout); err != nil {
+		return err
+	}
+
+	path, err := session.ReferenceSolutionPath(cfg.WorkspaceDir)
+	if err != nil {
+		return err
+	}
+	// Opening the split is a nice-to-have on top of the file already
+	// being on disk in the workspace -- a failure here (no editor pane
+	// attached, an unreachable socket) is printed but never fails the
+	// command outright, matching OpenInSplit's own graceful-degradation
+	// contract.
+	if err := tutor.OpenInSplit(context.Background(), os.Getenv("NVIM_SOCKET"), path); err != nil {
+		fmt.Printf("warning: could not open the reference solution in the editor: %v\n", err)
+	}
 	return nil
 }
 

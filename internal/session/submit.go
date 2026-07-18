@@ -126,6 +126,15 @@ func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, err
 		fmt.Fprintf(stdout, "solution video: %s\n", cfg.VideoURL)
 	}
 
+	// The reference solution: only once the coding submit has actually
+	// passed (a design session has no reference/ concept at all -- its
+	// "answer" is the rubric, already revealed above). The hidden tests
+	// are already revealed at this point, so there's nothing left to
+	// protect; might as well save the user a separate M-g round trip.
+	if cfg.Kind != exercise.KindDesign && result == tracker.ResultPass {
+		revealReferenceOnPass(cfg, stdout)
+	}
+
 	if err := writeLastTestResult(cfg, result, output); err != nil {
 		fmt.Fprintf(stdout, "warning: could not save test output for the tutor: %v\n", err)
 		// Not fatal — same graceful-degradation philosophy as the rest of
@@ -233,6 +242,28 @@ func waitForReady(cfg Config) error {
 		time.Sleep(cfg.PollInterval)
 	}
 	return fmt.Errorf("session: timed out after %s waiting for hidden tests to be revealed", cfg.RevealTimeout)
+}
+
+// revealReferenceOnPass makes the reference solution available in the
+// workspace right after a passing coding submit. Reuses the exact same
+// reference.request/reference.ready control-dir handshake `ballroom
+// reference` uses (orchestrator.WaitAndRevealReference fulfills either
+// caller identically) -- so if the user already pressed M-g earlier in
+// this session, waitForReferenceReady finds reference.ready already
+// there and this returns almost instantly. A failure here (host watcher
+// unreachable, or -- in principle -- an exercise missing .reference/) is
+// printed as a warning and never fails the submit: the graded result
+// already stands on its own.
+func revealReferenceOnPass(cfg Config, stdout io.Writer) {
+	if err := requestReferenceReveal(cfg); err != nil {
+		fmt.Fprintf(stdout, "note: could not reveal the reference solution: %v\n", err)
+		return
+	}
+	if err := waitForReferenceReady(cfg); err != nil {
+		fmt.Fprintf(stdout, "note: could not reveal the reference solution: %v\n", err)
+		return
+	}
+	fmt.Fprintln(stdout, "reference solution available at reference/solution.* (or run `ballroom reference` / press M-g to open it)")
 }
 
 func runTestCommand(cfg Config) (result string, output string) {

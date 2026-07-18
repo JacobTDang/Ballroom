@@ -258,3 +258,13 @@ func (c Config) ExercisePath(id string) string {
 func (c Config) TestsPath(id string) string {
 	return filepath.Join(c.TestsDir, id)
 }
+
+// ReferencePath returns the path to exercise <id>'s reference solution
+// directory -- a sibling of its repo/, checked into git but (like
+// TestsPath's hidden tests) never mounted into a session's workspace
+// until requested (see orchestrator.WaitAndRevealReference). Same
+// ".reference" directory internal/verify already reads to confirm a
+// known-correct solution passes each exercise's hidden tests.
+func (c Config) ReferencePath(id string) string {
+	return filepath.Join(c.ExercisesDir, id, ".reference")
+}
