@@ -31,7 +31,7 @@ vim.opt.cursorline = true
 vim.cmd.colorscheme("habamax")
 
 vim.opt.laststatus = 3
-vim.opt.statusline = " %{toupper(mode())} │ %f %m%r%h%w%=%y  ln %l/%L col %c "
+vim.opt.statusline = " %{toupper(mode())} │ %f %m%r%h%w%=%y  ln %l/%L col %c │ press <space>? for help "
 
 -- The problem statement opens as pre-rendered plain text (problem.txt,
 -- see docker/entrypoint.sh + orchestrator.PrepareWorkspace) -- no
@@ -100,3 +100,8 @@ vim.api.nvim_create_autocmd("TextChanged", {
 -- by tutor/chat.sh (issue #24: tutor-driven highlights/notes in the editor
 -- pane). See lua/ballroom_highlight.lua for the implementation.
 require("ballroom_highlight")
+
+-- A floating keybinding cheatsheet (<leader>? / :BallroomHelp) plus
+-- <leader>w/<leader>s shortcuts, for someone who doesn't know vim
+-- (issue #243). See lua/ballroom_help.lua for the implementation.
+require("ballroom_help")
