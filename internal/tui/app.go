@@ -467,7 +467,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pullDoneMsg:
 		m.modelDownloading = false
 		if msg.err != nil {
-			m.modelWarning = fmt.Sprintf("download failed: %v", msg.err)
+			m.modelWarning = fmt.Sprintf("couldn't download that model — %v", msg.err)
 			m.modelDownloadLines = nil
 			return m, nil
 		}
@@ -1453,7 +1453,7 @@ func (m appModel) renderMain() string {
 	}
 
 	if m.err != nil {
-		b.WriteString(failStyle.Render("  " + m.err.Error()))
+		b.WriteString(renderFriendlyError("something went wrong", m.err))
 		b.WriteString("\n\n")
 	}
 
@@ -1470,9 +1470,17 @@ func (m appModel) renderMain() string {
 	}
 	if m.homeLoadErr != nil {
 		b.WriteString("\n")
-		b.WriteString(checkDimStyle.Render("progress unavailable: " + m.homeLoadErr.Error()))
+		b.WriteString(renderFriendlyError("couldn't load your progress", m.homeLoadErr))
 	}
 	return b.String()
+}
+
+// renderFriendlyError is the one shape every screen-level failure
+// renders as: a short human headline in the fail color, with the raw
+// error kept visible on a dim detail line underneath — readable at a
+// glance without swallowing what actually happened.
+func renderFriendlyError(headline string, err error) string {
+	return failStyle.Render("  "+headline) + "\n" + checkDimStyle.Render("    "+err.Error())
 }
 
 func (m appModel) renderCategories() string {
@@ -1961,7 +1969,7 @@ func (m appModel) renderModelPicker() string {
 		b.WriteString(checkDimStyle.Render("loading models from " + ollamaHost + "..."))
 		b.WriteString("\n")
 	case m.modelLoadErr != nil:
-		b.WriteString(failStyle.Render("couldn't reach Ollama: " + m.modelLoadErr.Error()))
+		b.WriteString(renderFriendlyError("couldn't reach Ollama", m.modelLoadErr))
 		b.WriteString("\n")
 		b.WriteString(checkDimStyle.Render("you can still type a model tag directly"))
 		b.WriteString("\n")
