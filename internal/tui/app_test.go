@@ -240,6 +240,40 @@ func TestAppModel_Stats_NoGradedAttemptsHidesWeakSpots(t *testing.T) {
 	}
 }
 
+func TestAppModel_Stats_ShowsCodingWeakSpots(t *testing.T) {
+	defer fakeCatalogList(nil, nil)()
+	defer fakeRecentAttempts(nil, nil)()
+	defer fakeAllAttempts([]tracker.Attempt{
+		{Category: "trees", Result: tracker.ResultFail},
+		{Category: "trees", Result: tracker.ResultFail},
+		{Category: "trees", Result: tracker.ResultPass},
+	}, nil)()
+
+	m := appModel{stage: stageMain}
+	m = m.loadStats()
+	view := m.View()
+	if !strings.Contains(view, "Coding weak spots") {
+		t.Fatalf("stats view missing the coding weak-spots section:\n%s", view)
+	}
+	if !strings.Contains(view, "Trees") || !strings.Contains(view, "failed 2/3") {
+		t.Errorf("stats view should rank Trees as failed 2/3:\n%s", view)
+	}
+}
+
+func TestAppModel_Stats_TooFewCodingAttemptsHidesCodingWeakSpots(t *testing.T) {
+	defer fakeCatalogList(nil, nil)()
+	defer fakeRecentAttempts(nil, nil)()
+	// One failure is under the evidence threshold -- a single bad day
+	// must not brand a whole topic weak.
+	defer fakeAllAttempts([]tracker.Attempt{{Category: "trees", Result: tracker.ResultFail}}, nil)()
+
+	m := appModel{stage: stageMain}
+	m = m.loadStats()
+	if strings.Contains(m.View(), "Coding weak spots") {
+		t.Error("coding weak-spots section should be absent under the attempts threshold")
+	}
+}
+
 func TestAppModel_StatsAnyKeyGoesBackToMain(t *testing.T) {
 	m := appModel{stage: stageStats}
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})

@@ -161,8 +161,8 @@ const (
 	// styled for a specific width at append time before this refactor
 	// too; nothing regressed, they just don't re-flow.
 	blockNote displayBlockKind = iota
-	// blockUser is one line the user submitted, echoed with the
-	// userEchoPrefix.
+	// blockUser is one line the user submitted, echoed as an
+	// accent-bar block (renderUserBlock).
 	blockUser
 	// blockTutor is one tutor reply's raw markdown, styled by
 	// styleMarkdown at render time.
@@ -173,12 +173,36 @@ const (
 func renderBlock(b displayBlock, width int) string {
 	switch b.kind {
 	case blockUser:
-		return userEchoPrefix + b.raw
+		return renderUserBlock(b.raw, width)
 	case blockTutor:
 		return styleMarkdown(b.raw, width)
 	default:
 		return b.raw
 	}
+}
+
+// renderUserBlock renders one submitted user message as a block with a
+// pink accent bar down its left edge — the bar alone is the speaker
+// signal (no "you" label), in the user's own accent color, distinct
+// from the tutor's teal. The text is wrapped here at width−2 (bar +
+// space) so every emitted line is already ≤ width — the invariant that
+// keeps refreshViewport's outer word-wrap from ever re-breaking a line
+// and orphaning a continuation row without its bar. Built from raw
+// escapes rather than a lipgloss border style for the same reason
+// statusbar.go uses them: lipgloss colors can vanish under go test's
+// TTY-less termenv profile, and this block is pinned by
+// string-assertion tests.
+func renderUserBlock(raw string, width int) string {
+	bar := ansiFg(panePink) + "│" + mdColorReset + " "
+	text := raw
+	if w := width - 2; w > 0 {
+		text = lipgloss.NewStyle().Width(w).Render(raw)
+	}
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = bar + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 // newTutorLayoutOnly builds a model with just the textarea/viewport

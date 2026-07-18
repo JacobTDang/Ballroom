@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/JacobTDang/Ballroom/internal/exercise"
 	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
 
@@ -52,6 +53,69 @@ func ParseDimensionRatings(summary string) []DimensionRating {
 			Rating: strings.ToLower(m[2]),
 		})
 	}
+	return out
+}
+
+// CategoryWeakness aggregates one coding category's fail record across
+// attempts -- the coding-side counterpart of DimensionWeakness, behind
+// the Stats screen's "Coding weak spots" section.
+type CategoryWeakness struct {
+	Category string
+	Fails    int
+	Attempts int
+}
+
+// FailRatio is the fraction of this category's attempts that failed.
+func (c CategoryWeakness) FailRatio() float64 {
+	if c.Attempts == 0 {
+		return 0
+	}
+	return float64(c.Fails) / float64(c.Attempts)
+}
+
+// CodingWeakSpots aggregates per-category fail ratios across coding
+// attempts, worst first (highest fail ratio, then most attempts as the
+// stronger evidence, then name for stability). The design-graded
+// tracks (system-design, behavioral) are excluded -- their weakness
+// signal is the rubric dimensions, not pass/fail. Categories with
+// fewer than minAttempts attempts are excluded so one bad day can't
+// brand a whole topic weak, and all-passing categories aren't weak
+// spots at all.
+func CodingWeakSpots(attempts []tracker.Attempt, minAttempts int) []CategoryWeakness {
+	byCategory := map[string]*CategoryWeakness{}
+	var order []string
+	for _, a := range attempts {
+		if a.Category == exercise.CategorySystemDesign || a.Category == exercise.CategoryBehavioral || a.Category == "" {
+			continue
+		}
+		c, ok := byCategory[a.Category]
+		if !ok {
+			c = &CategoryWeakness{Category: a.Category}
+			byCategory[a.Category] = c
+			order = append(order, a.Category)
+		}
+		c.Attempts++
+		if a.Result == tracker.ResultFail {
+			c.Fails++
+		}
+	}
+	out := make([]CategoryWeakness, 0, len(order))
+	for _, key := range order {
+		c := *byCategory[key]
+		if c.Attempts < minAttempts || c.Fails == 0 {
+			continue
+		}
+		out = append(out, c)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].FailRatio() != out[j].FailRatio() {
+			return out[i].FailRatio() > out[j].FailRatio()
+		}
+		if out[i].Attempts != out[j].Attempts {
+			return out[i].Attempts > out[j].Attempts
+		}
+		return out[i].Category < out[j].Category
+	})
 	return out
 }
 

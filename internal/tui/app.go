@@ -338,9 +338,10 @@ type appModel struct {
 	langCursor      int
 
 	// stageStats
-	statsStatuses []catalog.ExerciseStatus
-	statsRecent   []tracker.Attempt
-	statsWeakDims []catalog.DimensionWeakness
+	statsStatuses   []catalog.ExerciseStatus
+	statsRecent     []tracker.Attempt
+	statsWeakDims   []catalog.DimensionWeakness
+	statsCodingWeak []catalog.CategoryWeakness
 
 	// stageSettings: settingsCursor is 0 = Worker model, 1 = Orchestrator
 	// model there; reused by stageProviderChoice as 0 = Local (Ollama),
@@ -648,6 +649,7 @@ func (m appModel) loadStats() appModel {
 		return m
 	}
 	m.statsWeakDims = catalog.WeakDimensions(all)
+	m.statsCodingWeak = catalog.CodingWeakSpots(all, codingWeakSpotMinAttempts)
 	m.err = nil
 	m.statsStatuses = statuses
 	m.statsRecent = recent
@@ -1659,6 +1661,11 @@ func (m appModel) renderLanguage() string {
 	return b.String()
 }
 
+// codingWeakSpotMinAttempts is the evidence bar for calling a coding
+// category weak — under this many attempts, one bad day would brand a
+// whole topic.
+const codingWeakSpotMinAttempts = 3
+
 func (m appModel) renderStats() string {
 	var b strings.Builder
 	b.WriteString(hintStyle.Render("Stats"))
@@ -1692,6 +1699,28 @@ func (m appModel) renderStats() string {
 			line := fmt.Sprintf("  %-32s missing %d/%d · adequate %d/%d", d.Name, d.Missing, d.Total(), d.Adequate, d.Total())
 			style := checkDimStyle
 			if d.Missing > 0 {
+				style = failStyle
+			}
+			b.WriteString(style.Render(line))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
+	if len(m.statsCodingWeak) > 0 {
+		b.WriteString(hintStyle.Render("Coding weak spots"))
+		b.WriteString("\n")
+		shown := m.statsCodingWeak
+		if len(shown) > 5 {
+			shown = shown[:5]
+		}
+		for _, c := range shown {
+			line := fmt.Sprintf("  %-32s failed %d/%d", catalog.DisplayCategory(c.Category), c.Fails, c.Attempts)
+			// Half-or-worse is a real problem area; anything listed at
+			// all is still worth a dim line (it has fails by
+			// construction).
+			style := checkDimStyle
+			if c.FailRatio() >= 0.5 {
 				style = failStyle
 			}
 			b.WriteString(style.Render(line))

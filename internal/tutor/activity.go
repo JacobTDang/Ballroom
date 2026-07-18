@@ -55,37 +55,35 @@ type activityFeed struct {
 }
 
 // started records a new running call, capping the list at
-// activityToolLines by dropping the oldest entry. Returns the current
-// formatted lines under the same lock, so a caller's redraw is never
-// built from a state that's already stale by the time it reads it.
-func (f *activityFeed) started(callID, name, argsPreview string) []string {
+// activityToolLines by dropping the oldest entry. (started/finished/
+// failed used to also return pre-formatted display lines; every caller
+// ignored them — display rendering reads currentCalls instead — so the
+// string-formatting side of the feed was deleted outright.)
+func (f *activityFeed) started(callID, name, argsPreview string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, activityCall{callID: callID, name: name, status: "running", detail: argsPreview})
 	if len(f.calls) > activityToolLines {
 		f.calls = f.calls[len(f.calls)-activityToolLines:]
 	}
-	return f.linesLocked()
 }
 
 // finished marks callID done with resultPreview. A callID that isn't
 // found (already dropped by started's cap) is a no-op, not an error —
 // eino always pairs a real OnStart with the matching OnEnd/OnError, but
 // that OnStart's entry may have aged out of the capped list already.
-func (f *activityFeed) finished(callID, resultPreview string) []string {
+func (f *activityFeed) finished(callID, resultPreview string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updateLocked(callID, "done", resultPreview)
-	return f.linesLocked()
 }
 
 // failed marks callID failed with errDetail. Same no-op-if-unknown
 // behavior as finished.
-func (f *activityFeed) failed(callID, errDetail string) []string {
+func (f *activityFeed) failed(callID, errDetail string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updateLocked(callID, "failed", errDetail)
-	return f.linesLocked()
 }
 
 func (f *activityFeed) updateLocked(callID, status, detail string) {
@@ -97,14 +95,6 @@ func (f *activityFeed) updateLocked(callID, status, detail string) {
 			return
 		}
 	}
-}
-
-func (f *activityFeed) linesLocked() []string {
-	lines := make([]string, len(f.calls))
-	for i, c := range f.calls {
-		lines[i] = formatActivityLine(c)
-	}
-	return lines
 }
 
 // currentCalls returns a copy of the feed's current calls, structured
@@ -134,38 +124,6 @@ func (f *activityFeed) currentCalls() []activityCall {
 // "o" is the only thing guaranteed to render identically in every
 // terminal, encoding, and font, full stop.
 const activityDotGlyph = "o"
-
-// activityLineBody renders one call's current state, everything after
-// the leading dot (see formatActivityLine/pulsedCallLine, its two
-// callers — one plain, one color-wraps the dot). "{}" (an empty JSON
-// object -- what eino sends for a no-argument tool) is treated the same
-// as no args at all, since showing "({})" on every no-arg tool call
-// (most of this package's tools) would be noise, not information.
-func activityLineBody(c activityCall) string {
-	switch c.status {
-	case "done":
-		if c.detail == "" {
-			return c.name
-		}
-		return fmt.Sprintf("%s  %s", c.name, c.detail)
-	case "failed":
-		return fmt.Sprintf("%s - failed: %s", c.name, c.detail)
-	default: // "running"
-		if c.detail == "" || c.detail == "{}" {
-			return c.name
-		}
-		return fmt.Sprintf("%s(%s)", c.name, c.detail)
-	}
-}
-
-// formatActivityLine renders one call's current state as plain text —
-// used by activityFeed's own started/finished/failed for the channel
-// snapshot pushed to the bubbletea Update loop; pulsedCallLine (below)
-// renders the same body but color-wraps the leading dot for the pulse
-// animation. Every line leads with activityDotGlyph.
-func formatActivityLine(c activityCall) string {
-	return activityDotGlyph + " " + activityLineBody(c)
-}
 
 // activityPulseBaseR/G/B is the activity dot's resting color — the same
 // teal used elsewhere in this project's palette (docker/tmux.conf,
@@ -352,24 +310,49 @@ func pulsedStatusLine(phase, cols int) string {
 	return line
 }
 
+// dimSpan wraps s in the pane's dim metadata color (markdown.go's
+// mdDimColor), with the same defensive leading reset every colored
+// span in this file carries (see coloredDot's doc comment for the
+// renderer-diffing bug that makes the reset load-bearing).
+func dimSpan(s string) string {
+	return "\033[0m" + mdDimColor + s + "\033[0m"
+}
+
 // activityCallHeader renders one call's header line body (everything
-// after the dot) — the tool name, plus its args in parens while still
-// running. Unlike activityLineBody, it never includes the result/error
-// detail inline — that's shown indented beneath the header instead (see
-// activityOutputLines) — a real UX fix: a completed call's raw
-// result/JSON used to be crammed onto this same line, truncating to
-// almost nothing in a normal-width pane.
-func activityCallHeader(c activityCall) string {
+// after the dot): the tool name in bold, plus — while still running —
+// its args dimmed in parens; a failed call's "- failed" flag in the
+// error red. It never includes the result/error detail inline — that's
+// shown indented beneath the header instead (see activityOutputLines)
+// — a real UX fix: a completed call's raw result/JSON used to be
+// crammed onto this same line, truncating to almost nothing in a
+// normal-width pane.
+//
+// Takes cols and truncates the plain text itself, each part against
+// what's left of the budget, BEFORE any escape is applied — the same
+// rule pulsedStatusLine documents: width-limiting can never slice a
+// truecolor sequence in half. (Its callers used to truncate the
+// returned string instead, which was only safe while this returned
+// plain text.)
+func activityCallHeader(c activityCall, cols int) string {
+	name := truncateLine(c.name, max(cols, 0))
+	rest := max(cols-len([]rune(name)), 0)
+	styled := mdBoldOn + name + mdBoldOff
 	switch c.status {
 	case "done":
-		return c.name
+		return styled
 	case "failed":
-		return c.name + " - failed"
+		if flag := truncateLine(" - failed", rest); flag != "" {
+			styled += activityErrorNote(flag)
+		}
+		return styled
 	default: // "running"
 		if c.detail == "" || c.detail == "{}" {
-			return c.name
+			return styled
 		}
-		return fmt.Sprintf("%s(%s)", c.name, c.detail)
+		if args := truncateLine("("+c.detail+")", rest); args != "" {
+			styled += dimSpan(args)
+		}
+		return styled
 	}
 }
 
@@ -491,41 +474,73 @@ func pulsedCallLines(c activityCall, phase, cols int) []string {
 	} else {
 		r, g, b = activitySettledDotColor(time.Since(c.completedAt))
 	}
-	header := coloredDot(r, g, b) + " " + truncateLine(activityCallHeader(c), max(cols-2, 0))
+	header := coloredDot(r, g, b) + " " + activityCallHeader(c, max(cols-2, 0))
 	return append([]string{header}, activityOutputLines(c, cols)...)
 }
 
-// toolUsageSummary renders a permanent, settled record of which tools a
-// completed turn used, plus each one's indented output preview — reuses
-// pulsedCallLines exactly as the live activity region does (phase is
-// irrelevant here: activityDotColor only varies by phase for a
-// "running" call, and every settled call is "done"/"failed" by the time
-// this renders). Unlike the live activity region (which disappears
-// entirely once the turn ends, see tutorModel.activityView), this gets
-// appended to displayLines so the conversation history keeps showing
-// what the model actually did and what it got back, not just its final
-// reply — a real feature request from live use ("leave behind the
-// toolname it used" / "the tool output should be indented"). Empty for
-// a turn that made no tool calls at all, so a normal reasoning-only turn
-// doesn't get a spurious blank entry.
+// settledCallLine renders one call for the permanent post-turn summary
+// as a single compact row: resting-teal dot, bold tool name, then the
+// first line of its result dimmed inline (or the failure flag and error
+// in red). One row per call deliberately — the multi-line indented
+// output preview stays a live-region-only affordance (pulsedCallLines),
+// where watching a result arrive is useful; baked into the transcript
+// forever it read as noise, so the settled record supersedes the old
+// indented-output summary with this quieter form.
 //
-// Backdates each call's completedAt before rendering, deliberately:
-// unlike the live activity region (re-rendered fresh every pulse tick,
-// so the settle fade genuinely animates as you watch it), this gets
-// rendered exactly once and baked into a plain string forever. Calling
-// pulsedCallLines with the real completedAt (set only moments earlier,
-// in the same Update() call) would freeze every entry at whatever point
-// of the fade it happened to catch -- almost always still glowing,
-// never the calm resting color a permanent record should show.
+// All truncation happens on plain text against the remaining budget
+// BEFORE styling, same escape-safety rule as activityCallHeader; a
+// budget too small for a meaningful summary drops the summary whole
+// rather than leaving a useless fragment.
+func settledCallLine(c activityCall, cols int) string {
+	budget := max(cols-2, 0) // dot + space
+	name := truncateLine(c.name, budget)
+	line := coloredDot(activityPulseBaseR, activityPulseBaseG, activityPulseBaseB) +
+		" " + mdBoldOn + name + mdBoldOff
+	rest := budget - len([]rune(name))
+
+	detail := strings.SplitN(c.detail, "\n", 2)[0]
+	switch {
+	case c.status == "failed":
+		// The failure flag survives an empty error detail — a failed
+		// call must never render indistinguishable from a clean one.
+		flag := " failed"
+		if detail != "" {
+			flag += ": " + detail
+		}
+		if t := truncateLine(flag, rest); len([]rune(t)) >= len(" failed") {
+			line += activityErrorNote(t)
+		}
+	case detail == "":
+		return line
+	default: // done
+		const sep = " - "
+		if s := truncateLine(sep+detail, rest); len([]rune(s)) > len(sep)+3 {
+			line += dimSpan(s)
+		}
+	}
+	return line
+}
+
+// toolUsageSummary renders a permanent, settled record of which tools a
+// completed turn used — one settledCallLine row per call. Unlike the
+// live activity region (which disappears entirely once the turn ends,
+// see tutorModel.activityView), this gets appended to displayLines so
+// the conversation history keeps showing what the model actually did —
+// a real feature request from live use ("leave behind the toolname it
+// used"). Empty for a turn that made no tool calls at all, so a normal
+// reasoning-only turn doesn't get a spurious blank entry.
+//
+// (The old form reused pulsedCallLines — full indented output previews,
+// plus a completedAt-backdating dance so the settle fade wouldn't bake
+// mid-glow into the permanent string. settledCallLine always renders at
+// the resting base color, so the backdating went with it.)
 func toolUsageSummary(calls []activityCall, cols int) string {
 	if len(calls) == 0 {
 		return ""
 	}
-	longAgo := time.Now().Add(-2 * activitySettleFadeDuration)
-	var lines []string
-	for _, c := range calls {
-		c.completedAt = longAgo
-		lines = append(lines, pulsedCallLines(c, 0, cols)...)
+	lines := make([]string, len(calls))
+	for i, c := range calls {
+		lines[i] = settledCallLine(c, cols)
 	}
 	return strings.Join(lines, "\n")
 }
