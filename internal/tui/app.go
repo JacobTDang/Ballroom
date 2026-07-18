@@ -209,6 +209,10 @@ const (
 	// available yet (settings.json nor OPENROUTER_API_KEY) — see
 	// handleModelEnter/selectModelOrPromptForKey.
 	stageOpenRouterKeyEntry
+	// stageHelp (issue #242) is the keybinding help screen, opened with
+	// "?" from every stage that takes key input -- see help.go. Esc/q/?
+	// all return to appModel.helpOrigin, the stage it was opened from.
+	stageHelp
 )
 
 // settingsTarget tracks which Config field stageProviderChoice and
@@ -415,6 +419,11 @@ type appModel struct {
 	openRouterPendingModel string // the openrouter: tag waiting on a key before it can be selected
 	openRouterKeyInput     string
 
+	// stageHelp: the stage "?" was pressed from, so Esc/q/? can return
+	// there instead of always landing back on the main menu (see
+	// openHelp/updateHelp in help.go).
+	helpOrigin appStage
+
 	// outcome is read by Run() once the program exits.
 	outcome       appOutcome
 	exerciseToRun exercise.Exercise
@@ -556,6 +565,8 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateAPIModelEntry(msg)
 		case stageOpenRouterKeyEntry:
 			return m.updateOpenRouterKeyEntry(msg)
+		case stageHelp:
+			return m.updateHelp(msg)
 		}
 	}
 	return m, nil
@@ -580,6 +591,8 @@ func (m appModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searchQuery = ""
 		m.searchCursor = 0
 		m.stage = stageSearch
+	case "?":
+		return m.openHelp()
 	case "enter":
 		return m.chooseMain()
 	case "q", "ctrl+c":
@@ -856,6 +869,8 @@ func (m appModel) updateCategories(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.problemFilter = ""
 			m.stage = stageProblems
 		}
+	case "?":
+		return m.openHelp()
 	case "q", "esc", "ctrl+c":
 		m.stage = stageMain
 	}
@@ -883,6 +898,8 @@ func (m appModel) updateDSACategories(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.problemCursor = 0
 		m.problemFilter = ""
 		m.stage = stageProblems
+	case "?":
+		return m.openHelp()
 	case "q", "esc", "ctrl+c":
 		m.stage = stageCategories
 	}
@@ -947,12 +964,15 @@ func (m appModel) updateProblems(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEsc, tea.KeyCtrlC:
 		return m.leaveProblems()
 	case tea.KeyRunes:
-		// "q" with nothing typed yet backs out, matching every other
-		// stage — once the user has started typing, every rune
-		// (including "q") feeds the filter, since it might be part of
+		// "q" (and "?", same reasoning) with nothing typed yet triggers
+		// its shortcut — once the user has started typing, every rune
+		// (including these) feeds the filter, since it might be part of
 		// a real title. Same contract as the model picker.
 		if m.problemFilter == "" && string(msg.Runes) == "q" {
 			return m.leaveProblems()
+		}
+		if m.problemFilter == "" && string(msg.Runes) == "?" {
+			return m.openHelp()
 		}
 		m.problemFilter += string(msg.Runes)
 		m.problemCursor = 0
@@ -996,6 +1016,8 @@ func (m appModel) updateLanguage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.launchExercise(m.selectedProblem.Variants[m.langCursor].Exercise)
+	case "?":
+		return m.openHelp()
 	case "q", "esc", "ctrl+c":
 		m.stage = stageProblems
 	}
@@ -1004,8 +1026,13 @@ func (m appModel) updateLanguage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // --- stageStats ---
 
-// updateStats mirrors the pre-merge statsModel: any keypress goes back.
-func (m appModel) updateStats(tea.KeyMsg) (tea.Model, tea.Cmd) {
+// updateStats mirrors the pre-merge statsModel: any keypress goes back,
+// except "?" which opens help instead (issue #242) -- everything else
+// still falls through to stageMain, including plain "q"/"esc".
+func (m appModel) updateStats(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type == tea.KeyRunes && string(msg.Runes) == "?" {
+		return m.openHelp()
+	}
 	m.stage = stageMain
 	return m, nil
 }
@@ -1031,6 +1058,11 @@ func (m appModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyEsc, tea.KeyCtrlC:
 		m.stage = stageMain
+		return m, nil
+	case tea.KeyRunes:
+		if string(msg.Runes) == "?" {
+			return m.openHelp()
+		}
 		return m, nil
 	case tea.KeyEnter:
 		switch m.settingsCursor {
@@ -1467,6 +1499,8 @@ func (m appModel) renderRight() string {
 		return m.renderAPIModelEntry()
 	case stageOpenRouterKeyEntry:
 		return m.renderOpenRouterKeyEntry()
+	case stageHelp:
+		return m.renderHelp()
 	default:
 		return m.renderMain()
 	}

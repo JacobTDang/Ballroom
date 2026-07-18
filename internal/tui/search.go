@@ -60,6 +60,13 @@ func (m appModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.stage = stageMain
 		return m, nil
 	case tea.KeyRunes:
+		// "?" with nothing typed yet opens help, matching the same
+		// nothing-typed-yet carve-out stageProblems gives "q"/"?" (see
+		// updateProblems) -- once a query is underway every rune feeds
+		// it instead, since "?" could in principle be part of one.
+		if m.searchQuery == "" && string(msg.Runes) == "?" {
+			return m.openHelp()
+		}
 		m.searchQuery += string(msg.Runes)
 		m.searchCursor = 0
 		return m, nil
