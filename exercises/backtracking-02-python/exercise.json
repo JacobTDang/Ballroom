@@ -8,5 +8,6 @@
   "tutor_mode": "hints-first",
   "repo_path": "./repo",
   "test_command": "python3 -m pytest -q",
-  "video_url": "https://youtu.be/GBKI9VSKdGg"
+  "video_url": "https://youtu.be/GBKI9VSKdGg",
+  "difficulty": "medium"
 }

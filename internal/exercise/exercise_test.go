@@ -369,3 +369,37 @@ func TestLoad_VideoURLOptionalAndValidated(t *testing.T) {
 		t.Errorf("Load err = %v, want an https validation error", err)
 	}
 }
+
+func TestLoad_DifficultyOptionalAndValidated(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "repo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, valid := range []string{"easy", "medium", "hard"} {
+		path := writeExercise(t, dir, map[string]any{"difficulty": valid})
+		ex, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load with difficulty %q: %v", valid, err)
+		}
+		if ex.Difficulty != valid {
+			t.Errorf("Difficulty = %q, want %q carried through", ex.Difficulty, valid)
+		}
+	}
+
+	path := writeExercise(t, dir, map[string]any{})
+	if ex, err := Load(path); err != nil || ex.Difficulty != "" {
+		t.Errorf("absent difficulty: ex.Difficulty=%q err=%v, want empty and no error", ex.Difficulty, err)
+	}
+
+	// Strict lowercase vocabulary: the site data's "Easy"/"Medium"/"Hard"
+	// must be normalized at fill time, not accepted here — a mixed-case
+	// value slipping through would fork the vocabulary every consumer
+	// (badges, sorting) has to match against.
+	for _, invalid := range []string{"extreme", "Easy", "MEDIUM"} {
+		path = writeExercise(t, dir, map[string]any{"difficulty": invalid})
+		if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "difficulty") {
+			t.Errorf("Load with difficulty %q err = %v, want a vocabulary validation error", invalid, err)
+		}
+	}
+}
