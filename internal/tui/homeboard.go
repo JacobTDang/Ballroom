@@ -31,6 +31,7 @@ var homeTracks = []struct {
 	{exercise.CategoryConcurrency, "Concurrency"},
 	{exercise.CategoryImplementation, "Implementation"},
 	{exercise.CategorySystemDesign, "System Design"},
+	{exercise.CategoryAPIDesign, "API Design"},
 	{exercise.CategoryOODesign, "OO Design"},
 	{exercise.CategoryBehavioral, "Behavioral"},
 }

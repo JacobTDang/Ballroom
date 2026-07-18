@@ -77,3 +77,7 @@ Take any systems-half component back to the Concurrency category's
 mindset: make your bloom filter or TTL cache thread-safe, then ask the
 tutor to poke holes. And in System Design sessions, these are no longer
 boxes — you've built the internals of the things you're drawing.
+
+The API-design ladder (`docs/api-design-roadmap.md`) is the spec-side
+counterpart: several of its questions pair one-to-one with problems
+here — design the mechanism there, build it here.

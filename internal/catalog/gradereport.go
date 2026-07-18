@@ -85,7 +85,7 @@ func CodingWeakSpots(attempts []tracker.Attempt, minAttempts int) []CategoryWeak
 	byCategory := map[string]*CategoryWeakness{}
 	var order []string
 	for _, a := range attempts {
-		if a.Category == exercise.CategorySystemDesign || a.Category == exercise.CategoryBehavioral || a.Category == "" {
+		if a.Category == exercise.CategorySystemDesign || a.Category == exercise.CategoryAPIDesign || a.Category == exercise.CategoryBehavioral || a.Category == "" {
 			continue
 		}
 		c, ok := byCategory[a.Category]

@@ -151,3 +151,7 @@ rate limiters, caches — the components inside the boxes) and
 `docs/concurrency-roadmap.md` (what breaks inside those components
 when threads arrive). Interleaving them turns "I'd put a cache here"
 into "I've built that cache."
+
+The API-design ladder (`docs/api-design-roadmap.md`) is the contract
+side of the same skill: this roadmap draws the boxes, that one
+specifies exactly how clients talk to them.
