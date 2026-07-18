@@ -1,0 +1,12 @@
+{
+  "id": "memo-key-01-go",
+  "problem_id": "memo-key-01",
+  "title": "Stale cache in ShippingCost",
+  "category": "debug",
+  "language": "go",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./...",
+  "difficulty": "hard"
+}

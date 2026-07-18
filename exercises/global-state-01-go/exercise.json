@@ -1,0 +1,12 @@
+{
+  "id": "global-state-01-go",
+  "problem_id": "global-state-01",
+  "title": "Global state leak in GenerateReport",
+  "category": "debug",
+  "language": "go",
+  "time_limit_min": 35,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./...",
+  "difficulty": "hard"
+}

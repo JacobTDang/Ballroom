@@ -18,16 +18,17 @@ import (
 // nothing here rather than a wall of zeros.
 
 // homeTracks are the practice tracks the progress bars cover, in
-// picker order. The genuinely tiny warm-up categories (debug,
-// ai-assisted: one problem each) are deliberately absent -- a bar for
-// a single problem reads as noise. Concurrency and Implementation
-// earned their rows when they grew into real ladders (10 and 11
-// problems).
+// picker order. The genuinely tiny warm-up category (ai-assisted: one
+// problem) is deliberately absent -- a bar for a single problem reads
+// as noise. Concurrency and Implementation earned their rows when they
+// grew into real ladders (10 and 11 problems); Debug's ladder is now
+// real too and gets the same treatment.
 var homeTracks = []struct {
 	group string
 	label string
 }{
 	{exercise.CategoryDSA, "DSA"},
+	{exercise.CategoryDebug, "Debug"},
 	{exercise.CategoryConcurrency, "Concurrency"},
 	{exercise.CategoryImplementation, "Implementation"},
 	{exercise.CategorySystemDesign, "System Design"},

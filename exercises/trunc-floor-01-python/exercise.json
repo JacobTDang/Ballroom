@@ -1,0 +1,12 @@
+{
+  "id": "trunc-floor-01-python",
+  "problem_id": "trunc-floor-01",
+  "title": "Negative Buckets",
+  "category": "debug",
+  "language": "python",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q",
+  "difficulty": "medium"
+}

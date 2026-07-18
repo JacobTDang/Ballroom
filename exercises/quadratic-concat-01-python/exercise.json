@@ -1,0 +1,12 @@
+{
+  "id": "quadratic-concat-01-python",
+  "problem_id": "quadratic-concat-01",
+  "title": "Quadratic string rebuild in build_log",
+  "category": "debug",
+  "language": "python",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q",
+  "difficulty": "medium"
+}

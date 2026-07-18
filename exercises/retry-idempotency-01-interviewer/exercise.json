@@ -1,0 +1,12 @@
+{
+  "id": "retry-idempotency-01-interviewer",
+  "problem_id": "retry-idempotency-01",
+  "title": "Charge Exactly Once: Idempotency Keys",
+  "kind": "design",
+  "category": "api-design",
+  "language": "interviewer",
+  "time_limit_min": 45,
+  "tutor_mode": "interviewer",
+  "repo_path": "./repo",
+  "difficulty": "hard"
+}
