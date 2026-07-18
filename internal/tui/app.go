@@ -15,6 +15,7 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/config"
 	"github.com/JacobTDang/Ballroom/internal/draft"
 	"github.com/JacobTDang/Ballroom/internal/exercise"
+	"github.com/JacobTDang/Ballroom/internal/palette"
 	"github.com/JacobTDang/Ballroom/internal/preflight"
 	"github.com/JacobTDang/Ballroom/internal/tracker"
 	"github.com/JacobTDang/Ballroom/internal/tutor"
@@ -183,6 +184,9 @@ const (
 	// or a picker) -- see search.go. The pickers' own filter only sees
 	// one category, which is the step this skips.
 	stageSearch
+	// stageRecommend is the "next up" picker -- the dashboard's
+	// recommendations, made launchable (see recommend.go).
+	stageRecommend
 	stageStats
 	// stageStatsDetail (issue #252) is the Stats drill-down: every
 	// attempt logged against one exercise (tracker.ListAttemptsFor),
@@ -295,7 +299,7 @@ const menuRightColWidth = 54
 // selected row and every other stage's selected row read as the same
 // highlight — reused directly instead of redefining an identical style.
 var (
-	menuSubtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B8680"))
+	menuSubtitleStyle = lipgloss.NewStyle().Foreground(palette.Lip(palette.MidGray))
 	menuRowHighlight  = cursorRowStyle
 )
 
@@ -382,6 +386,10 @@ type appModel struct {
 	// stageSearch — the live query and which result is selected.
 	searchQuery  string
 	searchCursor int
+
+	// stageRecommend — what to work on next, recomputed on entry.
+	recommendations []catalog.Recommendation
+	recommendCursor int
 
 	// stageStats
 	statsStatuses   []catalog.ExerciseStatus
@@ -579,6 +587,8 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateResumeDraft(msg)
 		case stageSearch:
 			return m.updateSearch(msg)
+		case stageRecommend:
+			return m.updateRecommend(msg)
 		case stageStats:
 			return m.updateStats(msg)
 		case stageStatsDetail:
@@ -619,6 +629,9 @@ func (m appModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searchQuery = ""
 		m.searchCursor = 0
 		m.stage = stageSearch
+	case "n":
+		m.refreshRecommendations()
+		m.stage = stageRecommend
 	case "?":
 		return m.openHelp()
 	case "enter":
@@ -1542,6 +1555,8 @@ func (m appModel) renderRight() string {
 		return m.renderResumeDraft()
 	case stageSearch:
 		return m.renderSearch()
+	case stageRecommend:
+		return m.renderRecommend()
 	case stageStats:
 		return m.renderStats()
 	case stageStatsDetail:

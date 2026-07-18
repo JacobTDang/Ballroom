@@ -1,0 +1,13 @@
+{
+  "id": "nearby-friends-01-coach",
+  "problem_id": "nearby-friends-01",
+  "title": "Design Nearby Friends",
+  "kind": "design",
+  "category": "system-design",
+  "language": "coach",
+  "time_limit_min": 90,
+  "tutor_mode": "design-coach",
+  "repo_path": "./repo",
+  "video_url": "https://youtu.be/atywHEArk1w",
+  "difficulty": "medium"
+}

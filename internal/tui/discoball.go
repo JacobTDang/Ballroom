@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/JacobTDang/Ballroom/internal/palette"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -33,16 +34,16 @@ var discoShades = []rune{'.', ':', '*', '%', '#'}
 var discoTileSequence = []rune{'%', '%', '#', '#', '*', '*', ':', ':', '.', '.'}
 
 var (
-	discoBallDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B6B6B"))
-	discoBallBrightStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#D9D3C4"))
+	discoBallDimStyle    = lipgloss.NewStyle().Foreground(palette.Lip(palette.DimGray))
+	discoBallBrightStyle = lipgloss.NewStyle().Foreground(palette.Lip(palette.PaleGray))
 
 	// The sparse "glint" palette — only a small fraction of tiles ever
 	// use these; everything else stays grayscale.
 	discoSparkleStyles = []lipgloss.Style{
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#3ED6D6")), // cyan
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#E0468C")), // magenta
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#E8A93C")), // gold
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#2FA6A6")), // teal
+		lipgloss.NewStyle().Foreground(palette.Lip(palette.Cyan)), // cyan
+		lipgloss.NewStyle().Foreground(palette.Lip(palette.Pink)), // magenta
+		lipgloss.NewStyle().Foreground(palette.Lip(palette.Gold)), // gold
+		lipgloss.NewStyle().Foreground(palette.Lip(palette.Teal)), // teal
 	}
 )
 
