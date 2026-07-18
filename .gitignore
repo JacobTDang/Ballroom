@@ -17,3 +17,4 @@ data/settings.json
 
 # Whisper model for ballroom voice (downloaded on first use, ~142 MB)
 data/whisper/
+data/transcripts/
