@@ -8,6 +8,7 @@ import (
 	"github.com/alecthomas/chroma/v2/formatters"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // Display-only markdown styling for the chat pane. The tutor's replies
@@ -32,15 +33,30 @@ var (
 	mdInlineCodePattern = regexp.MustCompile("`([^`\n]+)`")
 	// Headers: leading #s at line start.
 	mdHeaderPattern = regexp.MustCompile(`^(#{1,4})\s+(.*)$`)
+	// List items: the marker needs trailing whitespace, so *emphasis*
+	// and **bold** at line start never read as bullets.
+	mdBulletPattern  = regexp.MustCompile(`^(\s*)[-*]\s+(.*)$`)
+	mdOrderedPattern = regexp.MustCompile(`^(\s*)(\d+)\.\s+(.*)$`)
+	// Blockquotes: > with an optional single space, bare > included.
+	mdQuotePattern = regexp.MustCompile(`^>\s?(.*)$`)
+	// Horizontal rules: three or more -/*/_ alone on a line. Two
+	// dashes are prose (an em-dash stand-in), never a rule.
+	mdHrPattern = regexp.MustCompile(`^\s*(-{3,}|\*{3,}|_{3,})\s*$`)
+	// Links: [text](url), with the optional leading ! captured so
+	// image syntax can be recognized and left raw.
+	mdLinkPattern = regexp.MustCompile(`(!?)\[([^\]\n]+)\]\(([^)\n]+)\)`)
 )
 
-// Styling escapes. Bold closes with 22 (bold off) rather than a full
-// reset so it can't clobber styling an enclosing construct set up;
-// color spans close with 39 (default foreground) for the same reason.
+// Styling escapes. Bold closes with 22 (bold off) and underline with
+// 24 rather than a full reset so they can't clobber styling an
+// enclosing construct set up; color spans close with 39 (default
+// foreground) for the same reason.
 const (
-	mdBoldOn     = "\x1b[1m"
-	mdBoldOff    = "\x1b[22m"
-	mdColorReset = "\x1b[39m"
+	mdBoldOn       = "\x1b[1m"
+	mdBoldOff      = "\x1b[22m"
+	mdUnderlineOn  = "\x1b[4m"
+	mdUnderlineOff = "\x1b[24m"
+	mdColorReset   = "\x1b[39m"
 )
 
 var (
@@ -97,9 +113,25 @@ func styleMarkdown(content string, width int) string {
 			out = append(out, mdBoldOn+m[2]+mdBoldOff)
 			continue
 		}
-		line = mdBoldPattern.ReplaceAllString(line, mdBoldOn+"$1"+mdBoldOff)
-		line = mdInlineCodePattern.ReplaceAllString(line, mdCodeColor+"$1"+mdColorReset)
-		out = append(out, line)
+		if mdHrPattern.MatchString(line) {
+			out = append(out, renderRule(width))
+			continue
+		}
+		if m := mdQuotePattern.FindStringSubmatch(line); m != nil {
+			out = append(out, renderQuote(m[1], width))
+			continue
+		}
+		if m := mdBulletPattern.FindStringSubmatch(line); m != nil {
+			marker := mdCodeColor + "-" + mdColorReset
+			out = append(out, renderListItem(m[1], marker, 1, m[2], width)...)
+			continue
+		}
+		if m := mdOrderedPattern.FindStringSubmatch(line); m != nil {
+			marker := mdDimColor + m[2] + "." + mdColorReset
+			out = append(out, renderListItem(m[1], marker, len(m[2])+1, m[3], width)...)
+			continue
+		}
+		out = append(out, styleInline(line))
 	}
 	if inFence {
 		// Unterminated fence (a reply still streaming, or truncated):
@@ -108,6 +140,111 @@ func styleMarkdown(content string, width int) string {
 		out = append(out, renderFence(fenceLabel, fenceLines, cardWidth, true)...)
 	}
 	return strings.Join(out, "\n")
+}
+
+// styleInline styles one prose line's inline constructs: code spans
+// first, splitting the line around them so nothing else ever
+// transforms inside a span (a literal `[text](url)` in backticks must
+// stay literal -- running the passes sequentially over the whole line
+// would restyle the span's contents), then bold and links on the
+// non-code segments only.
+func styleInline(line string) string {
+	locs := mdInlineCodePattern.FindAllStringSubmatchIndex(line, -1)
+	if len(locs) == 0 {
+		return styleProse(line)
+	}
+	var b strings.Builder
+	last := 0
+	for _, loc := range locs {
+		b.WriteString(styleProse(line[last:loc[0]]))
+		b.WriteString(mdCodeColor + line[loc[2]:loc[3]] + mdColorReset)
+		last = loc[1]
+	}
+	b.WriteString(styleProse(line[last:]))
+	return b.String()
+}
+
+// styleProse is the non-code half of styleInline: bold, then links --
+// link text underlined, the URL dim in parens (terminals make plain
+// URLs clickable on their own; the dim keeps it from competing with
+// the prose). Image syntax (![...]) is left raw: the pane can't
+// render an image, and pretending it's a link would be a lie.
+func styleProse(s string) string {
+	s = mdBoldPattern.ReplaceAllString(s, mdBoldOn+"$1"+mdBoldOff)
+	return mdLinkPattern.ReplaceAllStringFunc(s, func(match string) string {
+		m := mdLinkPattern.FindStringSubmatch(match)
+		if m[1] == "!" {
+			return match
+		}
+		return mdUnderlineOn + m[2] + mdUnderlineOff + mdDimColor + " (" + m[3] + ")" + mdColorReset
+	})
+}
+
+// minListWrapWidth is the narrowest usable wrap column for a list
+// item's text; below it the hang indent costs more than it's worth,
+// so the item renders on one line and the outer wrap deals with it
+// (same spirit as minCardWidth degrading fences to the flat style).
+const minListWrapWidth = 8
+
+// renderListItem renders one list item with a hang indent: the styled
+// marker on the first line, continuation lines aligned under the item
+// text. The wrapping happens HERE, not in refreshViewport's outer
+// pass -- that pass is escape-aware but indent-blind, and would fold
+// a long item flush-left, destroying the hang. Emitting lines that
+// already fit the width keeps the outer pass a no-op for them (the
+// same invariant the editor cards rely on). markerWidth is the
+// marker's visual width (the styled string carries escapes, so the
+// caller states it).
+func renderListItem(indent, styledMarker string, markerWidth int, text string, width int) []string {
+	styled := styleInline(text)
+	first := indent + styledMarker + " "
+	avail := width - len(indent) - markerWidth - 1
+	if width <= 0 || avail < minListWrapWidth {
+		return []string{first + styled}
+	}
+	wrapped := strings.Split(lipgloss.NewStyle().Width(avail).Render(styled), "\n")
+	hang := indent + strings.Repeat(" ", markerWidth+1)
+	out := make([]string, 0, len(wrapped))
+	out = append(out, first+wrapped[0])
+	for _, cont := range wrapped[1:] {
+		out = append(out, hang+cont)
+	}
+	return out
+}
+
+// renderQuote renders a blockquote line: a bar in the structural rule
+// color plus the quoted text in the metadata dim, self-wrapped so the
+// bar lands on every wrapped line — the outer pass would fold a long
+// quote flush-left and orphan the continuation from its bar (seen
+// live in the preview harness). Inline spans still style; their
+// closing default-foreground resets are re-armed to dim so the rest
+// of the quote can't "leak" back to full brightness mid-line (the
+// same re-arm trick the editor cards use on chroma's resets).
+func renderQuote(text string, width int) string {
+	styled := strings.ReplaceAll(styleInline(text), mdColorReset, mdDimColor)
+	bar := ansiFg(paneRule) + "│" + mdColorReset + " "
+	avail := width - 2
+	if width <= 0 || avail < minListWrapWidth {
+		return bar + mdDimColor + styled + mdColorReset
+	}
+	wrapped := strings.Split(lipgloss.NewStyle().Width(avail).Render(styled), "\n")
+	for i, line := range wrapped {
+		wrapped[i] = bar + mdDimColor + line + mdColorReset
+	}
+	return strings.Join(wrapped, "\n")
+}
+
+// mdRuleWidth caps a horizontal rule: full-width rules read as pane
+// chrome (the old header rule), and 40 cells is plenty to say
+// "section break" in a chat column.
+const mdRuleWidth = 40
+
+func renderRule(width int) string {
+	n := mdRuleWidth
+	if width > 0 && width < n {
+		n = width
+	}
+	return mdDimColor + strings.Repeat("─", n) + mdColorReset
 }
 
 // renderFence renders one fenced block: an editor card (card.go) when
