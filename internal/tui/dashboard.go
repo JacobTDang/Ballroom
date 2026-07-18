@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/JacobTDang/Ballroom/internal/catalog"
+	"github.com/JacobTDang/Ballroom/internal/palette"
 )
 
 // The two-column dashboard layout (disco ball left, content right, framed
@@ -49,7 +50,7 @@ var dashboardGap = func() string {
 
 var dashboardPanelStyle = lipgloss.NewStyle().
 	Border(lipgloss.RoundedBorder()).
-	BorderForeground(lipgloss.Color("#9B5FB0")).
+	BorderForeground(palette.Lip(palette.Purple)).
 	Padding(1, 3)
 
 // ballGrids caches one built grid per height (width is always derived
@@ -172,7 +173,7 @@ const (
 // dashboardFooterStyle renders the footer's key hints -- same dim
 // voice as menuSubtitleStyle, defined here since the footer belongs to
 // the panel, not any one screen.
-var dashboardFooterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B8680"))
+var dashboardFooterStyle = lipgloss.NewStyle().Foreground(palette.Lip(palette.MidGray))
 
 // renderDashboardPanel joins a ball grid (sized to the panel — see
 // ballDimensions) and an animated banner (sized to fit) with the given
@@ -199,7 +200,7 @@ func renderDashboardPanel(termW, termH, phase int, rightBody string, layout dash
 	contentH := innerH
 	var footerBlock string
 	if footer != "" {
-		rule := lipgloss.NewStyle().Foreground(lipgloss.Color("#3A3D4D")).Render(strings.Repeat("─", max(innerW, 0)))
+		rule := lipgloss.NewStyle().Foreground(palette.Lip(palette.Rule)).Render(strings.Repeat("─", max(innerW, 0)))
 		footerBlock = rule + "\n" + lipgloss.PlaceHorizontal(innerW, lipgloss.Center, dashboardFooterStyle.Render(footer))
 		contentH = innerH - 2
 	}
