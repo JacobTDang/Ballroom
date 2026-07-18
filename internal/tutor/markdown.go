@@ -50,13 +50,6 @@ var (
 	mdCodeColor = ansiFg(paneTeal)
 	// Fence labels ("python") render dim -- metadata, not content.
 	mdDimColor = ansiFg(paneDimText)
-
-	// userEchoPrefix marks the user's own submitted lines in the
-	// transcript (display-only; history keeps the raw text): a dim
-	// "you" so the speaker label never competes with the message, with
-	// the › glyph in the palette's pink -- the user's own accent color,
-	// distinct from the tutor's teal.
-	userEchoPrefix = mdDimColor + "you " + mdColorReset + mdBoldOn + ansiFg(panePink) + "› " + mdColorReset + mdBoldOff
 )
 
 // styleMarkdown renders the tutor's markdown constructs as terminal
