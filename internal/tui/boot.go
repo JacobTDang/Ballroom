@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -242,6 +243,47 @@ func checkOK(checks []preflight.Check, name string) bool {
 	return false
 }
 
+// requiredCheckNames are the checks that must pass before the boot
+// screen will let you continue: without a running Docker daemon and a
+// built practice image, `docker run` at launch just fails outright, so
+// there's nothing "Press Enter to continue" would actually do (issue
+// #230). Ollama and the tutor model are deliberately not required --
+// without them the tutor pane won't work, but you can still code, run
+// tests, and submit inside a session (see this package's own doc
+// comment on checks being informational).
+var requiredCheckNames = map[string]bool{
+	preflight.CheckNameDocker: true,
+	preflight.CheckNameImage:  true,
+}
+
+// allRequiredChecksPassed reports whether every required check (see
+// requiredCheckNames) present in checks passed.
+func allRequiredChecksPassed(checks []preflight.Check) bool {
+	for _, c := range checks {
+		if requiredCheckNames[c.Name] && !c.OK {
+			return false
+		}
+	}
+	return true
+}
+
+// blockedReason names every failed required check and its remedy (the
+// check's own Detail, e.g. "not running — start Docker Desktop") --
+// e.g. "Docker daemon: not running — start Docker Desktop". A required
+// check with an empty Detail was never actually attempted (the image
+// slot's placeholder result when Docker itself failed -- see
+// checkDoneMsg) rather than a real failure with its own remedy, so it's
+// skipped: Docker's own failure above is already the actionable reason.
+func blockedReason(checks []preflight.Check) string {
+	var lines []string
+	for _, c := range checks {
+		if requiredCheckNames[c.Name] && !c.OK && c.Detail != "" {
+			lines = append(lines, c.Name+": "+c.Detail)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (m bootModel) Init() tea.Cmd {
 	return tea.Batch(m.runCheck(0), tickCmd())
 }
@@ -286,8 +328,20 @@ func (m bootModel) advance(check preflight.Check) (tea.Model, tea.Cmd) {
 		// same frame and there's nothing to actually watch happen.
 		return m, delayedCheck(len(m.checks))
 	}
-	m.ready = true
+	// Only a required check (Docker, the practice image) blocks
+	// continuing -- Ollama/the tutor model failing still resolves the
+	// sequence as "ready", same as before this field existed, so you're
+	// never stuck over a check that isn't required (issue #230).
+	m.ready = allRequiredChecksPassed(m.checks)
 	return m, nil
+}
+
+// blocked reports whether the boot sequence has finished (every pending
+// check has resolved) but ready is still false — a required check (see
+// requiredCheckNames) failed, and nothing changes until the user
+// re-runs the checks (the "r" key in Update) and they pass.
+func (m bootModel) blocked() bool {
+	return len(m.pending) > 0 && len(m.checks) == len(m.pending) && !m.ready
 }
 
 func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -406,6 +460,17 @@ func (m bootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ready {
 				return m, tea.Quit
 			}
+		case "r":
+			// Only meaningful once blocked -- re-running mid-sequence or
+			// after a successful boot has nothing to fix.
+			if m.blocked() {
+				m.checks = nil
+				m.building = false
+				m.buildSteps = nil
+				m.pullingModel = false
+				m.pullLines = nil
+				return m, m.runCheck(0)
+			}
 		}
 	}
 	return m, nil
@@ -476,6 +541,11 @@ func (m bootModel) renderRightColumn() string {
 	if m.ready {
 		b.WriteString("\n")
 		b.WriteString("  " + hintStyle.Render("Press Enter to continue") + checkDimStyle.Render("  (q to quit)") + "\n")
+	} else if m.blocked() {
+		b.WriteString("\n")
+		b.WriteString(renderFriendlyError("can't continue", errors.New(blockedReason(m.checks))))
+		b.WriteString("\n\n")
+		b.WriteString("  " + hintStyle.Render("r") + checkDimStyle.Render(" to re-run checks  ·  ") + hintStyle.Render("q") + checkDimStyle.Render(" to quit") + "\n")
 	}
 
 	return b.String()

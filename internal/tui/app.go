@@ -282,9 +282,16 @@ var (
 // handoff (Sandbox or an exercise session) returns — stageMain has no
 // resume data, stageProblems resumes straight into the category just
 // practiced instead of making the user re-pick it from the main menu.
+// launchErr carries a session that failed to even start (e.g. Docker
+// went down between the boot check and picking a problem) back into
+// the resumed screen instead of it being printed to a stderr line the
+// very next alt-screen program immediately wipes (issue #230) -- RunApp
+// seeds appModel.err from it so renderProblems shows it the same way
+// every other screen-level failure renders (see renderFriendlyError).
 type appResume struct {
-	stage    appStage
-	category string
+	stage     appStage
+	category  string
+	launchErr error
 }
 
 // appModel is the single bubbletea program behind the whole menu tree:
@@ -1551,6 +1558,15 @@ func (m appModel) renderProblems() string {
 	b.WriteString("\n")
 	b.WriteString(checkDimStyle.Render("choose a problem"))
 	b.WriteString("\n\n")
+
+	// Set by RunApp when the session just picked here failed to launch
+	// (e.g. Docker went down) -- shown right where the pick happened,
+	// on the same screen it resumes to, instead of a stderr line the
+	// very next alt-screen program immediately wiped (issue #230).
+	if m.err != nil {
+		b.WriteString(renderFriendlyError("couldn't start that session", m.err))
+		b.WriteString("\n\n")
+	}
 
 	b.WriteString(fmt.Sprintf("%s%s", checkDimStyle.Render("› "), m.problemFilter))
 	b.WriteString("\n\n")

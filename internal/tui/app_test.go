@@ -1810,6 +1810,77 @@ func TestNewAppModel_ResumeAtStageProblems_PreloadsCategory(t *testing.T) {
 	}
 }
 
+// --- issue #230: a launch failure resumes with an explanation ---
+
+func TestResumedAppModel_SeedsLaunchErrIntoStageProblems(t *testing.T) {
+	defer fakeCatalogList(practiceFixture(), nil)()
+
+	launchErr := errors.New("docker: cannot connect to the Docker daemon")
+	resume := appResume{stage: stageProblems, category: "two-pointers", launchErr: launchErr}
+
+	m := resumedAppModel(config.Config{}, resume)
+
+	if m.err == nil || m.err.Error() != launchErr.Error() {
+		t.Fatalf("err = %v, want %v", m.err, launchErr)
+	}
+	if m.stage != stageProblems {
+		t.Fatalf("stage = %v, want stageProblems", m.stage)
+	}
+}
+
+// TestResumedAppModel_RendersLaunchErrOnTheResumedScreen exercises the
+// same seeding end to end through renderRight(), the actual thing the
+// user sees -- confirming the resumed stageProblems screen (not just
+// the model's err field) shows the message, via the shared
+// renderFriendlyError helper every other screen-level failure uses.
+func TestResumedAppModel_RendersLaunchErrOnTheResumedScreen(t *testing.T) {
+	defer fakeCatalogList(practiceFixture(), nil)()
+
+	launchErr := errors.New("docker: cannot connect to the Docker daemon")
+	resume := appResume{stage: stageProblems, category: "two-pointers", launchErr: launchErr}
+
+	m := resumedAppModel(config.Config{}, resume)
+
+	out := stripAnsiTUI(m.renderRight())
+	if !strings.Contains(out, "docker: cannot connect to the Docker daemon") {
+		t.Errorf("expected the launch error visible on the resumed problems screen, got:\n%s", out)
+	}
+	if !strings.Contains(out, "couldn't start that session") {
+		t.Errorf("expected the friendly headline visible, got:\n%s", out)
+	}
+}
+
+func TestResumedAppModel_NoLaunchErrLeavesErrNil(t *testing.T) {
+	defer fakeCatalogList(practiceFixture(), nil)()
+
+	m := resumedAppModel(config.Config{}, appResume{stage: stageProblems, category: "two-pointers"})
+	if m.err != nil {
+		t.Errorf("err = %v, want nil", m.err)
+	}
+}
+
+// TestResumedAppModel_LoadFailureTakesPrecedenceOverLaunchErr: a launch
+// error must never clobber a more fundamental error newAppModel's own
+// construction already hit (e.g. the catalog failing to load), which
+// also leaves the model on stageMain rather than the stageProblems the
+// launchErr assumes it reached.
+func TestResumedAppModel_LoadFailureTakesPrecedenceOverLaunchErr(t *testing.T) {
+	loadErr := errors.New("catalog: boom")
+	defer fakeCatalogList(nil, loadErr)()
+
+	launchErr := errors.New("docker: cannot connect to the Docker daemon")
+	resume := appResume{stage: stageProblems, category: "two-pointers", launchErr: launchErr}
+
+	m := resumedAppModel(config.Config{}, resume)
+
+	if m.err == nil || m.err.Error() != loadErr.Error() {
+		t.Fatalf("err = %v, want the more fundamental load error %v", m.err, loadErr)
+	}
+	if m.stage != stageMain {
+		t.Fatalf("stage = %v, want stageMain (loadPractice failed, so resume's stageProblems never applied)", m.stage)
+	}
+}
+
 func TestUpdateProblems_DefaultLanguageRunsMatchingVariantDirectly(t *testing.T) {
 	m := appModel{
 		stage: stageProblems,

@@ -570,6 +570,12 @@ func TestBootModel_BuildDoneSuccessAdvancesAsPassingImageCheck(t *testing.T) {
 	}
 }
 
+// TestBootModel_BuildDoneFailureAdvancesAsFailingImageCheck is a
+// regression pin for issue #230's fix: the practice image is a required
+// check (see requiredCheckNames) since `docker run` at launch just fails
+// outright without one, so a failed build must now block ready instead
+// of the old "resolved, so ready" behavior every check used to get
+// regardless of pass/fail.
 func TestBootModel_BuildDoneFailureAdvancesAsFailingImageCheck(t *testing.T) {
 	m := bootModel{
 		pending: []func() preflight.Check{
@@ -588,8 +594,14 @@ func TestBootModel_BuildDoneFailureAdvancesAsFailingImageCheck(t *testing.T) {
 	if len(bm.checks) != 2 || bm.checks[1].OK {
 		t.Fatalf("expected a failing Image check appended, got %+v", bm.checks)
 	}
-	if !bm.ready {
-		t.Error("expected ready=true so the user isn't stuck — they can see the failure and quit")
+	if bm.checks[1].Name != preflight.CheckNameImage {
+		t.Fatalf("expected the failing check's Name to be the real preflight.CheckNameImage constant, got %q", bm.checks[1].Name)
+	}
+	if bm.ready {
+		t.Error("expected ready=false -- the practice image is required, so a failed build must block continuing (issue #230)")
+	}
+	if !bm.blocked() {
+		t.Error("expected blocked()=true once the sequence resolves with a failed required check")
 	}
 }
 
@@ -709,5 +721,187 @@ func TestBootModel_CtrlCAlwaysRequestsQuit(t *testing.T) {
 	}
 	if !newM.(bootModel).quit {
 		t.Error("expected quit=true after ctrl+c")
+	}
+}
+
+// --- issue #230: required checks block ready ---
+
+func TestBootModel_AdvanceBlocksReadyWhenDockerCheckFails(t *testing.T) {
+	m := bootModel{pending: make([]func() preflight.Check, 4)}
+	m.checks = []preflight.Check{
+		{Name: preflight.CheckNameImage, OK: true},
+		{Name: preflight.CheckNameOllama, OK: true},
+		{Name: preflight.CheckNameModel, OK: true},
+	}
+
+	newM, cmd := m.advance(preflight.Check{Name: preflight.CheckNameDocker, OK: false, Detail: "not running -- start Docker Desktop"})
+	bm := newM.(bootModel)
+
+	if bm.ready {
+		t.Error("expected ready=false when the required Docker check failed")
+	}
+	if cmd != nil {
+		t.Error("expected no further command once the sequence has fully resolved, even when blocked")
+	}
+}
+
+func TestBootModel_AdvanceStillReadyWhenOnlyNonRequiredChecksFail(t *testing.T) {
+	m := bootModel{pending: make([]func() preflight.Check, 4)}
+	m.checks = []preflight.Check{
+		{Name: preflight.CheckNameDocker, OK: true},
+		{Name: preflight.CheckNameImage, OK: true},
+		{Name: preflight.CheckNameOllama, OK: false},
+	}
+
+	newM, _ := m.advance(preflight.Check{Name: preflight.CheckNameModel, OK: false})
+	bm := newM.(bootModel)
+
+	if !bm.ready {
+		t.Error("expected ready=true -- Ollama/the tutor model are not required, so a failure there must not block continuing")
+	}
+}
+
+// TestBootModel_AllChecksPassSetsReady is the "all-checks-pass path
+// unchanged" regression pin, using the real preflight.CheckName*
+// constants (unlike several older tests in this file, which happen to
+// use placeholder names like "Docker" that never collide with
+// requiredCheckNames at all) so it actually exercises the new gating
+// logic on the pass path, not just around it.
+func TestBootModel_AllChecksPassSetsReady(t *testing.T) {
+	m := bootModel{pending: make([]func() preflight.Check, 4)}
+	m.checks = []preflight.Check{
+		{Name: preflight.CheckNameDocker, OK: true},
+		{Name: preflight.CheckNameImage, OK: true},
+		{Name: preflight.CheckNameOllama, OK: true},
+	}
+
+	newM, cmd := m.advance(preflight.Check{Name: preflight.CheckNameModel, OK: true})
+	bm := newM.(bootModel)
+
+	if !bm.ready {
+		t.Error("expected ready=true when every check, required or not, passed")
+	}
+	if bm.blocked() {
+		t.Error("expected blocked()=false once ready")
+	}
+	if cmd != nil {
+		t.Error("expected no further command once the sequence has fully resolved")
+	}
+}
+
+func TestBootModel_RenderRightColumnShowsBlockedStateWithRemedyAndHints(t *testing.T) {
+	m := bootModel{
+		pending: make([]func() preflight.Check, 4),
+		checks: []preflight.Check{
+			{Name: preflight.CheckNameDocker, OK: false, Detail: "not running - start Docker Desktop", Command: "docker info"},
+			{Name: preflight.CheckNameImage, OK: false},
+			{Name: preflight.CheckNameOllama, OK: true},
+			{Name: preflight.CheckNameModel, OK: true},
+		},
+	}
+	if !m.blocked() {
+		t.Fatal("test setup: expected the model to be blocked")
+	}
+
+	out := m.renderRightColumn()
+	if !strings.Contains(out, "start Docker Desktop") {
+		t.Errorf("expected the failing required check's remedy visible, got:\n%s", out)
+	}
+	if strings.Contains(out, preflight.CheckNameImage+":") {
+		t.Errorf("expected the Image placeholder (never actually attempted, empty Detail) not listed as its own reason, got:\n%s", out)
+	}
+	if !strings.Contains(out, "re-run checks") {
+		t.Errorf("expected an 'r to re-run' hint while blocked, got:\n%s", out)
+	}
+	if !strings.Contains(out, "to quit") {
+		t.Errorf("expected a 'q to quit' hint while blocked, got:\n%s", out)
+	}
+	if strings.Contains(out, "Press Enter to continue") {
+		t.Errorf("did not expect the ready prompt while blocked, got:\n%s", out)
+	}
+}
+
+func TestBootModel_RenderRightColumnShowsNothingExtraWhenNotYetResolved(t *testing.T) {
+	m := bootModel{
+		pending:    make([]func() preflight.Check, 4),
+		checkNames: []string{"Docker daemon", "Practice image", "Ollama", "Tutor model"},
+		checks:     []preflight.Check{{Name: preflight.CheckNameDocker, OK: false, Detail: "not running"}},
+	}
+	out := m.renderRightColumn()
+	if strings.Contains(out, "re-run checks") || strings.Contains(out, "Press Enter to continue") {
+		t.Errorf("expected neither the ready prompt nor the blocked hint mid-sequence, got:\n%s", out)
+	}
+}
+
+func TestBootModel_RKeyResetsAndReRunsChecksWhenBlocked(t *testing.T) {
+	defer noCheckDelay()()
+
+	var reran bool
+	m := bootModel{
+		pending: []func() preflight.Check{
+			func() preflight.Check {
+				reran = true
+				return preflight.Check{Name: preflight.CheckNameDocker, OK: true}
+			},
+			func() preflight.Check { return preflight.Check{Name: preflight.CheckNameImage, OK: true} },
+		},
+		checks: []preflight.Check{
+			{Name: preflight.CheckNameDocker, OK: false, Detail: "not running"},
+			{Name: preflight.CheckNameImage, OK: false},
+		},
+	}
+	if !m.blocked() {
+		t.Fatal("test setup: expected the model to start blocked")
+	}
+
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	bm := newM.(bootModel)
+
+	if len(bm.checks) != 0 {
+		t.Errorf("expected checks reset to empty on r, got %+v", bm.checks)
+	}
+	if bm.ready {
+		t.Error("expected ready=false immediately after r, before the re-run resolves")
+	}
+	if cmd == nil {
+		t.Fatal("expected r to return a command that starts re-running checks")
+	}
+	msg := cmd()
+	if _, ok := msg.(checkDoneMsg); !ok {
+		t.Fatalf("expected r's command to run the first check (a checkDoneMsg), got %T", msg)
+	}
+	if !reran {
+		t.Error("expected the first pending check function to actually run again")
+	}
+}
+
+func TestBootModel_RKeyIsNoOpWhenReady(t *testing.T) {
+	m := bootModel{
+		pending: make([]func() preflight.Check, 1),
+		checks:  []preflight.Check{{Name: preflight.CheckNameDocker, OK: true}},
+		ready:   true,
+	}
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if cmd != nil {
+		t.Error("expected r to be a no-op once ready -- nothing to fix")
+	}
+	bm := newM.(bootModel)
+	if len(bm.checks) != 1 {
+		t.Errorf("expected checks left untouched, got %+v", bm.checks)
+	}
+}
+
+func TestBootModel_RKeyIsNoOpMidSequence(t *testing.T) {
+	m := bootModel{
+		pending: make([]func() preflight.Check, 4),
+		checks:  []preflight.Check{{Name: preflight.CheckNameDocker, OK: true}},
+	}
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if cmd != nil {
+		t.Error("expected r to be a no-op mid-sequence -- nothing has failed yet")
+	}
+	bm := newM.(bootModel)
+	if len(bm.checks) != 1 {
+		t.Errorf("expected checks left untouched, got %+v", bm.checks)
 	}
 }
