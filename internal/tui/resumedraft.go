@@ -100,7 +100,7 @@ func (m appModel) updateResumeDraft(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m appModel) renderResumeDraft() string {
 	var b strings.Builder
-	b.WriteString(hintStyle.Render("  Unfinished work"))
+	b.WriteString(hintStyle.Render("  " + heading("Unfinished work")))
 	b.WriteString("\n\n")
 	b.WriteString(checkDimStyle.Render("  " + m.pendingExercise.Title))
 	b.WriteString("\n")

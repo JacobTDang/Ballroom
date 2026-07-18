@@ -113,7 +113,7 @@ func (m appModel) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // every other stage uses (see renderStats for the pattern this mirrors).
 func (m appModel) renderHelp() string {
 	var b strings.Builder
-	b.WriteString(hintStyle.Render("Help"))
+	b.WriteString(hintStyle.Render(heading("Help")))
 	b.WriteString("\n")
 	b.WriteString(checkDimStyle.Render("keys across the host menu, the session, and the tutor"))
 	b.WriteString("\n\n")

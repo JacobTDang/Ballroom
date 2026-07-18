@@ -1139,8 +1139,10 @@ func TestAppModel_Problems_QGoesBackToCategoriesWhenUngrouped(t *testing.T) {
 func TestAppModel_RenderProblems_ShowsDisplayCategoryAsHeader(t *testing.T) {
 	m := problemsFixture(t)
 	out := stripAnsiTUI(m.View())
-	if !strings.Contains(out, "Two Pointers") {
-		t.Errorf("expected the problems header to show %q, got:\n%s", "Two Pointers", out)
+	// Screen titles are letterspaced (see heading), so the header reads
+	// "T W O   P O I N T E R S" rather than the raw display name.
+	if !strings.Contains(out, heading("Two Pointers")) {
+		t.Errorf("expected the problems header to show %q, got:\n%s", heading("Two Pointers"), out)
 	}
 }
 
