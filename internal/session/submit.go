@@ -70,11 +70,25 @@ type Config struct {
 	// VideoURL, when non-empty, is the exercise's solution walkthrough
 	// video, printed alongside the results (the problem statement's
 	// footer carries it too -- see orchestrator.PrepareWorkspace).
-	VideoURL      string
-	StartedAt     time.Time
-	DBPath        string
-	PollInterval  time.Duration
-	RevealTimeout time.Duration
+	VideoURL  string
+	StartedAt time.Time
+	// StartUptime and HasStartUptime carry the container's /proc/uptime
+	// reading at session start (PRACTICE_START_UPTIME, exported by
+	// docker/entrypoint.sh before the tmux server starts -- see
+	// cmd/ballroom's startUptimeFromEnv). When HasStartUptime is true,
+	// TimeSpentMin is computed from uptime elapsed instead of wall clock
+	// (see clock.go and elapsedMinutes below): uptime does not advance
+	// while the host laptop is asleep, because the Docker Desktop Linux
+	// VM a session runs in is suspended along with it, so a lunch-break
+	// lid-close no longer inflates a 20-minute problem into a
+	// 200-minute one (issue #229). False (the zero value) means an
+	// older container image, a non-Linux host, or a test -- StartedAt's
+	// wall clock is the only signal available.
+	StartUptime    float64
+	HasStartUptime bool
+	DBPath         string
+	PollInterval   time.Duration
+	RevealTimeout  time.Duration
 }
 
 // Submit requests the hidden content be revealed, waits for it, grades
@@ -164,7 +178,7 @@ func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, err
 		Category:     cfg.Category,
 		Language:     cfg.Language,
 		Date:         time.Now().Format("2006-01-02"),
-		TimeSpentMin: time.Since(cfg.StartedAt).Minutes(),
+		TimeSpentMin: elapsedMinutes(cfg),
 		Result:       result,
 		Notes:        notes,
 		GradeSummary: gradeSummary,
@@ -182,6 +196,22 @@ func Submit(cfg Config, stdin io.Reader, stdout io.Writer) (tracker.Attempt, err
 	}
 	attempt.ID = id
 	return attempt, nil
+}
+
+// elapsedMinutes is the recorded attempt's time_spent_min: container
+// uptime when the session captured a start reading (cfg.HasStartUptime
+// -- see Config's doc comment) and this process can read the current
+// one, wall clock otherwise (tests, non-Linux hosts, or an older
+// container image that never set PRACTICE_START_UPTIME). See clock.go
+// for why uptime survives a host laptop sleeping mid-session and wall
+// clock does not (issue #229).
+func elapsedMinutes(cfg Config) float64 {
+	if cfg.HasStartUptime {
+		if now, ok := containerUptime(); ok {
+			return ElapsedMin(cfg.StartUptime, now)
+		}
+	}
+	return time.Since(cfg.StartedAt).Minutes()
 }
 
 func requestReveal(cfg Config) error {

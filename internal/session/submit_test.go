@@ -272,6 +272,96 @@ func TestSubmit_ComputesTimeSpent(t *testing.T) {
 	}
 }
 
+// withFakeNowUptime points procUptimePath (see clock.go) at a fixture
+// reporting nowUptime as the current reading, for the duration of the
+// test, restoring the real path after -- otherwise these tests would
+// depend on this machine's real /proc/uptime (nonexistent on macOS,
+// uncontrollable on Linux). Distinct from clock_test.go's
+// withFakeUptimeFile (same package, that one takes raw file content for
+// containerUptime's own parsing tests).
+func withFakeNowUptime(t *testing.T, nowUptime float64) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "uptime")
+	content := fmt.Sprintf("%.2f 0.00\n", nowUptime)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write fixture uptime file: %v", err)
+	}
+	orig := procUptimePath
+	procUptimePath = path
+	t.Cleanup(func() { procUptimePath = orig })
+}
+
+func TestSubmit_ComputesTimeSpentFromUptimeWhenPresent(t *testing.T) {
+	// "Now" uptime is 600s (10min) past the recorded start uptime.
+	withFakeNowUptime(t, 1600)
+
+	cfg := baseConfig(t)
+	cfg.TestCommand = "true"
+	cfg.HasStartUptime = true
+	cfg.StartUptime = 1000
+	// StartedAt deliberately set to something wildly different (3 hours,
+	// not 10 minutes) -- if the wall clock path were used by mistake,
+	// TimeSpentMin would be ~180, not ~10, so this proves the uptime
+	// path actually wins when both are present.
+	cfg.StartedAt = time.Now().Add(-3 * time.Hour)
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	attempt, err := Submit(cfg, strings.NewReader("\n"), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if attempt.TimeSpentMin < 9.99 || attempt.TimeSpentMin > 10.01 {
+		t.Errorf("TimeSpentMin = %v, want ~10 (uptime-derived, not the 3h wall-clock start)", attempt.TimeSpentMin)
+	}
+}
+
+func TestSubmit_FallsBackToWallClockWhenNoStartUptimeCaptured(t *testing.T) {
+	// HasStartUptime left at its zero value (false): the container never
+	// captured a start reading (older image) or this is a test/non-Linux
+	// host -- must behave exactly like before uptime existed.
+	cfg := baseConfig(t)
+	cfg.TestCommand = "true"
+	cfg.StartedAt = time.Now().Add(-10 * time.Minute)
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	attempt, err := Submit(cfg, strings.NewReader("\n"), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if attempt.TimeSpentMin < 9.9 || attempt.TimeSpentMin > 10.5 {
+		t.Errorf("TimeSpentMin = %v, want ~10 from the wall-clock fallback", attempt.TimeSpentMin)
+	}
+}
+
+func TestSubmit_FallsBackToWallClockWhenUptimeUnreadable(t *testing.T) {
+	// HasStartUptime is true (PRACTICE_START_UPTIME was present at
+	// process start) but /proc/uptime can't be read right now (e.g. this
+	// process is running on a non-Linux host) -- must still fall back
+	// instead of recording a bogus/zero time.
+	orig := procUptimePath
+	procUptimePath = filepath.Join(t.TempDir(), "does-not-exist")
+	t.Cleanup(func() { procUptimePath = orig })
+
+	cfg := baseConfig(t)
+	cfg.TestCommand = "true"
+	cfg.HasStartUptime = true
+	cfg.StartUptime = 1000
+	cfg.StartedAt = time.Now().Add(-10 * time.Minute)
+	mkdirs(t, cfg)
+	simulateHostReveal(t, cfg.ControlDir)
+
+	attempt, err := Submit(cfg, strings.NewReader("\n"), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if attempt.TimeSpentMin < 9.9 || attempt.TimeSpentMin > 10.5 {
+		t.Errorf("TimeSpentMin = %v, want ~10 from the wall-clock fallback when uptime is unreadable", attempt.TimeSpentMin)
+	}
+}
+
 func TestSubmit_PromptsForAndStoresNotes(t *testing.T) {
 	cfg := baseConfig(t)
 	cfg.TestCommand = "true"
