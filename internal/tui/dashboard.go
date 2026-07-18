@@ -48,8 +48,11 @@ var dashboardGap = func() string {
 	return s
 }()
 
+// The double rule is the most recognizable cue of the terminals this
+// app is styled after, and the panel frames every screen -- so it does
+// the most work of any single change here.
 var dashboardPanelStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
+	Border(lipgloss.DoubleBorder()).
 	BorderForeground(palette.Lip(palette.Purple)).
 	Padding(1, 3)
 

@@ -153,16 +153,16 @@ func TestAppModel_Help_RendersWithoutWrappingDamageAtMinimumPanelSize(t *testing
 	}
 
 	first := stripAnsiTUI(lines[0])
-	if !strings.HasPrefix(first, "╭") || !strings.HasSuffix(first, "╮") {
+	if !strings.HasPrefix(first, "╔") || !strings.HasSuffix(first, "╗") {
 		t.Errorf("top border row malformed: %q", first)
 	}
 	last := stripAnsiTUI(lines[len(lines)-1])
-	if !strings.HasPrefix(last, "╰") || !strings.HasSuffix(last, "╯") {
+	if !strings.HasPrefix(last, "╚") || !strings.HasSuffix(last, "╝") {
 		t.Errorf("bottom border row malformed: %q", last)
 	}
 	for i := 1; i < len(lines)-1; i++ {
 		l := stripAnsiTUI(lines[i])
-		if !strings.HasPrefix(l, "│") || !strings.HasSuffix(l, "│") {
+		if !strings.HasPrefix(l, "║") || !strings.HasSuffix(l, "║") {
 			t.Errorf("interior row %d missing its side borders: %q", i, l)
 		}
 	}

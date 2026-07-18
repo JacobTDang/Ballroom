@@ -45,21 +45,21 @@ func TestPracticeStreak_Table(t *testing.T) {
 }
 
 func TestProgressBar_Rendering(t *testing.T) {
-	if got := stripAnsiTUI(progressBar(0, 10, 10)); got != "░░░░░░░░░░" {
+	if got := stripAnsiTUI(progressBar(0, 10, 10)); got != "[░░░░░░░░░░]" {
 		t.Errorf("empty bar = %q", got)
 	}
-	if got := stripAnsiTUI(progressBar(10, 10, 10)); got != "▓▓▓▓▓▓▓▓▓▓" {
+	if got := stripAnsiTUI(progressBar(10, 10, 10)); got != "[██████████]" {
 		t.Errorf("full bar = %q", got)
 	}
-	if got := stripAnsiTUI(progressBar(5, 10, 10)); got != "▓▓▓▓▓░░░░░" {
+	if got := stripAnsiTUI(progressBar(5, 10, 10)); got != "[█████░░░░░]" {
 		t.Errorf("half bar = %q", got)
 	}
 	// One solve out of many must still show one visible cell of
 	// progress -- flooring 1/149 to zero would read as "nothing done".
-	if got := stripAnsiTUI(progressBar(1, 149, 14)); !strings.HasPrefix(got, "▓") {
+	if got := stripAnsiTUI(progressBar(1, 149, 14)); !strings.HasPrefix(got, "[█") {
 		t.Errorf("tiny progress rendered invisible: %q", got)
 	}
-	if got := stripAnsiTUI(progressBar(3, 0, 10)); got != "░░░░░░░░░░" {
+	if got := stripAnsiTUI(progressBar(3, 0, 10)); got != "[░░░░░░░░░░]" {
 		t.Errorf("zero-total bar must not divide by zero: %q", got)
 	}
 }

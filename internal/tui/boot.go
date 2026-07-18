@@ -513,6 +513,12 @@ func expandedCheckRow(mark, name, command, output string) string {
 func (m bootModel) renderRightColumn() string {
 	var b strings.Builder
 
+	// The checks already stream in one at a time (checkStartDelay), so
+	// framing them as a titled sequence costs nothing and makes the
+	// wait read as a machine coming up rather than a stalled screen.
+	b.WriteString(hintStyle.Render(heading("System check")))
+	b.WriteString("\n\n")
+
 	for _, c := range m.checks {
 		mark := checkOKStyle.Render("✓")
 		if !c.OK {
@@ -541,6 +547,7 @@ func (m bootModel) renderRightColumn() string {
 
 	if m.ready {
 		b.WriteString("\n")
+		b.WriteString("  " + passStyle.Render("READY.") + "\n\n")
 		b.WriteString("  " + hintStyle.Render("Press Enter to continue") + checkDimStyle.Render("  (q to quit)") + "\n")
 	} else if m.blocked() {
 		b.WriteString("\n")

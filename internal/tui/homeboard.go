@@ -53,8 +53,13 @@ func progressBar(solved, total, width int) string {
 			filled = 1
 		}
 	}
-	return passStyle.Render(strings.Repeat("▓", filled)) +
-		checkDimStyle.Render(strings.Repeat("░", width-filled))
+	// Bracketed and block-shaded: a framed meter reads as an instrument
+	// rather than a bare run of characters. The floor-to-one rule above
+	// is what keeps 1/149 from rounding away to an empty bar.
+	return checkDimStyle.Render("[") +
+		passStyle.Render(strings.Repeat("█", filled)) +
+		checkDimStyle.Render(strings.Repeat("░", width-filled)) +
+		checkDimStyle.Render("]")
 }
 
 // practiceStreak counts consecutive practice days ending today -- or

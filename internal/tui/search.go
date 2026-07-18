@@ -80,7 +80,7 @@ func (m appModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m appModel) renderSearch() string {
 	var b strings.Builder
-	b.WriteString(hintStyle.Render("Search"))
+	b.WriteString(hintStyle.Render(heading("Search")))
 	b.WriteString("\n")
 	b.WriteString(checkDimStyle.Render("title, id, or track — across every category"))
 	b.WriteString("\n\n")

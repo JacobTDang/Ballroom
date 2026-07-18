@@ -147,7 +147,7 @@ func TestRenderDashboardPanel_CenteredLayoutFillsTallPanels(t *testing.T) {
 	// row with real content and require it to sit well below the top.
 	firstContent := -1
 	for i, l := range lines {
-		inner := strings.Trim(stripAnsiTUI(l), "│╭╮╰╯─ ")
+		inner := strings.Trim(stripAnsiTUI(l), "║╔╗╚╝═ ")
 		if inner != "" {
 			firstContent = i
 			break
@@ -161,7 +161,7 @@ func TestRenderDashboardPanel_CenteredLayoutFillsTallPanels(t *testing.T) {
 	lines = strings.Split(top, "\n")
 	firstContent = -1
 	for i, l := range lines {
-		inner := strings.Trim(stripAnsiTUI(l), "│╭╮╰╯─ ")
+		inner := strings.Trim(stripAnsiTUI(l), "║╔╗╚╝═ ")
 		if inner != "" {
 			firstContent = i
 			break

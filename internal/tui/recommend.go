@@ -52,7 +52,7 @@ func (m appModel) chooseRecommendation() (tea.Model, tea.Cmd) {
 
 func (m appModel) renderRecommend() string {
 	var b strings.Builder
-	b.WriteString(hintStyle.Render("Next up"))
+	b.WriteString(hintStyle.Render(heading("Next up")))
 	b.WriteString("\n")
 	b.WriteString(checkDimStyle.Render("picked from what's due, what you've practiced least, and where you lose points"))
 	b.WriteString("\n\n")

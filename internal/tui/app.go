@@ -1748,7 +1748,7 @@ var categoryRoadmapDocs = map[string]string{
 
 func (m appModel) renderProblems() string {
 	var b strings.Builder
-	b.WriteString(hintStyle.Render(catalog.DisplayCategory(m.category)))
+	b.WriteString(hintStyle.Render(heading(catalog.DisplayCategory(m.category))))
 	b.WriteString("\n")
 	b.WriteString(checkDimStyle.Render("choose a problem"))
 	b.WriteString("\n\n")
@@ -1986,7 +1986,7 @@ func resultStyle(result string) lipgloss.Style {
 
 func (m appModel) renderStats() string {
 	var b strings.Builder
-	b.WriteString(hintStyle.Render("Stats"))
+	b.WriteString(hintStyle.Render(heading("Stats")))
 	b.WriteString("\n\n")
 
 	if m.err != nil {
@@ -2136,7 +2136,7 @@ func settingsFromConfig(cfg config.Config) config.Settings {
 
 func (m appModel) renderSettings() string {
 	var b strings.Builder
-	b.WriteString(hintStyle.Render("Settings"))
+	b.WriteString(hintStyle.Render(heading("Settings")))
 	b.WriteString("\n")
 	b.WriteString(checkDimStyle.Render(fmt.Sprintf("Worker model: %s", m.cfg.TutorModel)))
 	b.WriteString("\n")
