@@ -1,3 +1,5 @@
+import pytest
+
 from solution import CursorStore
 
 
@@ -40,11 +42,8 @@ def test_empty_final_token_and_nonempty_when_more_remain():
 def test_tampered_token_errors():
     store = CursorStore(_records(range(1, 10)))
     _, token = store.list(3, "")
-    try:
+    with pytest.raises(ValueError):
         store.list(3, _tamper(token))
-        assert False, "a tampered page_token was silently accepted"
-    except ValueError:
-        pass
 
 
 def test_page_size_clamps():
@@ -63,11 +62,8 @@ def test_page_size_clamps():
 def test_param_change_invalidates_token():
     store = CursorStore(_records(range(1, 30)))
     _, token = store.list(5, "")
-    try:
+    with pytest.raises(ValueError):
         store.list(7, token)
-        assert False, "resuming with a different page_size was silently honored"
-    except ValueError:
-        pass
 
 
 def test_insert_mid_walk_never_duplicates_or_skips():
