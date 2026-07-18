@@ -46,10 +46,13 @@ func Run(cfg config.Config) error {
 
 		switch final.outcome {
 		case outcomeRunExercise:
-			if runErr := orchestrator.RunExercise(cfg, final.exerciseToRun, final.draftDirToUse); runErr != nil {
-				fmt.Fprintf(os.Stderr, "ballroom: %v\n", runErr)
-			}
-			resume = appResume{stage: stageProblems, category: final.category}
+			// A launch failure (Docker down, image build broken, ...)
+			// carries into the resumed screen via launchErr instead of
+			// being printed here -- the very next line replaces this
+			// program with a fresh alt-screen one, which would wipe a
+			// stderr write before anyone could read it (issue #230).
+			runErr := orchestrator.RunExercise(cfg, final.exerciseToRun, final.draftDirToUse)
+			resume = appResume{stage: stageProblems, category: final.category, launchErr: runErr}
 		case outcomeRunSandbox:
 			if runErr := orchestrator.RunSandbox(cfg); runErr != nil {
 				fmt.Fprintf(os.Stderr, "ballroom: %v\n", runErr)
@@ -63,13 +66,30 @@ func Run(cfg config.Config) error {
 
 // RunApp shows the merged menu/practice/stats/model-picker program and
 // blocks until it exits — either the user quit, or an outcome needs a
-// docker handoff outside bubbletea (see appOutcome).
+// docker handoff outside bubbletea (see appOutcome). When resume carries
+// a launchErr, it's seeded into the fresh model's err field (see
+// resumedAppModel) so the resumed screen renders it.
 func RunApp(cfg config.Config, resume appResume) (appModel, error) {
-	final, err := tea.NewProgram(newAppModel(cfg, resume), tea.WithAltScreen()).Run()
+	final, err := tea.NewProgram(resumedAppModel(cfg, resume), tea.WithAltScreen()).Run()
 	if err != nil {
 		return appModel{}, err
 	}
 	return final.(appModel), nil
+}
+
+// resumedAppModel is newAppModel plus RunApp's own launchErr seeding,
+// split out so the seeding is unit-testable without going through a
+// real bubbletea program. A launchErr never overwrites an error
+// newAppModel's own construction already produced (e.g. the catalog
+// failing to load) -- that one is more fundamental (it leaves the model
+// on stageMain, unable to even reach the problem it resumed to) and
+// takes precedence.
+func resumedAppModel(cfg config.Config, resume appResume) appModel {
+	m := newAppModel(cfg, resume)
+	if m.err == nil {
+		m.err = resume.launchErr
+	}
+	return m
 }
 
 // recentAttempts returns up to n attempts, newest first.
