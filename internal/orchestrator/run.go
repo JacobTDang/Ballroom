@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/JacobTDang/Ballroom/internal/config"
@@ -35,11 +37,15 @@ const sandboxVolume = "ballroom-sandbox"
 //
 // The workspace is disposable but the user's in-progress code must not
 // be: SnapshotLoop polls it into data/.drafts/<exercise-id>/ every
-// draftSnapshotInterval while the session runs, and a final
-// draft.Snapshot call (deferred below, before cleanupWorkspace) catches
-// whatever was last saved on every exit path -- normal completion,
-// submit, `ballroom return`, a killed container, or a docker error
-// (issue #221).
+// draftSnapshotInterval while the session runs, and a final finalize
+// call (see newSessionFinalizer) catches whatever was last saved on
+// every exit path -- normal completion, submit, `ballroom return`, a
+// killed container, a docker error (issue #221), or the host terminal
+// closing (SIGINT/SIGTERM/SIGHUP -- issue #231). Go doesn't run
+// deferred functions for an unhandled fatal signal, so without
+// installSignalCleanup catching those three, finalize's deferred call
+// below would simply never run and workspaceDir/controlDir would leak
+// forever.
 //
 // draftDir is the caller's answer to "resume or start fresh": the
 // draft directory to overlay onto the starter, or empty for a pristine
@@ -59,30 +65,37 @@ func RunExercise(cfg config.Config, ex exercise.Exercise, draftDir string) error
 	if err != nil {
 		return err
 	}
-	defer cleanupWorkspace()
 
-	controlDir, err := os.MkdirTemp("", "practice-control-")
+	controlDir, err := os.MkdirTemp("", controlDirPrefix)
 	if err != nil {
+		cleanupWorkspace()
 		return fmt.Errorf("orchestrator: create control dir: %w", err)
 	}
-	defer os.RemoveAll(controlDir)
 
 	startedAt := time.Now()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Registered after cleanupWorkspace above, so Go's LIFO defer order
-	// runs this snapshot FIRST on every exit path, catching whatever
-	// the user last saved before the workspace it lives in is deleted.
-	// By the time any defer runs, the explicit cancel() + channel
-	// drains below have already stopped SnapshotLoop, so this never
-	// races a concurrent in-loop snapshot.
-	defer func() {
-		if _, err := draft.Snapshot(cfg.DataDir, ex.ID, workspaceDir); err != nil {
-			fmt.Fprintf(os.Stderr, "orchestrator: final draft snapshot: %v\n", err)
-		}
-	}()
+	// finalize is the session's one true cleanup -- the final draft
+	// snapshot (catching whatever was last saved before the workspace it
+	// lives in is deleted) plus removing the workspace and control dirs.
+	// Idempotent, so it's safe for both the deferred call below (the
+	// normal exit path) and the signal handler registered next to reach
+	// it -- e.g. a SIGHUP arriving the same instant the container exits
+	// on its own.
+	finalize := newSessionFinalizer(cfg, ex.ID, workspaceDir, controlDir, cleanupWorkspace)
+	defer finalize()
+
+	// Closing the terminal SIGHUPs this process; Ctrl-C/a kill sends
+	// SIGINT/SIGTERM. On signal, run the same finalize the normal exit
+	// path does, then re-raise so the process still dies promptly (see
+	// installSignalCleanup). stop deregisters this and stops its
+	// goroutine on every return from here on, so a long session of many
+	// RunExercise calls (the Run loop in internal/tui/run.go) never
+	// accumulates one abandoned handler per past session.
+	stopSignalCleanup := installSignalCleanup(finalize, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer stopSignalCleanup()
 
 	revealErr := make(chan error, 1)
 	go func() {
@@ -116,6 +129,25 @@ func RunExercise(cfg config.Config, ex exercise.Exercise, draftDir string) error
 		return fmt.Errorf("orchestrator: docker run: %w", runErr)
 	}
 	return nil
+}
+
+// newSessionFinalizer returns the session's idempotent cleanup: one
+// final draft.Snapshot, then removing the workspace and control dirs.
+// Wrapped in sync.Once because two different paths can both reach the
+// returned func -- RunExercise's own deferred call on a normal return,
+// and installSignalCleanup's handler on SIGINT/SIGTERM/SIGHUP -- and
+// only the first one to run should actually do the work.
+func newSessionFinalizer(cfg config.Config, exerciseID, workspaceDir, controlDir string, cleanupWorkspace func()) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			if _, err := draft.Snapshot(cfg.DataDir, exerciseID, workspaceDir); err != nil {
+				fmt.Fprintf(os.Stderr, "orchestrator: final draft snapshot: %v\n", err)
+			}
+			cleanupWorkspace()
+			os.RemoveAll(controlDir)
+		})
+	}
 }
 
 // RunSandbox mounts a persistent volume (survives across runs) and starts

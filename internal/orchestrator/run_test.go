@@ -1,10 +1,13 @@
 package orchestrator
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/JacobTDang/Ballroom/internal/config"
+	"github.com/JacobTDang/Ballroom/internal/draft"
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 )
 
@@ -205,5 +208,64 @@ func TestSandboxRunArgs_ForwardsTutorNotesToggle(t *testing.T) {
 	args := sandboxRunArgs(config.Config{DockerImage: "img", DisableTutorNotes: true})
 	if !containsFlag(args, "PRACTICE_TUTOR_NOTES=off") {
 		t.Errorf("args = %v, want PRACTICE_TUTOR_NOTES=off in sandbox args too", args)
+	}
+}
+
+// --- issue #231: idempotent session cleanup ---
+
+func TestNewSessionFinalizer_SnapshotsAndRemovesBothDirsOnFirstCall(t *testing.T) {
+	dataDir := t.TempDir()
+	workspaceDir := t.TempDir()
+	controlDir := t.TempDir()
+	exerciseID := "finalizer-test"
+
+	if err := os.WriteFile(filepath.Join(workspaceDir, "solution.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	cleanupCalls := 0
+	cleanupWorkspace := func() { cleanupCalls++; os.RemoveAll(workspaceDir) }
+
+	finalize := newSessionFinalizer(config.Config{DataDir: dataDir}, exerciseID, workspaceDir, controlDir, cleanupWorkspace)
+	finalize()
+
+	if cleanupCalls != 1 {
+		t.Errorf("expected cleanupWorkspace called exactly once, got %d", cleanupCalls)
+	}
+	if _, err := os.Stat(controlDir); !os.IsNotExist(err) {
+		t.Errorf("expected controlDir removed, stat err = %v", err)
+	}
+	draftFile := filepath.Join(draft.Dir(dataDir, exerciseID), "solution.go")
+	if got, err := os.ReadFile(draftFile); err != nil {
+		t.Errorf("expected a final draft snapshot written to %s: %v", draftFile, err)
+	} else if string(got) != "package main" {
+		t.Errorf("draft content = %q, want %q", got, "package main")
+	}
+}
+
+// TestNewSessionFinalizer_SecondCallIsANoOp is issue #231's explicit
+// idempotency requirement: RunExercise's normal defer and its signal
+// handler can both reach the same finalizer (e.g. a signal arriving the
+// same moment the container exits on its own), and only the first call
+// should do anything.
+func TestNewSessionFinalizer_SecondCallIsANoOp(t *testing.T) {
+	dataDir := t.TempDir()
+	workspaceDir := t.TempDir()
+	controlDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(workspaceDir, "solution.py"), []byte("x = 1"), 0o644); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	cleanupCalls := 0
+	cleanupWorkspace := func() { cleanupCalls++ }
+
+	finalize := newSessionFinalizer(config.Config{DataDir: dataDir}, "finalizer-test-2", workspaceDir, controlDir, cleanupWorkspace)
+
+	finalize()
+	finalize() // must not error, panic, or re-run the work
+
+	if cleanupCalls != 1 {
+		t.Errorf("expected cleanupWorkspace called exactly once across two finalize() calls, got %d", cleanupCalls)
 	}
 }
