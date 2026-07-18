@@ -826,6 +826,160 @@ func TestFilterByCategory_ListsDueProblemsFirst(t *testing.T) {
 	}
 }
 
+func codingProblem(id, title, difficulty string) catalog.ProblemStatus {
+	return catalog.ProblemStatus{
+		ProblemID: id, Title: title, Category: "two-pointers",
+		Variants: []catalog.ExerciseStatus{
+			{Exercise: exercise.Exercise{ID: id + "-go", ProblemID: id, Title: title, Category: "two-pointers", Language: "go", Difficulty: difficulty}},
+		},
+	}
+}
+
+func TestFilterProblems_CaseInsensitiveTitleMatch(t *testing.T) {
+	problems := []catalog.ProblemStatus{
+		codingProblem("p1", "Two Sum II", "easy"),
+		codingProblem("p2", "Container With Most Water", "medium"),
+		codingProblem("p3", "Trapping Rain Water", "hard"),
+	}
+	if got := filterProblems(problems, ""); len(got) != 3 {
+		t.Errorf("empty filter matched %d, want all 3", len(got))
+	}
+	got := filterProblems(problems, "WATER")
+	if len(got) != 2 || got[0].ProblemID != "p2" || got[1].ProblemID != "p3" {
+		t.Errorf("filter WATER = %+v, want p2,p3 in order", got)
+	}
+	if got := filterProblems(problems, "zzz"); len(got) != 0 {
+		t.Errorf("filter zzz matched %d, want none", len(got))
+	}
+}
+
+func TestAppModel_Problems_TypingFiltersAndEnterSelectsFromFiltered(t *testing.T) {
+	m := appModel{stage: stageProblems, category: "two-pointers", categoryProblems: []catalog.ProblemStatus{
+		codingProblem("p1", "Two Sum II", "easy"),
+		codingProblem("p2", "Container With Most Water", "medium"),
+		codingProblem("p3", "Trapping Rain Water", "hard"),
+	}}
+	for _, r := range "rain" {
+		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = newM.(appModel)
+	}
+	if m.problemFilter != "rain" {
+		t.Fatalf("problemFilter = %q, want %q", m.problemFilter, "rain")
+	}
+	if vis := m.visibleProblems(); len(vis) != 1 || vis[0].ProblemID != "p3" {
+		t.Fatalf("visibleProblems = %+v, want just p3", vis)
+	}
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(appModel)
+	if m.stage != stageLanguage || m.selectedProblem.ProblemID != "p3" {
+		t.Errorf("enter selected %q (stage %v), want the filtered match p3 at stageLanguage", m.selectedProblem.ProblemID, m.stage)
+	}
+}
+
+func TestAppModel_Problems_QFeedsFilterOnceTypingStarted(t *testing.T) {
+	m := appModel{stage: stageProblems, category: "debug", categoryProblems: []catalog.ProblemStatus{
+		codingProblem("p1", "Quick fix", "easy"),
+	}}
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	m = newM.(appModel)
+	if m.stage != stageCategories {
+		t.Fatalf("q with empty filter: stage = %v, want stageCategories (backs out)", m.stage)
+	}
+
+	m = appModel{stage: stageProblems, category: "debug", categoryProblems: []catalog.ProblemStatus{
+		codingProblem("p1", "Quick fix", "easy"),
+	}, problemFilter: "ui"}
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	m = newM.(appModel)
+	if m.stage != stageProblems || m.problemFilter != "uiq" {
+		t.Errorf("q mid-filter: stage=%v filter=%q, want it appended to the filter", m.stage, m.problemFilter)
+	}
+
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = newM.(appModel)
+	if m.problemFilter != "ui" {
+		t.Errorf("backspace: filter = %q, want %q", m.problemFilter, "ui")
+	}
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = newM.(appModel)
+	if m.stage != stageCategories {
+		t.Errorf("esc: stage = %v, want it to back out even mid-filter", m.stage)
+	}
+}
+
+func TestAppModel_Problems_EntryResetsFilter(t *testing.T) {
+	m := problemsFixture(t)
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m = newM.(appModel)
+	if m.problemFilter != "x" {
+		t.Fatalf("setup: filter = %q, want %q", m.problemFilter, "x")
+	}
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // back to DSA topics
+	m = newM.(appModel)
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // re-enter the topic
+	m = newM.(appModel)
+	if m.stage != stageProblems || m.problemFilter != "" {
+		t.Errorf("re-entry: stage=%v filter=%q, want a fresh empty filter", m.stage, m.problemFilter)
+	}
+}
+
+func TestDifficultyBadge_LettersAndMixedRange(t *testing.T) {
+	cases := []struct {
+		p    catalog.ProblemStatus
+		want string
+	}{
+		{codingProblem("p1", "A", "easy"), "E"},
+		{codingProblem("p2", "B", "medium"), "M"},
+		{codingProblem("p3", "C", "hard"), "H"},
+		{codingProblem("p4", "D", ""), ""},
+		{catalog.ProblemStatus{Variants: []catalog.ExerciseStatus{
+			{Exercise: exercise.Exercise{Difficulty: "medium"}},
+			{Exercise: exercise.Exercise{Difficulty: "hard"}},
+		}}, "M/H"},
+	}
+	for _, c := range cases {
+		if got := difficultyBadge(c.p); got != c.want {
+			t.Errorf("difficultyBadge(%s) = %q, want %q", c.p.ProblemID, got, c.want)
+		}
+	}
+}
+
+func TestRenderProblems_ShowsDifficultyBadgesAndSearchPrompt(t *testing.T) {
+	m := appModel{stage: stageProblems, category: "two-pointers", categoryProblems: []catalog.ProblemStatus{
+		codingProblem("p1", "Two Sum II", "easy"),
+		codingProblem("p2", "Container With Most Water", "medium"),
+		codingProblem("p3", "Trapping Rain Water", "hard"),
+	}}
+	out := m.renderProblems()
+	for _, want := range []string{"[E]", "[M]", "[H]", "type to search"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("renderProblems missing %q", want)
+		}
+	}
+}
+
+func TestRenderProblems_WindowFollowsCursorOnLongLists(t *testing.T) {
+	var problems []catalog.ProblemStatus
+	for i := 0; i < 20; i++ {
+		problems = append(problems, codingProblem(fmt.Sprintf("p%02d", i), fmt.Sprintf("Problem %02d", i), "easy"))
+	}
+	m := appModel{stage: stageProblems, category: "two-pointers", categoryProblems: problems}
+
+	top := m.renderProblems()
+	if !strings.Contains(top, "Problem 00") || strings.Contains(top, "Problem 19") {
+		t.Errorf("cursor at top: want the first problem visible and the last one below the window")
+	}
+	if !strings.Contains(top, "more") {
+		t.Errorf("cursor at top: want a more-below indicator, got:\n%s", top)
+	}
+
+	m.problemCursor = 19
+	bottom := m.renderProblems()
+	if !strings.Contains(bottom, "Problem 19") || strings.Contains(bottom, "Problem 00") {
+		t.Errorf("cursor at bottom: want the last problem visible and the first one above the window")
+	}
+}
+
 func TestAppModel_Problems_MockDueMarker(t *testing.T) {
 	m := appModel{stage: stageProblems, category: exercise.CategorySystemDesign, categoryProblems: []catalog.ProblemStatus{
 		{
