@@ -187,3 +187,23 @@ func TestExerciseRunArgs_ForwardsVideoURL(t *testing.T) {
 		t.Errorf("expected the video url forwarded, got %v", args)
 	}
 }
+
+func TestExerciseRunArgs_ForwardsTutorNotesToggle(t *testing.T) {
+	cfg := config.Config{DockerImage: "img", DisableTutorNotes: true}
+	args := exerciseRunArgs(cfg, exercise.Exercise{}, "/c", "/w", time.Now())
+	if !containsFlag(args, "PRACTICE_TUTOR_NOTES=off") {
+		t.Errorf("args = %v, want PRACTICE_TUTOR_NOTES=off forwarded when notes are disabled", args)
+	}
+	cfg.DisableTutorNotes = false
+	args = exerciseRunArgs(cfg, exercise.Exercise{}, "/c", "/w", time.Now())
+	if !containsFlag(args, "PRACTICE_TUTOR_NOTES=") {
+		t.Errorf("args = %v, want the empty always-forwarded PRACTICE_TUTOR_NOTES", args)
+	}
+}
+
+func TestSandboxRunArgs_ForwardsTutorNotesToggle(t *testing.T) {
+	args := sandboxRunArgs(config.Config{DockerImage: "img", DisableTutorNotes: true})
+	if !containsFlag(args, "PRACTICE_TUTOR_NOTES=off") {
+		t.Errorf("args = %v, want PRACTICE_TUTOR_NOTES=off in sandbox args too", args)
+	}
+}

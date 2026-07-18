@@ -148,8 +148,24 @@ func exerciseRunArgs(cfg config.Config, ex exercise.Exercise, controlDir, worksp
 		// Ollama's). Forwarded because the tutor process that reads it
 		// runs inside the container; empty means "use the default".
 		"-e", "TUTOR_STREAM=" + os.Getenv("TUTOR_STREAM"),
+		// Always forwarded, empty or "off" -- the Settings toggle that
+		// removes the tutor's editor highlight/note tool at the source
+		// (cmd/ballroom's tutorCmd reads it into
+		// tutor.Config.DisableEditorNotes).
+		"-e", "PRACTICE_TUTOR_NOTES=" + tutorNotesEnvValue(cfg),
 		cfg.DockerImage,
 	}
+}
+
+// tutorNotesEnvValue renders cfg.DisableTutorNotes for the container
+// env: "off" disables the tool, empty means the default (enabled) --
+// an env var can't carry a Go bool, and "off" reads clearer in `docker
+// inspect` output than "false"/"0".
+func tutorNotesEnvValue(cfg config.Config) string {
+	if cfg.DisableTutorNotes {
+		return "off"
+	}
+	return ""
 }
 
 // sandboxRunArgs builds the `docker run` argument list for an ungraded
@@ -172,6 +188,8 @@ func sandboxRunArgs(cfg config.Config) []string {
 		"-e", "TUTOR_ORCHESTRATOR_MODEL=" + cfg.OrchestratorModel,
 		// See exerciseRunArgs -- same host-env streaming override.
 		"-e", "TUTOR_STREAM=" + os.Getenv("TUTOR_STREAM"),
+		// See exerciseRunArgs -- same notes-toggle forwarding.
+		"-e", "PRACTICE_TUTOR_NOTES=" + tutorNotesEnvValue(cfg),
 		cfg.DockerImage,
 	}
 }

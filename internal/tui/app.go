@@ -557,7 +557,7 @@ func (m appModel) chooseMain() (tea.Model, tea.Cmd) {
 	case menuPractice:
 		return m.loadPractice(), nil
 	case menuDaily:
-		return m.loadDaily(), nil
+		return m.loadDaily().resolveLanguageStage()
 	case menuSandbox:
 		m.outcome = outcomeRunSandbox
 		return m, tea.Quit
@@ -909,6 +909,7 @@ func (m appModel) updateProblems(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.selectedProblem = visible[m.problemCursor]
 		m.langCursor = 0
 		m.stage = stageLanguage
+		return m.resolveLanguageStage()
 	case tea.KeyEsc, tea.KeyCtrlC:
 		return m.leaveProblems()
 	case tea.KeyRunes:
@@ -926,6 +927,27 @@ func (m appModel) updateProblems(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // --- stageLanguage ---
+
+// resolveLanguageStage honors cfg.DefaultLanguage wherever the flow
+// just landed on the language picker: a variant matching the default
+// runs immediately, anything else keeps the picker. Design/behavioral
+// problems ride coach/interviewer in the language slot, so they never
+// match a python/go/cpp default and always ask — same for a problem
+// that simply lacks the default language. Guarded on stage so error
+// paths (e.g. loadDaily with no problems) pass through untouched.
+func (m appModel) resolveLanguageStage() (tea.Model, tea.Cmd) {
+	if m.stage != stageLanguage || m.cfg.DefaultLanguage == "" {
+		return m, nil
+	}
+	for _, v := range m.selectedProblem.Variants {
+		if v.Exercise.Language == m.cfg.DefaultLanguage {
+			m.exerciseToRun = v.Exercise
+			m.outcome = outcomeRunExercise
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
 
 func (m appModel) updateLanguage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
@@ -973,7 +995,7 @@ func (m appModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyDown:
-		if m.settingsCursor < 1 {
+		if m.settingsCursor < len(settingsRoleLabels)-1 {
 			m.settingsCursor++
 		}
 		return m, nil
@@ -981,15 +1003,48 @@ func (m appModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.stage = stageMain
 		return m, nil
 	case tea.KeyEnter:
-		if m.settingsCursor == 0 {
+		switch m.settingsCursor {
+		case 0:
 			m.settingsEditing = settingsTargetWorker
-		} else {
+		case 1:
 			m.settingsEditing = settingsTargetOrchestrator
+		case 2:
+			return m.cycleDefaultLanguage()
+		case 3:
+			return m.toggleTutorNotes()
 		}
 		m.stage = stageProviderChoice
 		m.settingsCursor = 0
 		return m, nil
 	}
+	return m, nil
+}
+
+// cycleDefaultLanguage advances the default-language preference
+// ask → python → go → cpp → ask and persists immediately — a 4-value
+// cycle doesn't warrant a sub-stage, and showing the new value in the
+// header line is feedback enough.
+func (m appModel) cycleDefaultLanguage() (tea.Model, tea.Cmd) {
+	next := map[string]string{"": "python", "python": "go", "go": "cpp", "cpp": ""}
+	m.cfg.DefaultLanguage = next[m.cfg.DefaultLanguage]
+	if err := config.SaveSettings(m.cfg.SettingsPath(), settingsFromConfig(m.cfg)); err != nil {
+		m.err = err
+		return m, nil
+	}
+	m.err = nil
+	return m, nil
+}
+
+// toggleTutorNotes flips whether sessions get the tutor's editor
+// highlight/note tool at all (issue #25's durable variant; M-h in a
+// session still toggles rendering of notes that do exist).
+func (m appModel) toggleTutorNotes() (tea.Model, tea.Cmd) {
+	m.cfg.DisableTutorNotes = !m.cfg.DisableTutorNotes
+	if err := config.SaveSettings(m.cfg.SettingsPath(), settingsFromConfig(m.cfg)); err != nil {
+		m.err = err
+		return m, nil
+	}
+	m.err = nil
 	return m, nil
 }
 
@@ -1037,12 +1092,7 @@ func (m appModel) updateProviderChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // reachable when editing the orchestrator role.
 func (m appModel) clearOrchestratorModel() (tea.Model, tea.Cmd) {
 	m.cfg.OrchestratorModel = ""
-	if err := config.SaveSettings(m.cfg.SettingsPath(), config.Settings{
-		TutorModel:        m.cfg.TutorModel,
-		OpenRouterAPIKey:  m.cfg.OpenRouterAPIKey,
-		OrchestratorModel: "",
-		GraderModel:       m.cfg.GraderModel,
-	}); err != nil {
+	if err := config.SaveSettings(m.cfg.SettingsPath(), settingsFromConfig(m.cfg)); err != nil {
 		m.err = err
 		return m, nil
 	}
@@ -1288,20 +1338,12 @@ func (m appModel) handleModelDownloadPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 // carry forward every other field, or the one this call isn't touching
 // would silently get wiped from settings.json on save.
 func (m appModel) selectModel(name string) (tea.Model, tea.Cmd) {
-	settings := config.Settings{
-		TutorModel:        m.cfg.TutorModel,
-		OpenRouterAPIKey:  m.cfg.OpenRouterAPIKey,
-		OrchestratorModel: m.cfg.OrchestratorModel,
-		GraderModel:       m.cfg.GraderModel,
-	}
 	if m.settingsEditing == settingsTargetOrchestrator {
 		m.cfg.OrchestratorModel = name
-		settings.OrchestratorModel = name
 	} else {
 		m.cfg.TutorModel = name
-		settings.TutorModel = name
 	}
-	if err := config.SaveSettings(m.cfg.SettingsPath(), settings); err != nil {
+	if err := config.SaveSettings(m.cfg.SettingsPath(), settingsFromConfig(m.cfg)); err != nil {
 		m.err = err
 		return m, nil
 	}
@@ -1762,14 +1804,33 @@ var (
 )
 
 // settingsRoleLabels/settingsRoleDescs back updateSettings' top-level
-// Worker/Orchestrator role list and renderSettings' rendering of it.
+// list and renderSettings' rendering of it: the two model roles (enter
+// opens the provider choice) plus the two in-place preferences (enter
+// cycles/toggles and saves immediately — no sub-stage for a 4-value
+// cycle or a bool).
 var (
-	settingsRoleLabels = []string{"Worker model", "Orchestrator model"}
+	settingsRoleLabels = []string{"Worker model", "Orchestrator model", "Default language", "Tutor editor notes"}
 	settingsRoleDescs  = []string{
 		"Answers coding questions — always required",
 		"Routes turns to the worker, or answers directly — optional",
+		"Skip the language picker for problems available in it — enter cycles",
+		"Let the tutor highlight lines and leave notes in the editor — enter toggles",
 	}
 )
+
+// settingsFromConfig snapshots every persisted preference from cfg —
+// the single source for "carry everything forward" saves, so adding a
+// new Settings field can't silently wipe it from one save site.
+func settingsFromConfig(cfg config.Config) config.Settings {
+	return config.Settings{
+		TutorModel:        cfg.TutorModel,
+		OrchestratorModel: cfg.OrchestratorModel,
+		GraderModel:       cfg.GraderModel,
+		OpenRouterAPIKey:  cfg.OpenRouterAPIKey,
+		DefaultLanguage:   cfg.DefaultLanguage,
+		DisableTutorNotes: cfg.DisableTutorNotes,
+	}
+}
 
 func (m appModel) renderSettings() string {
 	var b strings.Builder
@@ -1782,6 +1843,18 @@ func (m appModel) renderSettings() string {
 		orchestratorStatus = "none (routing off)"
 	}
 	b.WriteString(checkDimStyle.Render(fmt.Sprintf("Orchestrator model: %s", orchestratorStatus)))
+	b.WriteString("\n")
+	langStatus := m.cfg.DefaultLanguage
+	if langStatus == "" {
+		langStatus = "ask every time"
+	}
+	b.WriteString(checkDimStyle.Render(fmt.Sprintf("Default language: %s", langStatus)))
+	b.WriteString("\n")
+	notesStatus := "on"
+	if m.cfg.DisableTutorNotes {
+		notesStatus = "off"
+	}
+	b.WriteString(checkDimStyle.Render(fmt.Sprintf("Tutor editor notes: %s", notesStatus)))
 	b.WriteString("\n\n")
 
 	for i, label := range settingsRoleLabels {
