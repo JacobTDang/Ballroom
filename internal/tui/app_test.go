@@ -1888,3 +1888,25 @@ func TestUpdateSettings_ToggleTutorNotesPersists(t *testing.T) {
 		t.Fatal("DisableTutorNotes = true after second toggle, want false")
 	}
 }
+
+func TestRenderMain_ErrorShowsHeadlineWithRawDetailKeptVisible(t *testing.T) {
+	m := appModel{stage: stageMain, err: errors.New("sqlite: database is locked")}
+	out := stripAnsiTUI(m.renderMain())
+	if !strings.Contains(out, "something went wrong") {
+		t.Errorf("renderMain = %q, want the human headline", out)
+	}
+	if !strings.Contains(out, "sqlite: database is locked") {
+		t.Errorf("renderMain = %q, want the raw error detail still visible, never swallowed", out)
+	}
+}
+
+func TestRenderModelPicker_OllamaErrorShowsHeadlineAndDetail(t *testing.T) {
+	m := appModel{stage: stageModelPicker, modelLoadErr: errors.New("dial tcp: connection refused")}
+	out := stripAnsiTUI(m.renderModelPicker())
+	if !strings.Contains(out, "couldn't reach Ollama") || !strings.Contains(out, "connection refused") {
+		t.Errorf("renderModelPicker = %q, want headline and raw detail", out)
+	}
+	if !strings.Contains(out, "type a model tag directly") {
+		t.Errorf("renderModelPicker = %q, want the escape-hatch hint kept", out)
+	}
+}

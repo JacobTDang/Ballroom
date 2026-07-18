@@ -59,17 +59,22 @@ var openRouterBaseURL = "https://openrouter.ai/api/v1"
 //
 // Temperature matches tutor/chat.sh's previous options.temperature —
 // kept low so the tutor's tone/behavior stays consistent across turns
-// rather than drifting with a high-temperature sample. Only set on the
-// Ollama path for now; openai.ChatModelConfig's equivalent (Temperature
-// *float32) can be wired the same way if OpenRouter's default proves
-// too high-variance in practice.
+// rather than drifting with a high-temperature sample. Set on BOTH
+// provider paths: the OpenRouter path used to omit it, which left the
+// tutor's sampling to whatever each hosted model's default was —
+// meaningfully spikier than 0.2 on the free-tier models actually in
+// use.
+const tutorTemperature float32 = 0.2
+
 func newChatModel(ctx context.Context, modelName, ollamaHost, apiKey string) (model.ToolCallingChatModel, error) {
 	if strings.HasPrefix(modelName, OpenRouterModelPrefix) {
+		temperature := tutorTemperature
 		cm, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
-			BaseURL: openRouterBaseURL,
-			APIKey:  apiKey,
-			Model:   strings.TrimPrefix(modelName, OpenRouterModelPrefix),
-			Timeout: ollamaRequestTimeout,
+			BaseURL:     openRouterBaseURL,
+			APIKey:      apiKey,
+			Model:       strings.TrimPrefix(modelName, OpenRouterModelPrefix),
+			Timeout:     ollamaRequestTimeout,
+			Temperature: &temperature,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("tutor: new chat model (openrouter): %w", err)
@@ -81,7 +86,7 @@ func newChatModel(ctx context.Context, modelName, ollamaHost, apiKey string) (mo
 		BaseURL: ollamaHost,
 		Timeout: ollamaRequestTimeout,
 		Model:   modelName,
-		Options: &ollama.Options{Temperature: 0.2},
+		Options: &ollama.Options{Temperature: tutorTemperature},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("tutor: new chat model: %w", err)
