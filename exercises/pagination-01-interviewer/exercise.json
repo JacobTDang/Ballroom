@@ -1,0 +1,12 @@
+{
+  "id": "pagination-01-interviewer",
+  "problem_id": "pagination-01",
+  "title": "Paginate the Product Catalog",
+  "kind": "design",
+  "category": "api-design",
+  "language": "interviewer",
+  "time_limit_min": 45,
+  "tutor_mode": "interviewer",
+  "repo_path": "./repo",
+  "difficulty": "hard"
+}
