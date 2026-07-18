@@ -176,3 +176,27 @@ func TestDailyPick_EmptyCatalogStillReturnsFalse(t *testing.T) {
 		t.Error("empty catalog returned a pick")
 	}
 }
+
+// TestDailyPick_WidensOneRankAtATime: when the gated pool is empty,
+// jumping straight to "anything unsolved" can hand a beginner a hard
+// problem the gate existed to withhold. Stepping up one rank keeps the
+// progression intact -- a user with every easy problem done gets a
+// medium, not a hard.
+func TestDailyPick_WidensOneRankAtATime(t *testing.T) {
+	var problems []ProblemStatus
+	for i := 0; i < 5; i++ { // under the 15-solved threshold
+		problems = append(problems, dailyProblem("easy-"+string(rune('a'+i)), exercise.DifficultyEasy, true))
+	}
+	problems = append(problems, dailyProblem("med-left", exercise.DifficultyMedium, false))
+	problems = append(problems, dailyProblem("hard-left", exercise.DifficultyHard, false))
+
+	for d := 0; d < 30; d++ {
+		got, ok := DailyPick(problems, time.Now().AddDate(0, 0, d))
+		if !ok {
+			t.Fatalf("day %d: no pick", d)
+		}
+		if got.ProblemID == "hard-left" {
+			t.Fatalf("day %d: widened past medium to a hard problem while a medium was available", d)
+		}
+	}
+}
