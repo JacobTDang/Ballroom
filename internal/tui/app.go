@@ -184,6 +184,12 @@ const (
 	// one category, which is the step this skips.
 	stageSearch
 	stageStats
+	// stageStatsDetail (issue #252) is the Stats drill-down: every
+	// attempt logged against one exercise (tracker.ListAttemptsFor),
+	// reached with Enter on a row of stageStats' recent-activity list.
+	// Esc/q back out one level to stageStats, not stageMain -- see
+	// updateStatsDetail in statsdetail.go.
+	stageStatsDetail
 	// stageSettings is the Settings menu entry's landing screen: a
 	// Worker model / Orchestrator model role choice (see settingsTarget)
 	// — which one is being edited then decides where stageProviderChoice
@@ -247,9 +253,16 @@ const (
 var catalogListFn = catalog.List
 var recentAttemptsFn = recentAttempts
 var allAttemptsFn = allAttempts
+var attemptsForFn = attemptsFor
 
-// recentAttemptsLimit caps how many recent attempts Stats shows.
-const recentAttemptsLimit = 10
+// recentAttemptsLimit caps how many recent attempts Stats loads for the
+// navigable list -- raised well past the old 10-row hard truncation
+// (issue #252). The list windows/paginates instead of dumping
+// everything on screen at once (see maxVisibleRecent/recentWindow), so
+// a much larger cap just means more to scroll through rather than an
+// unusable wall of text; recentAttempts already reads every row before
+// trimming, so raising this costs nothing extra query-side.
+const recentAttemptsLimit = 500
 
 // menuChoice is one of the main menu options.
 type menuChoice int
@@ -375,6 +388,19 @@ type appModel struct {
 	statsRecent     []tracker.Attempt
 	statsWeakDims   []catalog.DimensionWeakness
 	statsCodingWeak []catalog.CategoryWeakness
+	// statsCursor indexes statsRecent -- the recent-activity list's own
+	// cursor (issue #252), separate from every other stage's cursor field
+	// so switching stages can never leave this one pointed somewhere stale.
+	statsCursor int
+
+	// stageStatsDetail -- the exercise whose full history is on screen
+	// (statsDetailExerciseID, set from the statsRecent row Enter was
+	// pressed on), the history itself newest-first
+	// (tracker.ListAttemptsFor, via attemptsForFn), and that list's own
+	// scroll cursor. See statsdetail.go.
+	statsDetailExerciseID string
+	statsDetailAttempts   []tracker.Attempt
+	statsDetailCursor     int
 
 	// stageSettings: settingsCursor is 0 = Worker model, 1 = Orchestrator
 	// model there; reused by stageProviderChoice as 0 = Local (Ollama),
@@ -555,6 +581,8 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSearch(msg)
 		case stageStats:
 			return m.updateStats(msg)
+		case stageStatsDetail:
+			return m.updateStatsDetail(msg)
 		case stageSettings:
 			return m.updateSettings(msg)
 		case stageProviderChoice:
@@ -1026,14 +1054,41 @@ func (m appModel) updateLanguage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // --- stageStats ---
 
-// updateStats mirrors the pre-merge statsModel: any keypress goes back,
-// except "?" which opens help instead (issue #242) -- everything else
-// still falls through to stageMain, including plain "q"/"esc".
+// updateStats drives the recent-activity list (issue #252): up/down/j/k
+// move statsCursor, pgup/pgdn page it, enter drills into the selected
+// row's exercise (loadStatsDetail, in statsdetail.go), and q/esc back
+// out to the main menu. "?" still opens help ahead of everything else,
+// the same carve-out every other stage gives it (issue #242).
+//
+// This replaces the pre-#252 "any keypress goes back" catch-all, which
+// is exactly why the screen couldn't be read before it vanished. An
+// unmapped key is now a deliberate no-op -- the same convention every
+// other list stage in this program already uses (updateCategories,
+// updateDSACategories, ... simply fall through their switch).
 func (m appModel) updateStats(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.Type == tea.KeyRunes && string(msg.Runes) == "?" {
+	switch msg.String() {
+	case "up", "k":
+		if m.statsCursor > 0 {
+			m.statsCursor--
+		}
+	case "down", "j":
+		if m.statsCursor < len(m.statsRecent)-1 {
+			m.statsCursor++
+		}
+	case "pgup":
+		m.statsCursor = max(0, m.statsCursor-maxVisibleRecent)
+	case "pgdown":
+		m.statsCursor = min(max(len(m.statsRecent)-1, 0), m.statsCursor+maxVisibleRecent)
+	case "enter":
+		if len(m.statsRecent) == 0 || m.statsCursor >= len(m.statsRecent) {
+			return m, nil
+		}
+		return m.loadStatsDetail(m.statsRecent[m.statsCursor].ExerciseID), nil
+	case "?":
 		return m.openHelp()
+	case "q", "esc", "ctrl+c":
+		m.stage = stageMain
 	}
-	m.stage = stageMain
 	return m, nil
 }
 
@@ -1489,6 +1544,8 @@ func (m appModel) renderRight() string {
 		return m.renderSearch()
 	case stageStats:
 		return m.renderStats()
+	case stageStatsDetail:
+		return m.renderStatsDetail()
 	case stageSettings:
 		return m.renderSettings()
 	case stageProviderChoice:
@@ -1679,17 +1736,37 @@ func (m appModel) renderProblems() string {
 // slides to keep the cursor visible with ↑/↓ "N more" indicators.
 const maxVisibleProblems = 12
 
-// problemWindow returns the [start, end) slice of an n-problem list to
-// draw with the cursor kept in view — centered when there's room,
-// clamped at the edges. Pure so the windowing math is testable without
-// rendering.
-func problemWindow(cursor, n int) (int, int) {
-	if n <= maxVisibleProblems {
+// sliceWindow returns the [start, end) slice of an n-item list to draw
+// size items at a time, with the cursor kept in view — centered when
+// there's room, clamped at the edges. Pure so the windowing math is
+// testable without rendering. Shared by every scrollable list this
+// program has (the problem picker, catalog search, and Stats' two
+// lists — see problemWindow/recentWindow below) so "keep the cursor on
+// screen" behaves identically everywhere instead of each screen
+// reinventing its own slightly-different math.
+func sliceWindow(cursor, n, size int) (int, int) {
+	if n <= size {
 		return 0, n
 	}
-	start := cursor - maxVisibleProblems/2
-	start = max(0, min(start, n-maxVisibleProblems))
-	return start, start + maxVisibleProblems
+	start := cursor - size/2
+	start = max(0, min(start, n-size))
+	return start, start + size
+}
+
+// problemWindow bounds the problem picker / catalog search window.
+func problemWindow(cursor, n int) (int, int) {
+	return sliceWindow(cursor, n, maxVisibleProblems)
+}
+
+// maxVisibleRecent bounds how many rows Stats' recent-activity list
+// (issue #252) shows at once — shorter than maxVisibleProblems since
+// the list shares the screen with the totals/weak-spot sections above
+// it, rather than owning a full dedicated screen.
+const maxVisibleRecent = 8
+
+// recentWindow bounds the Stats recent-activity list's window.
+func recentWindow(cursor, n int) (int, int) {
+	return sliceWindow(cursor, n, maxVisibleRecent)
 }
 
 // difficultyBadge is the letter(s) for a problem's difficulty: one of
@@ -1793,10 +1870,35 @@ func (m appModel) renderLanguage() string {
 // whole topic.
 const codingWeakSpotMinAttempts = 3
 
+// resultStyle maps an attempt's result to how Stats colors it: pass
+// teal, gave-up orange (matching homeboard's "~" marker -- see
+// gaveUpStyle), anything else (fail) red. Shared by the recent-activity
+// list here and the per-exercise drill-down in statsdetail.go so an
+// attempt reads the same color wherever it's shown.
+func resultStyle(result string) lipgloss.Style {
+	switch result {
+	case tracker.ResultPass:
+		return passStyle
+	case tracker.ResultGaveUp:
+		return gaveUpStyle
+	default:
+		return failStyle
+	}
+}
+
 func (m appModel) renderStats() string {
 	var b strings.Builder
 	b.WriteString(hintStyle.Render("Stats"))
 	b.WriteString("\n\n")
+
+	if m.err != nil {
+		// loadStatsDetail (statsdetail.go) stays on stageStats when the
+		// drill-down's own load fails, so that failure has to render
+		// somewhere -- here, the same renderFriendlyError banner every
+		// other screen-level failure in this program uses.
+		b.WriteString(renderFriendlyError("couldn't open that exercise's history", m.err))
+		b.WriteString("\n\n")
+	}
 
 	total, attempted, solved := 0, 0, 0
 	for _, s := range m.statsStatuses {
@@ -1862,17 +1964,31 @@ func (m appModel) renderStats() string {
 	} else {
 		b.WriteString(hintStyle.Render("Recent activity"))
 		b.WriteString("\n")
-		for _, a := range m.statsRecent {
-			resultStyle := failStyle
-			if a.Result == tracker.ResultPass {
-				resultStyle = passStyle
+
+		cursor := min(m.statsCursor, max(len(m.statsRecent)-1, 0))
+		start, end := recentWindow(cursor, len(m.statsRecent))
+		if start > 0 {
+			b.WriteString(checkDimStyle.Render(fmt.Sprintf("  ↑ %d more", start)))
+			b.WriteString("\n")
+		}
+		for i := start; i < end; i++ {
+			a := m.statsRecent[i]
+			if i == cursor {
+				line := fmt.Sprintf("%s  %-28s %s", a.Date, a.ExerciseID, a.Result)
+				b.WriteString(cursorRowStyle.Render("❯ " + line))
+			} else {
+				b.WriteString(fmt.Sprintf("  %s  %-28s %s", a.Date, a.ExerciseID, resultStyle(a.Result).Render(a.Result)))
 			}
-			fmt.Fprintf(&b, "%s  %-28s %s\n", a.Date, a.ExerciseID, resultStyle.Render(a.Result))
+			b.WriteString("\n")
+		}
+		if end < len(m.statsRecent) {
+			b.WriteString(checkDimStyle.Render(fmt.Sprintf("  ↓ %d more", len(m.statsRecent)-end)))
+			b.WriteString("\n")
 		}
 	}
 
 	b.WriteString("\n")
-	b.WriteString(checkDimStyle.Render("press any key to go back"))
+	b.WriteString(checkDimStyle.Render("↑/↓ move · enter open history · pgup/pgdn page · q back"))
 	return b.String()
 }
 

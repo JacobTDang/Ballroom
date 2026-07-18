@@ -50,6 +50,7 @@ var helpSections = []helpSection{
 			{"1-5", "jump straight to a main-menu item"},
 			{"enter", "select"},
 			{"/", "search the whole catalog, from anywhere"},
+			{"PgUp / PgDn", "page Stats' recent-activity list and per-exercise history"},
 			{"?", "show this help"},
 			{"q / esc", "back a screen; q quits from the main menu"},
 		},

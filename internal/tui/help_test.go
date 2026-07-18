@@ -25,6 +25,7 @@ func TestAppModel_Help_OpensFromEveryInputStageAndReturnsToOrigin(t *testing.T) 
 		{"stageLanguage", stageLanguage},
 		{"stageSearch", stageSearch},
 		{"stageStats", stageStats},
+		{"stageStatsDetail", stageStatsDetail},
 		{"stageSettings", stageSettings},
 	}
 
