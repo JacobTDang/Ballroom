@@ -1,0 +1,13 @@
+{
+  "id": "distributed-rate-limiter-01-coach",
+  "problem_id": "distributed-rate-limiter-01",
+  "title": "Design a Distributed Rate Limiter",
+  "kind": "design",
+  "category": "system-design",
+  "language": "coach",
+  "time_limit_min": 90,
+  "tutor_mode": "design-coach",
+  "repo_path": "./repo",
+  "video_url": "https://youtu.be/MIJFyUPG4Z4",
+  "difficulty": "medium"
+}

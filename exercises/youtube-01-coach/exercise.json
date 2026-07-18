@@ -1,0 +1,13 @@
+{
+  "id": "youtube-01-coach",
+  "problem_id": "youtube-01",
+  "title": "Design YouTube",
+  "kind": "design",
+  "category": "system-design",
+  "language": "coach",
+  "time_limit_min": 90,
+  "tutor_mode": "design-coach",
+  "repo_path": "./repo",
+  "video_url": "https://youtu.be/IUrQ5_g3XKs",
+  "difficulty": "medium"
+}
