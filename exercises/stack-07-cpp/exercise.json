@@ -8,5 +8,6 @@
   "tutor_mode": "hints-first",
   "repo_path": "./repo",
   "test_command": "clang++ -std=c++17 -O0 -g -o /tmp/t solution.cpp hidden_test.cpp && /tmp/t",
-  "video_url": "https://youtu.be/zx5Sw9130L0"
+  "video_url": "https://youtu.be/zx5Sw9130L0",
+  "difficulty": "hard"
 }
