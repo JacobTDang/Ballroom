@@ -1,6 +1,7 @@
 // Package tracker reads and writes the SQLite attempts log at data/tracker.db.
-// Single flat table, matching interview_prep_mvp_spec.md Section 3.5 — no
-// per-category tables, no spaced-repetition scheduling for MVP.
+// Single flat table of attempts — per-category tables would buy nothing
+// a WHERE clause doesn't, and scheduling lives in internal/catalog
+// (due.go's review windows) rather than in the schema.
 package tracker
 
 import (

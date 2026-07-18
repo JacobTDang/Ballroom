@@ -1,5 +1,6 @@
 # Unified practice environment image (Go + C++ + Python toolchains, nvim, tmux).
-# See interview_prep_mvp_spec.md Section 3.1.
+# One image for every language rather than one per language: a session is
+# a single container, and an exercise's language is a runtime choice.
 #
 # Build from the repo root (paths below assume that build context):
 #   docker build -f docker/Dockerfile -t ballroom-practice .

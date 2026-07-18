@@ -13,9 +13,10 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
 
-// categoryOrder matches the taxonomy in interview_prep_plan.md Part 2,
-// followed by the NeetCode 150 roadmap's own category sequence —
-// exercises are grouped by category in this order on the homepage.
+// categoryOrder is the practice taxonomy: the broad tracks first, then
+// the NeetCode 150 roadmap's own category sequence, then the design
+// tracks — exercises are grouped by category in this order on the
+// homepage and in the picker.
 var categoryOrder = map[string]int{
 	exercise.CategoryDSA:            0,
 	exercise.CategoryDebug:          1,
