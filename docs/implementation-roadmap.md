@@ -1,10 +1,12 @@
 # Implementation Roadmap
 
-Eleven "build it from scratch" problems for the implement-X interview
+Fifteen "build it from scratch" problems for the implement-X interview
 round, practiced in Ballroom's Implementation category — each in Go,
-Python, and C++ with real hidden tests. Two halves: **systems
-components** (the pieces behind every system-design box you draw) and
-**parsers & tooling** (the classic implement-a-thing screens).
+Python, and C++ with real hidden tests. Three parts: **systems
+components** (the pieces behind every system-design box you draw),
+**parsers & tooling** (the classic implement-a-thing screens), and
+**API mechanics** (the wire-level machinery behind the API-design
+track's advanced questions).
 
 **Cadence**: one problem per session. These are single-threaded on
 purpose — build the component here, then the Concurrency ladder
@@ -60,6 +62,29 @@ purpose — build the component here, then the Concurrency ladder
 - [ ] **JSON subset parser** (`json-parser-01`) — objects, arrays,
       strings, integers, booleans, null; a real recursive-descent
       parser with position-carrying errors.
+
+## API mechanics
+
+The request-handling machinery behind the API-design track's advanced
+questions — same hidden-test bar, now the wire-level mechanics instead
+of the architecture. Pairs one-to-one with `docs/api-design-roadmap.md`:
+design the mechanism there, build it here.
+
+- [ ] **Cursor pagination** (`cursor-pagination-01`) — opaque keyset
+      cursors over id-sorted records: stable under mid-walk inserts,
+      tamper-checked, page size clamped. Pairs with `pagination-01`.
+- [ ] **Idempotency key store** (`idempotency-store-01`) — the
+      execute/in-flight/replay request lifecycle, fingerprint
+      conflicts, TTL-bounded retention. Pairs with
+      `retry-idempotency-01`.
+- [ ] **Conditional requests** (`conditional-request-01`) — the etag
+      generations behind Get's If-None-Match and Put's If-Match: 200,
+      304, 412, and precondition-required, with no etag resurrection.
+      Pairs with `etag-concurrency-01`.
+- [ ] **Field mask update engine** (`field-mask-update-01`) — AIP-134's
+      dotted-path Update: sibling fields untouched, masked-and-absent
+      clears, unknown paths refused by name. Pairs with
+      `library-api-01`.
 
 ## Ground rules the tests enforce everywhere
 
