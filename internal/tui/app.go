@@ -13,6 +13,7 @@ import (
 
 	"github.com/JacobTDang/Ballroom/internal/catalog"
 	"github.com/JacobTDang/Ballroom/internal/config"
+	"github.com/JacobTDang/Ballroom/internal/draft"
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 	"github.com/JacobTDang/Ballroom/internal/preflight"
 	"github.com/JacobTDang/Ballroom/internal/tracker"
@@ -174,6 +175,10 @@ const (
 	stageDSACategories
 	stageProblems
 	stageLanguage
+	// stageResumeDraft asks whether to resume a saved solution draft or
+	// start from the exercise's starter -- see resumedraft.go. Entered
+	// from launchExercise, which every launch path funnels through.
+	stageResumeDraft
 	stageStats
 	// stageSettings is the Settings menu entry's landing screen: a
 	// Worker model / Orchestrator model role choice (see settingsTarget)
@@ -336,6 +341,15 @@ type appModel struct {
 	// stageLanguage
 	selectedProblem catalog.ProblemStatus
 	langCursor      int
+
+	// stageResumeDraft — the exercise waiting on the resume/fresh
+	// answer, the draft it would resume, and which row is selected.
+	// draftDirToUse is the answer, read by the caller after Quit: the
+	// draft dir to overlay, or empty for the pristine starter.
+	pendingExercise exercise.Exercise
+	pendingDraft    draft.Draft
+	resumeCursor    int
+	draftDirToUse   string
 
 	// stageStats
 	statsStatuses   []catalog.ExerciseStatus
@@ -511,6 +525,8 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateProblems(msg)
 		case stageLanguage:
 			return m.updateLanguage(msg)
+		case stageResumeDraft:
+			return m.updateResumeDraft(msg)
 		case stageStats:
 			return m.updateStats(msg)
 		case stageSettings:
@@ -941,9 +957,7 @@ func (m appModel) resolveLanguageStage() (tea.Model, tea.Cmd) {
 	}
 	for _, v := range m.selectedProblem.Variants {
 		if v.Exercise.Language == m.cfg.DefaultLanguage {
-			m.exerciseToRun = v.Exercise
-			m.outcome = outcomeRunExercise
-			return m, tea.Quit
+			return m.launchExercise(v.Exercise)
 		}
 	}
 	return m, nil
@@ -963,9 +977,7 @@ func (m appModel) updateLanguage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.selectedProblem.Variants) == 0 {
 			return m, nil
 		}
-		m.exerciseToRun = m.selectedProblem.Variants[m.langCursor].Exercise
-		m.outcome = outcomeRunExercise
-		return m, tea.Quit
+		return m.launchExercise(m.selectedProblem.Variants[m.langCursor].Exercise)
 	case "q", "esc", "ctrl+c":
 		m.stage = stageProblems
 	}
@@ -1421,6 +1433,8 @@ func (m appModel) renderRight() string {
 		return m.renderProblems()
 	case stageLanguage:
 		return m.renderLanguage()
+	case stageResumeDraft:
+		return m.renderResumeDraft()
 	case stageStats:
 		return m.renderStats()
 	case stageSettings:
