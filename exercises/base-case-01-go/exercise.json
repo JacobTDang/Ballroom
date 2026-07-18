@@ -1,0 +1,12 @@
+{
+  "id": "base-case-01-go",
+  "problem_id": "base-case-01",
+  "title": "Wrong floor: CountPaths collapses every answer to zero",
+  "category": "debug",
+  "language": "go",
+  "time_limit_min": 25,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "go test ./...",
+  "difficulty": "medium"
+}
