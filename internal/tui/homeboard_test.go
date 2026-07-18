@@ -77,6 +77,10 @@ func homeboardFixtureProblems() []catalog.ProblemStatus {
 			Variants: []catalog.ExerciseStatus{{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageCoach}}}},
 		{ProblemID: "parking-lot-01", Title: "Design a Parking Lot", Category: exercise.CategoryOODesign,
 			Variants: []catalog.ExerciseStatus{{Exercise: exercise.Exercise{Language: "python"}, Attempts: 1, LastResult: tracker.ResultFail, LastAttemptDate: "2020-01-01"}}},
+		{ProblemID: "bounded-queue-01", Title: "Bounded Producer-Consumer Queue", Category: exercise.CategoryConcurrency,
+			Variants: []catalog.ExerciseStatus{{Exercise: exercise.Exercise{Language: "go"}}}},
+		{ProblemID: "bloom-filter-01", Title: "Bloom Filter", Category: exercise.CategoryImplementation,
+			Variants: []catalog.ExerciseStatus{{Exercise: exercise.Exercise{Language: "go"}}}},
 	}
 }
 
@@ -88,7 +92,7 @@ func TestRenderHomeboard_ShowsTracksDueDailyStreakRecent(t *testing.T) {
 
 	got := stripAnsiTUI(renderHomeboard(homeboardFixtureProblems(), attempts, time.Now()))
 
-	for _, want := range []string{"DSA", "System Design", "OO Design", "Behavioral"} {
+	for _, want := range []string{"DSA", "Concurrency", "Implementation", "System Design", "OO Design", "Behavioral"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("homeboard missing the %s track:\n%s", want, got)
 		}
