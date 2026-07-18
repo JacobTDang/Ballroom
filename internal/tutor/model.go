@@ -107,6 +107,44 @@ type tutorModel struct {
 	helpRequestCount          int
 	turnInFlight              bool
 
+	// turnCancel cancels the in-flight turn's derived context (see
+	// startTurn's ctx, cancel := context.WithTimeout(m.ctx, turnTimeout))
+	// -- nil whenever no turn is in flight, and also nil while a turn is
+	// still queued behind strategy detection (queuedSubmit) and hasn't
+	// actually started a goroutine yet. Set by submit/the
+	// strategiesDetectedMsg case; cleared once the turn is no longer
+	// this model's concern, either by cancelInFlightTurn or by
+	// turnCompleteMsg's own handling of a natural completion.
+	turnCancel context.CancelFunc
+
+	// pendingUserText is the in-flight turn's submitted line, held here
+	// purely so a cancel or failure can hand it back to the user instead
+	// of discarding it (see recoverPendingText) -- set the moment a turn
+	// starts (submit), cleared the moment it's recovered one way or the
+	// other. A successful completion also clears it without recovering
+	// anything: success has nothing left to hand back.
+	pendingUserText string
+
+	// turnSeq tags every message a turn produces (activityEventMsg,
+	// streamTextMsg, turnCompleteMsg all carry the seq they were started
+	// under -- see startTurn/waitForActivityEvent) with a monotonic
+	// generation number. Bumped both when a new turn starts AND when the
+	// current one is cancelled (cancelInFlightTurn) -- cancelling must
+	// retire the generation immediately even though the cancelled
+	// goroutine is still unwinding in the background, since ctx
+	// cancellation aborts the in-flight request but not instantaneously,
+	// and by the time that happens bubbletea's runtime may already have
+	// moved on to a different turn, or none at all.
+	//
+	// Update's three turn-message cases drop anything whose seq doesn't
+	// match m.turnSeq before touching any state. That's what makes a
+	// cancelled turn's eventual straggling result harmless once it does
+	// land: bubbletea's runtime started that wait the moment submit
+	// returned it, so a cancel genuinely cannot prevent it from
+	// eventually being delivered to Update -- only rendering it inert
+	// once it gets there.
+	turnSeq int
+
 	// activeCalls/pulsePhase drive the live tool-call activity region
 	// (see activityView, buildActivityChannelOption) -- activeCalls is
 	// only ever non-nil while turnInFlight; pulsePhase free-runs for the
@@ -409,6 +447,26 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// own "Ctrl-D to exit." text.
 			return m, tea.Quit
 		}
+		if msg.Type == tea.KeyCtrlC {
+			// Ctrl-C is otherwise unhandled by bubbletea entirely: the
+			// program runs the terminal in raw mode, so there is no
+			// SIGINT to catch -- this KeyMsg is the only signal a Ctrl-C
+			// press ever produces. While a turn is running it cancels
+			// that turn (same as Esc, just below); idle, it quits --
+			// matching every other program in this codebase (see
+			// internal/tui/app.go's own "ctrl+c" -> tea.Quit, and this
+			// file's own Ctrl-D case above).
+			if m.turnInFlight {
+				return m.cancelInFlightTurn()
+			}
+			return m, tea.Quit
+		}
+		if msg.Type == tea.KeyEsc && m.turnInFlight {
+			// Esc is only claimed here, while a turn is in flight --
+			// idle, it falls through to the textarea below unchanged,
+			// same as before this existed.
+			return m.cancelInFlightTurn()
+		}
 		if msg.Type == tea.KeyEnter {
 			return m.submit()
 		}
@@ -442,11 +500,22 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case activityEventMsg:
+		if msg.seq != m.turnSeq {
+			// Stale: this turn was cancelled (or superseded) before it
+			// finished -- see turnSeq's doc comment for why bubbletea's
+			// runtime can still deliver this regardless, and why dropping
+			// it here (rather than re-arming a wait nobody asked for
+			// anymore) is the correct response.
+			return m, nil
+		}
 		m.activeCalls = msg.calls
 		m.recomputeLayout()
-		return m, waitForActivityEvent(msg.activityCh, msg.streamCh, msg.doneCh)
+		return m, waitForActivityEvent(msg.seq, msg.activityCh, msg.streamCh, msg.doneCh)
 
 	case streamTextMsg:
+		if msg.seq != m.turnSeq {
+			return m, nil
+		}
 		if !m.streamPainting && msg.text != "" {
 			// First painted chunk: the reply is visibly arriving, so the
 			// thinking glow starts dying now rather than at turn
@@ -458,7 +527,7 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.streamingText = msg.text
 		m.refreshViewport()
-		return m, waitForActivityEvent(msg.activityCh, msg.streamCh, msg.doneCh)
+		return m, waitForActivityEvent(msg.seq, msg.activityCh, msg.streamCh, msg.doneCh)
 
 	case pulseTickMsg:
 		// Free-running for the program's whole lifetime (see the doc
@@ -478,19 +547,30 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// because startTurn snapshots m and needs the strategies resolved.
 		var cmds []tea.Cmd
 		for _, q := range m.queuedSubmits {
-			activityCh, streamCh, doneCh := startTurn(m, q.line, q.checkComprehension)
-			cmds = append(cmds, waitForActivityEvent(activityCh, streamCh, doneCh))
+			activityCh, streamCh, doneCh, cancel := startTurn(m, q.line, q.checkComprehension, q.seq)
+			m.turnCancel = cancel
+			cmds = append(cmds, waitForActivityEvent(q.seq, activityCh, streamCh, doneCh))
 		}
 		m.queuedSubmits = nil
 		return m, tea.Batch(cmds...)
 
 	case turnCompleteMsg:
+		if msg.seq != m.turnSeq {
+			// Stale: see turnSeq's doc comment -- either this turn was
+			// cancelled and (maybe) replaced by a newer one already, or
+			// it was cancelled and nothing has started since. Either way
+			// its result is no longer this model's concern; the cancel
+			// already showed its own note and recovered the user's text
+			// at cancel time (cancelInFlightTurn).
+			return m, nil
+		}
 		// Read the glow's level before flipping turnInFlight, then
 		// backdate the settle time so the fade-out resumes from that
 		// level -- a reply landing mid-bloom must not flash the glow
 		// up to full brightness before it dies.
 		glowLevel := m.auroraFade()
 		m.turnInFlight = false
+		m.turnCancel = nil
 		m.turnSettledAt = time.Now().Add(-auroraFadeOutLead(glowLevel))
 		// The provisional streamed block (if any) is done: the final
 		// reply below replaces it on success, and a failed turn must not
@@ -525,11 +605,27 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockNote, raw: activityErrorNote(msg.routingWarning)})
 		}
 		if msg.err != nil {
+			// A per-turn timeout (turnTimeout, distinct from
+			// ollamaRequestTimeout's per-REQUEST scope) gets its own
+			// wording instead of the generic connectivity phrasing below
+			// -- a timeout genuinely reached the model, it just never got
+			// a reply back in time, which "could not reach" describes
+			// badly. Matched by substring, not errors.Is: eino/its
+			// underlying provider clients don't reliably preserve the
+			// error chain (see fallback.go's isEmptyChoicesErr for the
+			// same reasoning applied to a different provider failure),
+			// but the deadline error's own message text survives any
+			// amount of %v/%w wrapping either way.
+			detail := fmt.Sprintf("could not reach %s: %v", msg.endpoint, msg.err)
+			if strings.Contains(msg.err.Error(), context.DeadlineExceeded.Error()) {
+				detail = fmt.Sprintf("turn timed out after %v with no reply -- please try again", turnTimeout)
+			}
 			m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockNote, raw: turnFailedFallbackReply})
-			m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockNote, raw: activityErrorNote(fmt.Sprintf("could not reach %s: %v", msg.endpoint, msg.err))})
+			m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockNote, raw: activityErrorNote(m.recoverPendingText(detail))})
 			m.refreshViewport()
 			return m, nil
 		}
+		m.pendingUserText = ""
 		m.history = append(m.history, schema.UserMessage(msg.userMessage), schema.AssistantMessage(msg.reply.Content, nil))
 		// The block keeps the raw reply -- styleMarkdown runs per frame
 		// in renderBlock, and history above keeps the raw text too,
@@ -672,6 +768,73 @@ func (m *tutorModel) refreshViewport() {
 	m.viewport.GotoBottom()
 }
 
+// turnCancelledNote is what a user-initiated cancel (Esc or Ctrl-C while
+// a turn is in flight, see cancelInFlightTurn) shows -- distinct
+// wording, AND distinct color (dimSpan's neutral gray, not
+// activityErrorNote's red), from turnFailedFallbackReply/the failure
+// detail below it, so a deliberate cancel never reads like the model or
+// network failed on its own.
+const turnCancelledNote = "Turn cancelled."
+
+// cancelInFlightTurn handles Esc or Ctrl-C while m.turnInFlight (see
+// Update's tea.KeyMsg case): cancels the turn and restores the pane to
+// idle SYNCHRONOUSLY, without waiting for the turn's own goroutine to
+// actually unwind. That's a deliberate choice, not an oversight -- the
+// issue asks for control back "immediately", and ctx cancellation
+// propagates to an in-flight HTTP request promptly but not
+// instantaneously (a request already past its network call, deep in
+// react.Agent's own graph bookkeeping between steps, might not observe
+// ctx.Done() for another moment). Bumping turnSeq here (not just
+// clearing turnCancel) is what makes that eventual straggling result
+// harmless once it does land -- see the field's doc comment.
+//
+// turnCancel may be nil here (a turn queued behind strategy detection,
+// see queuedSubmit, never got as far as starting a goroutine at all) --
+// guarded rather than assumed, since either way the rest of this
+// (clearing turnInFlight, dropping the queue, recovering the text) still
+// applies.
+func (m tutorModel) cancelInFlightTurn() (tea.Model, tea.Cmd) {
+	if m.turnCancel != nil {
+		m.turnCancel()
+	}
+	m.turnCancel = nil
+	m.turnInFlight = false
+	m.turnSeq++
+	m.queuedSubmits = nil
+
+	glowLevel := m.auroraFade()
+	m.turnSettledAt = time.Now().Add(-auroraFadeOutLead(glowLevel))
+	m.streamingText = ""
+	m.streamPainting = false
+	m.activeCalls = nil
+	m.recomputeLayout()
+
+	m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockNote, raw: dimSpan(m.recoverPendingText(turnCancelledNote))})
+	m.refreshViewport()
+	return m, nil
+}
+
+// recoverPendingText hands m.pendingUserText back to the user rather
+// than ever silently discarding it (see the field's doc comment): back
+// into the textarea when it's empty -- the common case, nothing lost --
+// or, if the user has since typed ahead (a fresh, unsent draft already
+// sits there), appended onto note instead so it stays recoverable by
+// copy rather than clobbering what they're mid-typing. Always clears
+// pendingUserText: once shown here, either way, there's nothing left to
+// recover a second time.
+func (m *tutorModel) recoverPendingText(note string) string {
+	text := m.pendingUserText
+	m.pendingUserText = ""
+	if text == "" {
+		return note
+	}
+	if strings.TrimSpace(m.textarea.Value()) == "" {
+		m.textarea.SetValue(text)
+		return note
+	}
+	return fmt.Sprintf("%s (you've typed ahead, so your message wasn't put back -- copy it from here: %q)", note, text)
+}
+
 // submit handles Enter: empty input is a no-op (nothing to send). A real
 // message resets the textarea (growth immediately collapses back down —
 // recomputeLayout runs again right after), echoes into the viewport
@@ -714,6 +877,14 @@ func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 	m.turnStartedAt = time.Now().Add(-auroraFadeInLead(glowLevel))
 	m.streamingText = ""
 	m.streamPainting = false
+	// A new generation starts here, whether the turn can actually start
+	// its goroutine yet or is about to be queued below -- either way
+	// this line's text is now "in flight" from the user's perspective,
+	// and turnSeq/pendingUserText need to track it from this point so a
+	// cancel arriving before detection resolves still has something
+	// concrete to cancel and recover (see cancelInFlightTurn).
+	m.turnSeq++
+	m.pendingUserText = line
 	m.recomputeLayout()
 	m.displayBlocks = append(m.displayBlocks, displayBlock{kind: blockUser, raw: line})
 	m.refreshViewport()
@@ -725,22 +896,26 @@ func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 	// strategies land. startTurn can't run yet because it snapshots m,
 	// strategies included.
 	if !m.strategiesDetected {
-		m.queuedSubmits = append(m.queuedSubmits, queuedSubmit{line: line, checkComprehension: checkComprehension})
+		m.queuedSubmits = append(m.queuedSubmits, queuedSubmit{line: line, checkComprehension: checkComprehension, seq: m.turnSeq})
 		return m, nil
 	}
 
-	activityCh, streamCh, doneCh := startTurn(m, line, checkComprehension)
-	return m, waitForActivityEvent(activityCh, streamCh, doneCh)
+	activityCh, streamCh, doneCh, cancel := startTurn(m, line, checkComprehension, m.turnSeq)
+	m.turnCancel = cancel
+	return m, waitForActivityEvent(m.turnSeq, activityCh, streamCh, doneCh)
 }
 
 // queuedSubmit is one message submitted before strategy detection
 // resolved -- see the strategiesDetected field's doc comment.
 // checkComprehension is captured at submit time because submit consumes
 // comprehensionCheckPending immediately, whether or not the turn can
-// start yet.
+// start yet. seq is submit's own turnSeq at the time this was queued,
+// carried through to startTurn once the strategiesDetectedMsg case
+// actually starts it (see turnSeq's doc comment).
 type queuedSubmit struct {
 	line               string
 	checkComprehension bool
+	seq                int
 }
 
 // turnCompleteMsg carries one turn's final outcome — whether it went
@@ -755,8 +930,12 @@ type queuedSubmit struct {
 // routingWarning is non-empty only when routing was enabled and the
 // handoff decision itself failed (defaulting to the specialist, per
 // decideHandoff) -- the turn still completes normally either way, this
-// is just visibility into why the decision defaulted.
+// is just visibility into why the decision defaulted. seq is the
+// generation this turn was started under (see tutorModel.turnSeq's doc
+// comment) -- Update drops this message outright if it no longer
+// matches the model's current turnSeq.
 type turnCompleteMsg struct {
+	seq              int
 	reply            *schema.Message
 	err              error
 	endpoint         string
@@ -770,7 +949,10 @@ type turnCompleteMsg struct {
 // eino callbacks as they fire, delivered here by waitForActivityEvent.
 // Carries its own source channels so Update can re-arm the wait without
 // needing to store them as model fields (they're per-turn, ephemeral).
+// seq is turnCompleteMsg's own field of the same name, threaded through
+// unchanged by waitForActivityEvent on every re-arm.
 type activityEventMsg struct {
+	seq        int
 	calls      []activityCall
 	activityCh <-chan []activityCall
 	streamCh   <-chan string
@@ -780,8 +962,10 @@ type activityEventMsg struct {
 // streamTextMsg carries the in-flight turn's accumulated partial reply
 // (see stream.go's pushLatestStreamText) — the streaming counterpart of
 // activityEventMsg, delivered by the same waitForActivityEvent wait and
-// carrying the same channels so Update re-arms identically.
+// carrying the same channels (and seq, see activityEventMsg's doc
+// comment) so Update re-arms identically.
 type streamTextMsg struct {
+	seq        int
 	text       string
 	activityCh <-chan []activityCall
 	streamCh   <-chan string
@@ -805,7 +989,12 @@ func pulseTickCmd() tea.Cmd {
 // result from doneCh instead. One single re-armed command rather than
 // one per channel, so every caller that drains a turn synchronously
 // (RunOneTurn, the test helpers) keeps its one-cmd-chain invariant.
-func waitForActivityEvent(activityCh <-chan []activityCall, streamCh <-chan string, doneCh <-chan turnCompleteMsg) tea.Cmd {
+//
+// seq is stamped onto every activityEventMsg/streamTextMsg this produces
+// (turnCompleteMsg already carries its own, stamped by startTurn) so
+// Update can recognize a stale turn's messages -- see tutorModel.turnSeq's
+// doc comment.
+func waitForActivityEvent(seq int, activityCh <-chan []activityCall, streamCh <-chan string, doneCh <-chan turnCompleteMsg) tea.Cmd {
 	return func() tea.Msg {
 		for {
 			select {
@@ -815,7 +1004,7 @@ func waitForActivityEvent(activityCh <-chan []activityCall, streamCh <-chan stri
 					// so nothing more can paint: the turn is done.
 					return <-doneCh
 				}
-				return activityEventMsg{calls: calls, activityCh: activityCh, streamCh: streamCh, doneCh: doneCh}
+				return activityEventMsg{seq: seq, calls: calls, activityCh: activityCh, streamCh: streamCh, doneCh: doneCh}
 			case text, ok := <-streamCh:
 				if !ok {
 					// Stream finished but the turn hasn't: disable this arm
@@ -823,26 +1012,55 @@ func waitForActivityEvent(activityCh <-chan []activityCall, streamCh <-chan stri
 					streamCh = nil
 					continue
 				}
-				return streamTextMsg{text: text, activityCh: activityCh, streamCh: streamCh, doneCh: doneCh}
+				return streamTextMsg{seq: seq, text: text, activityCh: activityCh, streamCh: streamCh, doneCh: doneCh}
 			}
 		}
 	}
 }
 
+// turnTimeout bounds one whole turn -- comprehension check, routing
+// decision, and the main model call together (see startTurn) -- unlike
+// ollamaRequestTimeout (agent.go), which only bounds a single HTTP
+// request and can't stop a react.Agent turn that legitimately makes
+// several of those in sequence (each individually within budget) from
+// still running for tens of minutes; reactMaxStep=30 steps at up to
+// ollamaRequestTimeout=120s each is a long time with no escape but
+// Ctrl-D. A var, not a const, so tests can shrink it rather than
+// waiting out the real duration -- same pattern as ollamaRequestTimeout.
+var turnTimeout = 5 * time.Minute
+
 // startTurn runs one submitted line's whole turn — comprehension check
 // (if checkComprehension), routing decision (if m.routingEnabled), and
 // the actual model call — on its own goroutine, exactly mirroring the
-// old Run() loop's own sequencing. Returns the two channels
-// waitForActivityEvent drains; m is a snapshot (Go closures capture by
-// value here since m is passed as a parameter, not a live reference),
-// which is why helpRequestCount/comprehensionCheckPending are already
-// resolved by submit before this is called.
-func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []activityCall, <-chan string, <-chan turnCompleteMsg) {
+// old Run() loop's own sequencing. Returns the three channels
+// waitForActivityEvent drains, plus the derived context's cancel func so
+// the caller can store it for a later Esc/Ctrl-C (see
+// tutorModel.turnCancel); m is a snapshot (Go closures capture by value
+// here since m is passed as a parameter, not a live reference), which is
+// why helpRequestCount/comprehensionCheckPending are already resolved by
+// submit before this is called.
+//
+// seq is stamped onto every turnCompleteMsg this produces so Update can
+// recognize a stale result once cancelling has moved the model on to a
+// different (or no) generation -- see tutorModel.turnSeq's doc comment.
+//
+// Every network call in the goroutine below uses ctx (derived from
+// m.ctx here), never m.ctx directly -- that's the actual mechanism that
+// makes both the timeout and a manual cancel (via the returned
+// CancelFunc) reach the request in flight, comprehension check, routing
+// decision, or main call alike.
+func startTurn(m tutorModel, line string, checkComprehension bool, seq int) (<-chan []activityCall, <-chan string, <-chan turnCompleteMsg, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(m.ctx, turnTimeout)
 	activityCh := make(chan []activityCall, 32)
 	streamCh := make(chan string, 1)
 	doneCh := make(chan turnCompleteMsg, 1)
 
 	go func() {
+		// Always released once the turn ends, one way or another --
+		// natural completion, timeout, or an external cancel via the
+		// returned CancelFunc racing to get here first (cancel is
+		// idempotent, so whichever fires first wins harmlessly).
+		defer cancel()
 		// LIFO: streamCh closes first, so by the time waitForActivityEvent
 		// sees activityCh closed (its read-doneCh signal), no more partial
 		// text can arrive.
@@ -868,12 +1086,12 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 				checkAgent, checkCM, checkStrategy, checkModel = m.orchestratorAgent, m.orchestratorCM, m.orchestratorStrategy, m.cfg.OrchestratorModel
 			}
 			checkMessages := prependToolsPrompt(checkStrategy, m.toolCatalogText, comprehensionCheckMessages(m.history, m.cfg.WorkDir, line))
-			reply, err := callRole(m.ctx, checkStrategy, checkAgent, checkCM, m.tools, checkMessages, feed, activityCh, activityOpt, onTextFor(checkModel))
+			reply, err := callRole(ctx, checkStrategy, checkAgent, checkCM, m.tools, checkMessages, feed, activityCh, activityOpt, onTextFor(checkModel))
 			if err == nil {
 				// helpRequestCount stays at its pre-turn snapshot -- a
 				// successful comprehension check never counts as a
 				// hints-first "help request" (see submit's doc comment).
-				doneCh <- turnCompleteMsg{reply: reply, userMessage: line, helpRequestCount: m.helpRequestCount}
+				doneCh <- turnCompleteMsg{seq: seq, reply: reply, userMessage: line, helpRequestCount: m.helpRequestCount}
 				return
 			}
 			// Couldn't reach the provider for the check -- fall through
@@ -884,7 +1102,7 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 		turnAgent, turnCM, turnStrategy, turnEndpoint, turnModel := m.workerAgent, m.workerCM, m.workerStrategy, m.workerEndpoint, m.cfg.Model
 		routingWarning := ""
 		if m.routingEnabled {
-			handoff, err := decideHandoff(m.ctx, m.orchestratorCM, line)
+			handoff, err := decideHandoff(ctx, m.orchestratorCM, line)
 			if err != nil {
 				// Doesn't abort the turn -- decideHandoff already
 				// defaulted to handoff (true) on this same error, so the
@@ -909,15 +1127,15 @@ func startTurn(m tutorModel, line string, checkComprehension bool) (<-chan []act
 			turn = append([]*schema.Message{note}, turn...)
 		}
 		requestMessages := prependToolsPrompt(turnStrategy, m.toolCatalogText, append(append([]*schema.Message{}, m.history...), turn...))
-		reply, err := callRole(m.ctx, turnStrategy, turnAgent, turnCM, m.tools, requestMessages, feed, activityCh, activityOpt, onTextFor(turnModel))
+		reply, err := callRole(ctx, turnStrategy, turnAgent, turnCM, m.tools, requestMessages, feed, activityCh, activityOpt, onTextFor(turnModel))
 		if err != nil {
-			doneCh <- turnCompleteMsg{err: err, endpoint: turnEndpoint, userMessage: line, helpRequestCount: newHelpRequestCount, routingWarning: routingWarning}
+			doneCh <- turnCompleteMsg{seq: seq, err: err, endpoint: turnEndpoint, userMessage: line, helpRequestCount: newHelpRequestCount, routingWarning: routingWarning}
 			return
 		}
-		doneCh <- turnCompleteMsg{reply: reply, userMessage: line, helpRequestCount: newHelpRequestCount, routingWarning: routingWarning}
+		doneCh <- turnCompleteMsg{seq: seq, reply: reply, userMessage: line, helpRequestCount: newHelpRequestCount, routingWarning: routingWarning}
 	}()
 
-	return activityCh, streamCh, doneCh
+	return activityCh, streamCh, doneCh, cancel
 }
 
 // buildActivityChannelOption wires the eino callback machinery
