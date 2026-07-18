@@ -1809,3 +1809,82 @@ func TestNewAppModel_ResumeAtStageProblems_PreloadsCategory(t *testing.T) {
 		t.Errorf("categoryProblems = %+v, want just two-pointers-01", m.categoryProblems)
 	}
 }
+
+func TestUpdateProblems_DefaultLanguageRunsMatchingVariantDirectly(t *testing.T) {
+	m := appModel{
+		stage: stageProblems,
+		cfg:   config.Config{DefaultLanguage: "go"},
+		categoryProblems: []catalog.ProblemStatus{{
+			ProblemID: "p1",
+			Variants: []catalog.ExerciseStatus{
+				{Exercise: exercise.Exercise{ID: "p1-python", Language: "python"}},
+				{Exercise: exercise.Exercise{ID: "p1-go", Language: "go"}},
+			},
+		}},
+	}
+	newM, cmd := m.updateProblems(tea.KeyMsg{Type: tea.KeyEnter})
+	got := newM.(appModel)
+	if got.outcome != outcomeRunExercise || got.exerciseToRun.ID != "p1-go" {
+		t.Fatalf("outcome=%v exerciseToRun=%q, want the go variant run directly", got.outcome, got.exerciseToRun.ID)
+	}
+	if cmd == nil {
+		t.Fatal("want a tea.Quit cmd when the default language matches")
+	}
+}
+
+func TestUpdateProblems_DefaultLanguageWithoutMatchingVariantStillAsks(t *testing.T) {
+	// Design problems ride coach/interviewer in the language slot — a
+	// python/go/cpp default must never match them.
+	m := appModel{
+		stage: stageProblems,
+		cfg:   config.Config{DefaultLanguage: "go"},
+		categoryProblems: []catalog.ProblemStatus{{
+			ProblemID: "url-shortener",
+			Variants: []catalog.ExerciseStatus{
+				{Exercise: exercise.Exercise{ID: "u-coach", Language: "coach"}},
+				{Exercise: exercise.Exercise{ID: "u-interviewer", Language: "interviewer"}},
+			},
+		}},
+	}
+	newM, cmd := m.updateProblems(tea.KeyMsg{Type: tea.KeyEnter})
+	got := newM.(appModel)
+	if got.stage != stageLanguage || cmd != nil {
+		t.Fatalf("stage=%v cmd=%v, want the language picker kept when no variant matches", got.stage, cmd)
+	}
+}
+
+func TestUpdateSettings_CycleDefaultLanguagePersists(t *testing.T) {
+	m := appModel{stage: stageSettings, settingsCursor: 2, cfg: config.Config{DataDir: t.TempDir()}}
+	for _, want := range []string{"python", "go", "cpp", ""} {
+		newM, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
+		m = newM.(appModel)
+		if m.cfg.DefaultLanguage != want {
+			t.Fatalf("DefaultLanguage = %q, want %q in the cycle", m.cfg.DefaultLanguage, want)
+		}
+		s, err := config.LoadSettings(m.cfg.SettingsPath())
+		if err != nil || s.DefaultLanguage != want {
+			t.Fatalf("persisted DefaultLanguage = %q (err %v), want %q", s.DefaultLanguage, err, want)
+		}
+		if m.stage != stageSettings {
+			t.Fatalf("stage = %v, want to stay on stageSettings", m.stage)
+		}
+	}
+}
+
+func TestUpdateSettings_ToggleTutorNotesPersists(t *testing.T) {
+	m := appModel{stage: stageSettings, settingsCursor: 3, cfg: config.Config{DataDir: t.TempDir()}}
+	newM, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(appModel)
+	if !m.cfg.DisableTutorNotes {
+		t.Fatal("DisableTutorNotes = false after toggle, want true")
+	}
+	s, err := config.LoadSettings(m.cfg.SettingsPath())
+	if err != nil || !s.DisableTutorNotes {
+		t.Fatalf("persisted DisableTutorNotes = %v (err %v), want true", s.DisableTutorNotes, err)
+	}
+	newM, _ = m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(appModel)
+	if m.cfg.DisableTutorNotes {
+		t.Fatal("DisableTutorNotes = true after second toggle, want false")
+	}
+}

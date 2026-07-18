@@ -110,6 +110,16 @@ type Config struct {
 	// used). One key authenticates every model on the account, so this
 	// stays a single shared field even with two model roles.
 	OpenRouterAPIKey string
+	// DefaultLanguage, when non-empty (one of "python"/"go"/"cpp"),
+	// skips the language-picker step for problems that have a variant
+	// in that language; empty means ask every time (the original
+	// behavior). Design/behavioral problems ride coach/interviewer in
+	// the language slot, so they never match and always ask.
+	DefaultLanguage string
+	// DisableTutorNotes removes the tutor's highlight_lines tool, so
+	// sessions run without editor highlights/notes at all — a durable
+	// alternative to the in-session M-h rendering toggle.
+	DisableTutorNotes bool
 }
 
 // Settings holds user preferences persisted across invocations, e.g. the
@@ -129,6 +139,13 @@ type Settings struct {
 	// stage) instead of requiring OPENROUTER_API_KEY to be exported in
 	// the shell every session.
 	OpenRouterAPIKey string `json:"openrouter_api_key"`
+	// DefaultLanguage mirrors Config.DefaultLanguage ("" = ask every
+	// time). Validated on Load, not here — LoadSettings stays a dumb
+	// reader so a bad value still round-trips visibly.
+	DefaultLanguage string `json:"default_language,omitempty"`
+	// DisableTutorNotes mirrors Config.DisableTutorNotes (issue #25's
+	// durable variant: notes off at the source, not just hidden).
+	DisableTutorNotes bool `json:"disable_tutor_notes,omitempty"`
 }
 
 // SettingsPath returns the path to the persisted settings file.
@@ -218,6 +235,16 @@ func Load() (Config, error) {
 	if cfg.OpenRouterAPIKey == "" {
 		cfg.OpenRouterAPIKey = os.Getenv("OPENROUTER_API_KEY")
 	}
+	// Fail loud on an unsupported default_language (hand-edited file):
+	// silently treating it as "ask every time" would leave the user
+	// wondering why their default is never honored.
+	switch settings.DefaultLanguage {
+	case "", "python", "go", "cpp":
+		cfg.DefaultLanguage = settings.DefaultLanguage
+	default:
+		return Config{}, fmt.Errorf("config: default_language %q in %s: want python, go, cpp, or empty", settings.DefaultLanguage, cfg.SettingsPath())
+	}
+	cfg.DisableTutorNotes = settings.DisableTutorNotes
 
 	return cfg, nil
 }

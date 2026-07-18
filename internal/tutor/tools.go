@@ -275,10 +275,6 @@ func buildTools(cfg Config) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	highlightLines, err := newHighlightLinesTool(cfg)
-	if err != nil {
-		return nil, err
-	}
 	readCursorPosition, err := newReadCursorPositionTool(cfg)
 	if err != nil {
 		return nil, err
@@ -288,12 +284,26 @@ func buildTools(cfg Config) ([]tool.BaseTool, error) {
 		return nil, err
 	}
 
+	raw := []tool.BaseTool{readSolution, readSolutionDiff, readProblem, readTestOutput}
+	// The highlight tool is simply absent when notes are disabled (the
+	// Settings toggle) — removing it from the set is the one mechanism
+	// the model can't route around, unlike a prompt instruction or a
+	// no-op tool result. The catalog text shown to the model is
+	// rendered from this list (renderToolCatalog), so it adjusts
+	// automatically.
+	if !cfg.DisableEditorNotes {
+		highlightLines, err := newHighlightLinesTool(cfg)
+		if err != nil {
+			return nil, err
+		}
+		raw = append(raw, highlightLines)
+	}
 	// Wrap every tool so a failure (malformed model-generated arguments,
 	// an out-of-bounds highlight range, an unreachable nvim socket that
 	// somehow still errors, ...) becomes a string result fed back to the
 	// model instead of aborting the whole turn — replaces
 	// tutor/chat.sh's process_highlights bash-level fallthrough case.
-	raw := []tool.BaseTool{readSolution, readSolutionDiff, readProblem, readTestOutput, highlightLines, readCursorPosition, readGradingRubric}
+	raw = append(raw, readCursorPosition, readGradingRubric)
 	wrapped := make([]tool.BaseTool, len(raw))
 	for i, t := range raw {
 		wrapped[i] = utils.WrapToolWithErrorHandler(t, toolErrorHandler)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -415,5 +416,35 @@ func TestBuildTools_MalformedArgumentsHandledGracefully(t *testing.T) {
 	}
 	if !strings.Contains(out, "tool error") {
 		t.Errorf("result = %q, want it to mention the tool error instead of silently succeeding", out)
+	}
+}
+
+func TestBuildTools_DisableEditorNotesRemovesHighlightTool(t *testing.T) {
+	names := func(cfg Config) []string {
+		tools, err := buildTools(cfg)
+		if err != nil {
+			t.Fatalf("buildTools: %v", err)
+		}
+		var out []string
+		for _, tl := range tools {
+			info, err := tl.Info(context.Background())
+			if err != nil {
+				t.Fatalf("Info: %v", err)
+			}
+			out = append(out, info.Name)
+		}
+		return out
+	}
+
+	withNotes := names(Config{WorkDir: t.TempDir()})
+	if !slices.Contains(withNotes, "highlight_lines") {
+		t.Fatalf("default tools = %v, want highlight_lines present", withNotes)
+	}
+	withoutNotes := names(Config{WorkDir: t.TempDir(), DisableEditorNotes: true})
+	if slices.Contains(withoutNotes, "highlight_lines") {
+		t.Fatalf("tools with notes disabled = %v, want highlight_lines absent", withoutNotes)
+	}
+	if len(withoutNotes) != len(withNotes)-1 {
+		t.Errorf("tool count %d -> %d, want exactly one fewer with notes disabled", len(withNotes), len(withoutNotes))
 	}
 }
