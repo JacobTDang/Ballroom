@@ -563,7 +563,7 @@ func TestTutorModel_SubmitBeforeDetectionQueuesTurnUntilStrategiesArrive(t *test
 	if !m.turnInFlight {
 		t.Error("turnInFlight = false after a queued submit, want true -- the thinking indicator must engage immediately")
 	}
-	if !strings.Contains(ansi.Strip(m.View()), "you › early question") {
+	if !strings.Contains(ansi.Strip(m.View()), "│ early question") {
 		t.Error("queued submit's echo missing from the view")
 	}
 
@@ -1106,18 +1106,82 @@ func TestTutorModel_TurnCompleteClearsActiveCallsAndTurnInFlight(t *testing.T) {
 	}
 }
 
-func TestTutorModel_SubmitEchoCarriesStyledYouPrefix(t *testing.T) {
+func TestTutorModel_SubmitEchoCarriesUserAccentBar(t *testing.T) {
 	m := newTutorLayoutOnly()
 	m.textarea.SetValue("what about sharding?")
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := newM.(tutorModel)
 
 	display := renderedBlocks(got)
-	if !strings.Contains(ansi.Strip(display), "you › what about sharding?") {
-		t.Errorf("echo missing the you › prefix:\n%s", ansi.Strip(display))
+	if !strings.Contains(ansi.Strip(display), "│ what about sharding?") {
+		t.Errorf("echo missing the │ accent bar:\n%s", ansi.Strip(display))
 	}
-	if !strings.Contains(display, "\x1b[") {
-		t.Error("the you › prefix should carry styling escapes")
+	if !strings.Contains(display, ansiFg(panePink)) {
+		t.Error("the accent bar should carry the pink foreground escape")
+	}
+}
+
+// TestRenderUserBlock_EveryWrappedLineCarriesTheBar pins the block's
+// two invariants: the bar marks every wrapped line (not just the
+// first), and every emitted line is already within the given width —
+// which is what keeps refreshViewport's outer word-wrap from ever
+// re-breaking a line and orphaning its continuation without the bar.
+func TestRenderUserBlock_EveryWrappedLineCarriesTheBar(t *testing.T) {
+	raw := "this is a long user question that will definitely wrap across several rows at a narrow width"
+	got := renderUserBlock(raw, 40)
+
+	lines := strings.Split(got, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("renderUserBlock at width 40 produced %d line(s), want the text wrapped across several", len(lines))
+	}
+	for i, line := range lines {
+		plain := ansi.Strip(line)
+		if !strings.HasPrefix(plain, "│ ") {
+			t.Errorf("line %d = %q, want every wrapped line to start with the │ bar", i, plain)
+		}
+		if w := lipgloss.Width(line); w > 40 {
+			t.Errorf("line %d is %d cells wide, want within the 40-cell width", i, w)
+		}
+	}
+	joined := strings.ReplaceAll(ansi.Strip(got), "│ ", "")
+	for _, word := range strings.Fields(raw) {
+		if !strings.Contains(joined, word) {
+			t.Errorf("wrapped block lost the word %q from the raw text", word)
+		}
+	}
+}
+
+func TestRenderUserBlock_WidthZeroPrefixesWithoutWrapping(t *testing.T) {
+	got := renderUserBlock("early question", 0)
+	if plain := ansi.Strip(got); plain != "│ early question" {
+		t.Errorf("renderUserBlock(width 0) = %q, want the bare barred line with no wrapping or padding", plain)
+	}
+}
+
+// TestTutorModel_ResizeReWrapsUserAccentBars mirrors the editor cards'
+// resize test: a user block re-flows at the new width and the bar
+// still marks every line.
+func TestTutorModel_ResizeReWrapsUserAccentBars(t *testing.T) {
+	m := newTutorLayoutOnly()
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+	m.displayBlocks = []displayBlock{{kind: blockUser, raw: "a question long enough to stay on one row when wide but wrap once narrow"}}
+	m.refreshViewport()
+	if wide := strings.Split(renderedBlocks(m), "\n"); len(wide) != 1 {
+		t.Fatalf("user block spans %d lines at width 80, want 1 (the fixture must only wrap when narrow)", len(wide))
+	}
+
+	newM, _ = m.Update(tea.WindowSizeMsg{Width: 40, Height: 24})
+	m = newM.(tutorModel)
+	narrow := renderedBlocks(m)
+	narrowLines := strings.Split(narrow, "\n")
+	if len(narrowLines) <= 1 {
+		t.Fatalf("user block did not re-wrap at width 40:\n%s", ansi.Strip(narrow))
+	}
+	for i, line := range narrowLines {
+		if plain := ansi.Strip(line); !strings.HasPrefix(plain, "│ ") {
+			t.Errorf("post-resize line %d = %q, want the bar on every wrapped line", i, plain)
+		}
 	}
 }
 
