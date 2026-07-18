@@ -18,11 +18,13 @@ import (
 // nothing here rather than a wall of zeros.
 
 // homeTracks are the practice tracks the progress bars cover, in
-// picker order. The genuinely tiny warm-up category (ai-assisted: one
-// problem) is deliberately absent -- a bar for a single problem reads
-// as noise. Concurrency and Implementation earned their rows when they
-// grew into real ladders (10 and 11 problems); Debug's ladder is now
-// real too and gets the same treatment.
+// picker order. Every category the picker lists gets a row here too
+// (issue #255) -- ai-assisted used to be the one exception, on the
+// theory that a single-problem bar reads as noise, but that just made
+// the dashboard inconsistent with the picker (which lists it) without
+// actually hiding it from practice. It's real content the user can
+// work through, so it gets a row like everything else; a 0/1 or 1/1
+// bar is honest, not noisy.
 var homeTracks = []struct {
 	group string
 	label string
@@ -31,6 +33,7 @@ var homeTracks = []struct {
 	{exercise.CategoryDebug, "Debug"},
 	{exercise.CategoryConcurrency, "Concurrency"},
 	{exercise.CategoryImplementation, "Implementation"},
+	{exercise.CategoryAIAssisted, "AI-Assisted"},
 	{exercise.CategorySystemDesign, "System Design"},
 	{exercise.CategoryAPIDesign, "API Design"},
 	{exercise.CategoryOODesign, "OO Design"},

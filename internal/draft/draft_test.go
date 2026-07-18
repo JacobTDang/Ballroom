@@ -407,3 +407,71 @@ func TestArchive_RotationOverwritesEarlierPrevious(t *testing.T) {
 		t.Errorf("previous.go = %q, want the most recently archived generation %q", got, "gen2")
 	}
 }
+
+// TestExists_* cover the picker's draft marker (issue #255): Exists must
+// be a cheap existence check (no file content reads -- see the doc
+// comment) that agrees exactly with Load's ok result, so the marker
+// never promises a resume prompt that doesn't actually appear.
+
+func TestExists_FalseWhenNeverSnapshotted(t *testing.T) {
+	dataDir := t.TempDir()
+	if Exists(dataDir, "never-practiced") {
+		t.Error("expected Exists to be false for an exercise with no draft dir at all")
+	}
+}
+
+func TestExists_TrueAfterSnapshot(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "solution.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Snapshot(dataDir, "ex-1", workspace); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	if !Exists(dataDir, "ex-1") {
+		t.Error("expected Exists to be true right after a snapshot")
+	}
+}
+
+// TestExists_FalseAfterArchive: Archive rotates solution.* to
+// previous.* and leaves the draft directory itself in place -- Exists
+// must track "is there a current, resumable draft", not mere directory
+// presence, or the picker marker would promise a resume prompt for a
+// problem that was deliberately started fresh.
+func TestExists_FalseAfterArchive(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "solution.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Snapshot(dataDir, "ex-1", workspace); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if err := Archive(dataDir, "ex-1"); err != nil {
+		t.Fatalf("Archive: %v", err)
+	}
+
+	if Exists(dataDir, "ex-1") {
+		t.Error("expected Exists to be false after Archive left only previous.* behind")
+	}
+}
+
+func TestExists_DoesNotReadFileContents(t *testing.T) {
+	// A directory containing a solution.* whose bytes would fail to
+	// parse as anything meaningful must still report true -- Exists
+	// only checks presence, never opens/parses the file for content.
+	dataDir := t.TempDir()
+	dir := Dir(dataDir, "ex-1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "solution.go"), []byte{0xff, 0x00, 0xfe}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if !Exists(dataDir, "ex-1") {
+		t.Error("expected Exists to report true regardless of file content")
+	}
+}

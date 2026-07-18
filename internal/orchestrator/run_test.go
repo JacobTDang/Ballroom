@@ -70,6 +70,59 @@ func TestExerciseRunArgs_ForwardsKind(t *testing.T) {
 	}
 }
 
+// TestExerciseRunArgs_TutorModeOverride* cover issue #255's per-session
+// tutor-mode override: cfg.TutorModeOverride must win over a coding
+// exercise's own TutorMode, but a design/behavioral exercise's TutorMode
+// IS its session persona (interviewer, story coach, ...), not a coding
+// assistance level, so it must never be overridden.
+
+func TestExerciseRunArgs_TutorModeOverride_AppliesToCodingExercise(t *testing.T) {
+	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "llama3:8b", TutorModeOverride: "syntax-only"}
+	ex := exercise.Exercise{ID: "two-pointers-01-go", Kind: exercise.KindCoding, Category: "pattern", Language: "go", TutorMode: "full-assist", TestCommand: "go test ./..."}
+
+	args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now())
+
+	if !containsFlag(args, "PRACTICE_TUTOR_MODE=syntax-only") {
+		t.Errorf("expected the override to win over the exercise's own full-assist TutorMode, got %v", args)
+	}
+}
+
+func TestExerciseRunArgs_TutorModeOverride_EmptyUsesExerciseDefault(t *testing.T) {
+	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "llama3:8b"}
+	ex := exercise.Exercise{ID: "two-pointers-01-go", Kind: exercise.KindCoding, Category: "pattern", Language: "go", TutorMode: "hints-first", TestCommand: "go test ./..."}
+
+	args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now())
+
+	if !containsFlag(args, "PRACTICE_TUTOR_MODE=hints-first") {
+		t.Errorf("expected the exercise's own TutorMode with no override set, got %v", args)
+	}
+}
+
+func TestExerciseRunArgs_TutorModeOverride_NeverAppliesToDesignExercise(t *testing.T) {
+	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "llama3:8b", TutorModeOverride: "syntax-only"}
+	ex := exercise.Exercise{ID: "url-shortener-01-coach", Kind: exercise.KindDesign, Category: "system-design", Language: "coach", TutorMode: "design-coach"}
+
+	args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now())
+
+	if !containsFlag(args, "PRACTICE_TUTOR_MODE=design-coach") {
+		t.Errorf("expected a design exercise's persona (TutorMode) to stay design-coach, unaffected by the coding-only override, got %v", args)
+	}
+	if containsFlag(args, "PRACTICE_TUTOR_MODE=syntax-only") {
+		t.Errorf("did not expect the coding-only override to leak into a design session, got %v", args)
+	}
+}
+
+func TestExerciseRunArgs_TutorModeOverride_NeverAppliesToBehavioralExercise(t *testing.T) {
+	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "llama3:8b", TutorModeOverride: "full-assist"}
+	ex := exercise.Exercise{ID: "disagreement-01-coach", Kind: exercise.KindDesign, Category: "behavioral", Language: "coach", TutorMode: "story-coach"}
+
+	args := exerciseRunArgs(cfg, ex, "/control", "/workspace", time.Now())
+
+	if !containsFlag(args, "PRACTICE_TUTOR_MODE=story-coach") {
+		t.Errorf("expected a behavioral exercise's persona (TutorMode) to stay story-coach, unaffected by the coding-only override, got %v", args)
+	}
+}
+
 func TestExerciseRunArgs_ForwardsGraderModel(t *testing.T) {
 	cfg := config.Config{DataDir: "/data", DockerImage: "ballroom-practice", TutorModel: "llama3:8b", GraderModel: "openrouter:tencent/hy3:free"}
 	ex := exercise.Exercise{ID: "url-shortener-01-coach", Kind: exercise.KindDesign, Category: "system-design", Language: "coach", TutorMode: "design-coach"}

@@ -192,6 +192,20 @@ func Load(dataDir, exerciseID string) (Draft, bool, error) {
 	}, true, nil
 }
 
+// Exists cheaply reports whether exerciseID has a current, resumable
+// draft under dataDir — the same solution.* presence check Load uses to
+// decide its ok result, but without reading meta.json or any file
+// content, so it's safe to call once per visible row on every picker
+// render (see internal/tui's problemHasDraft) without the cost of a
+// real Load. Deliberately NOT a bare directory-existence check: Archive
+// leaves the draft directory in place (holding only previous.* and no
+// meta.json), and a marker that fired for that case would promise a
+// resume prompt that Load would then refuse to honor.
+func Exists(dataDir, exerciseID string) bool {
+	files, err := solutionFiles(Dir(dataDir, exerciseID))
+	return err == nil && len(files) > 0
+}
+
 // Archive rotates exerciseID's current draft files to previous.<ext>
 // (overwriting any earlier previous.<ext> -- one generation of
 // history, not a stack) and removes the now-stale meta.json, so a

@@ -228,14 +228,19 @@ const (
 // settingsTarget tracks which Config field stageProviderChoice and
 // everything past it (stageModelPicker, stageAPIModelEntry,
 // stageOpenRouterKeyEntry) are editing — set by updateSettings when the
-// user picks Worker or Orchestrator from stageSettings' top-level list,
-// read by selectModel to decide whether to write cfg.TutorModel or
-// cfg.OrchestratorModel.
+// user picks Worker, Orchestrator, or Grader from stageSettings'
+// top-level list, read by selectModel to decide whether to write
+// cfg.TutorModel, cfg.OrchestratorModel, or cfg.GraderModel.
 type settingsTarget int
 
 const (
 	settingsTargetWorker settingsTarget = iota
 	settingsTargetOrchestrator
+	// settingsTargetGrader is the design-submit grading role
+	// (cfg.GraderModel) -- like the orchestrator, optional (empty means
+	// grade with the worker model), so it gets the same 3rd "None"
+	// provider-choice option.
+	settingsTargetGrader
 )
 
 // appOutcome is what Run's caller should do once the program exits.
@@ -1107,11 +1112,13 @@ func (m appModel) updateStats(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // --- stageSettings ---
 
-// updateSettings handles the top-level Worker model / Orchestrator model
-// role choice — a plain 2-item list, same up/down/enter shape as every
-// other short list in this program. Enter records which Config field is
-// being edited (settingsEditing) and moves to stageProviderChoice, which
-// asks Local vs API for that role.
+// updateSettings handles the top-level role/preference choice — a plain
+// list, same up/down/enter shape as every other short list in this
+// program. Enter on one of the three model roles (Worker/Orchestrator/
+// Grader) records which Config field is being edited (settingsEditing)
+// and moves to stageProviderChoice, which asks Local vs API for that
+// role; enter on one of the in-place preferences cycles/toggles and
+// saves immediately without leaving this screen.
 func (m appModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyUp:
@@ -1139,9 +1146,13 @@ func (m appModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 1:
 			m.settingsEditing = settingsTargetOrchestrator
 		case 2:
-			return m.cycleDefaultLanguage()
+			m.settingsEditing = settingsTargetGrader
 		case 3:
+			return m.cycleDefaultLanguage()
+		case 4:
 			return m.toggleTutorNotes()
+		case 5:
+			return m.cycleTutorModeOverride()
 		}
 		m.stage = stageProviderChoice
 		m.settingsCursor = 0
@@ -1178,16 +1189,43 @@ func (m appModel) toggleTutorNotes() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// cycleTutorModeOverride advances the per-session tutor-mode override
+// exercise default → syntax-only → hints-first → full-assist → exercise
+// default and persists immediately, same shape as cycleDefaultLanguage
+// (a small closed cycle doesn't warrant a sub-stage). Only ever reaches
+// a coding exercise's session (internal/orchestrator.exerciseRunArgs
+// applies it) -- a design/behavioral exercise's tutor_mode is its
+// session persona, never overridden regardless of this setting.
+func (m appModel) cycleTutorModeOverride() (tea.Model, tea.Cmd) {
+	next := map[string]string{"": "syntax-only", "syntax-only": "hints-first", "hints-first": "full-assist", "full-assist": ""}
+	m.cfg.TutorModeOverride = next[m.cfg.TutorModeOverride]
+	if err := config.SaveSettings(m.cfg.SettingsPath(), settingsFromConfig(m.cfg)); err != nil {
+		m.err = err
+		return m, nil
+	}
+	m.err = nil
+	return m, nil
+}
+
 // --- stageProviderChoice ---
+
+// settingsTargetOptional reports whether target's model may legitimately
+// be unset — Worker never can (a session always needs a model to talk
+// to), but Orchestrator (empty = routing off) and Grader (empty = grade
+// with the worker model) both can, so their provider choice gets a 3rd
+// "None" entry (see updateProviderChoice/renderProviderChoice).
+func settingsTargetOptional(target settingsTarget) bool {
+	return target == settingsTargetOrchestrator || target == settingsTargetGrader
+}
 
 // updateProviderChoice handles the Local (Ollama) / API (OpenRouter)
 // provider choice for whichever role updateSettings just picked
 // (m.settingsEditing) — a plain list, 2 items normally, or 3 when editing
-// the orchestrator (a trailing "None (disable routing)" entry, since the
-// worker model can never be unset).
+// the orchestrator or grader (a trailing "None" entry, since the worker
+// model can never be unset but those two can).
 func (m appModel) updateProviderChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	maxCursor := 1
-	if m.settingsEditing == settingsTargetOrchestrator {
+	if settingsTargetOptional(m.settingsEditing) {
 		maxCursor = 2
 	}
 	switch msg.Type {
@@ -1211,6 +1249,9 @@ func (m appModel) updateProviderChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 1:
 			return m.loadAPIModelEntry(), nil
 		case 2:
+			if m.settingsEditing == settingsTargetGrader {
+				return m.clearGraderModel()
+			}
 			return m.clearOrchestratorModel()
 		}
 	}
@@ -1222,6 +1263,22 @@ func (m appModel) updateProviderChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // reachable when editing the orchestrator role.
 func (m appModel) clearOrchestratorModel() (tea.Model, tea.Cmd) {
 	m.cfg.OrchestratorModel = ""
+	if err := config.SaveSettings(m.cfg.SettingsPath(), settingsFromConfig(m.cfg)); err != nil {
+		m.err = err
+		return m, nil
+	}
+	m.err = nil
+	m.stage = stageSettings
+	return m, nil
+}
+
+// clearGraderModel disables the dedicated grading model by clearing
+// cfg.GraderModel — the "None (use worker model)" entry in
+// stageProviderChoice, only reachable when editing the grader role.
+// Design-submit grading then falls back to the worker model (see
+// cmd/ballroom's graderModelFromEnv).
+func (m appModel) clearGraderModel() (tea.Model, tea.Cmd) {
+	m.cfg.GraderModel = ""
 	if err := config.SaveSettings(m.cfg.SettingsPath(), settingsFromConfig(m.cfg)); err != nil {
 		m.err = err
 		return m, nil
@@ -1464,13 +1521,16 @@ func (m appModel) handleModelDownloadPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 // so a slow/unreachable check can't stall the picker.
 //
 // Which Config field gets written depends on m.settingsEditing (set by
-// updateSettings when the role choice was made) — either branch must
+// updateSettings when the role choice was made) — every branch must
 // carry forward every other field, or the one this call isn't touching
 // would silently get wiped from settings.json on save.
 func (m appModel) selectModel(name string) (tea.Model, tea.Cmd) {
-	if m.settingsEditing == settingsTargetOrchestrator {
+	switch m.settingsEditing {
+	case settingsTargetOrchestrator:
 		m.cfg.OrchestratorModel = name
-	} else {
+	case settingsTargetGrader:
+		m.cfg.GraderModel = name
+	default:
 		m.cfg.TutorModel = name
 	}
 	if err := config.SaveSettings(m.cfg.SettingsPath(), settingsFromConfig(m.cfg)); err != nil {
@@ -1671,6 +1731,21 @@ func (m appModel) renderDSACategories() string {
 	return b.String()
 }
 
+// categoryRoadmapDocs maps a top-level practice category to its planning
+// doc under docs/, when one exists — named in the problem picker's
+// footer (renderProblems) so the roadmap is one glance away instead of
+// something you have to know to go find. Categories without a roadmap
+// doc (ai-assisted, oo-design, behavioral, and every individual DSA
+// subcategory — the NeetCode 150 list itself is that track's roadmap)
+// are simply absent from this map, so the footer line doesn't render.
+var categoryRoadmapDocs = map[string]string{
+	exercise.CategorySystemDesign:   "docs/system-design-roadmap.md",
+	exercise.CategoryAPIDesign:      "docs/api-design-roadmap.md",
+	exercise.CategoryConcurrency:    "docs/concurrency-roadmap.md",
+	exercise.CategoryDebug:          "docs/debug-roadmap.md",
+	exercise.CategoryImplementation: "docs/implementation-roadmap.md",
+}
+
 func (m appModel) renderProblems() string {
 	var b strings.Builder
 	b.WriteString(hintStyle.Render(catalog.DisplayCategory(m.category)))
@@ -1729,10 +1804,14 @@ func (m appModel) renderProblems() string {
 			// problem gone untouched for a month.
 			marker = "  · review due"
 		}
+		draftMarker := ""
+		if problemHasDraft(m.cfg.DataDir, p) {
+			draftMarker = "  · draft"
+		}
 		if i == cursor {
-			b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s %s %s%s", label, stripBadgeStyle(p), status, marker)))
+			b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s %s %s%s%s", label, stripBadgeStyle(p), status, marker, draftMarker)))
 		} else {
-			b.WriteString(fmt.Sprintf("  %s %s %s%s", label, badge, statusStyle.Render(status), dueMarkerStyle.Render(marker)))
+			b.WriteString(fmt.Sprintf("  %s %s %s%s%s", label, badge, statusStyle.Render(status), dueMarkerStyle.Render(marker), checkDimStyle.Render(draftMarker)))
 		}
 		b.WriteString("\n")
 	}
@@ -1742,6 +1821,10 @@ func (m appModel) renderProblems() string {
 	}
 
 	b.WriteString("\n")
+	if doc, ok := categoryRoadmapDocs[m.category]; ok {
+		b.WriteString(checkDimStyle.Render("roadmap: " + doc))
+		b.WriteString("\n")
+	}
 	b.WriteString(checkDimStyle.Render("type to search · ↑/↓ move · enter select · esc back"))
 	return b.String()
 }
@@ -2020,17 +2103,19 @@ var (
 )
 
 // settingsRoleLabels/settingsRoleDescs back updateSettings' top-level
-// list and renderSettings' rendering of it: the two model roles (enter
-// opens the provider choice) plus the two in-place preferences (enter
-// cycles/toggles and saves immediately — no sub-stage for a 4-value
-// cycle or a bool).
+// list and renderSettings' rendering of it: the three model roles
+// (enter opens the provider choice) plus the three in-place preferences
+// (enter cycles/toggles and saves immediately — no sub-stage for a
+// small closed cycle or a bool).
 var (
-	settingsRoleLabels = []string{"Worker model", "Orchestrator model", "Default language", "Tutor editor notes"}
+	settingsRoleLabels = []string{"Worker model", "Orchestrator model", "Grader model", "Default language", "Tutor editor notes", "Tutor mode override"}
 	settingsRoleDescs  = []string{
 		"Answers coding questions — always required",
 		"Routes turns to the worker, or answers directly — optional",
+		"Grades design submits, or the worker model if unset — optional",
 		"Skip the language picker for problems available in it — enter cycles",
 		"Let the tutor highlight lines and leave notes in the editor — enter toggles",
+		"Force a coding assistance level for every session — enter cycles",
 	}
 )
 
@@ -2045,6 +2130,7 @@ func settingsFromConfig(cfg config.Config) config.Settings {
 		OpenRouterAPIKey:  cfg.OpenRouterAPIKey,
 		DefaultLanguage:   cfg.DefaultLanguage,
 		DisableTutorNotes: cfg.DisableTutorNotes,
+		TutorModeOverride: cfg.TutorModeOverride,
 	}
 }
 
@@ -2060,6 +2146,12 @@ func (m appModel) renderSettings() string {
 	}
 	b.WriteString(checkDimStyle.Render(fmt.Sprintf("Orchestrator model: %s", orchestratorStatus)))
 	b.WriteString("\n")
+	graderStatus := m.cfg.GraderModel
+	if graderStatus == "" {
+		graderStatus = "none (uses worker model)"
+	}
+	b.WriteString(checkDimStyle.Render(fmt.Sprintf("Grader model: %s", graderStatus)))
+	b.WriteString("\n")
 	langStatus := m.cfg.DefaultLanguage
 	if langStatus == "" {
 		langStatus = "ask every time"
@@ -2071,6 +2163,12 @@ func (m appModel) renderSettings() string {
 		notesStatus = "off"
 	}
 	b.WriteString(checkDimStyle.Render(fmt.Sprintf("Tutor editor notes: %s", notesStatus)))
+	b.WriteString("\n")
+	modeStatus := m.cfg.TutorModeOverride
+	if modeStatus == "" {
+		modeStatus = "exercise default"
+	}
+	b.WriteString(checkDimStyle.Render(fmt.Sprintf("Tutor mode override: %s", modeStatus)))
 	b.WriteString("\n\n")
 
 	for i, label := range settingsRoleLabels {
@@ -2089,21 +2187,29 @@ func (m appModel) renderSettings() string {
 
 // renderProviderChoice renders the Local (Ollama) / API (OpenRouter)
 // choice for whichever role updateSettings picked (m.settingsEditing) —
-// a 3rd "None (disable routing)" entry is appended only when editing the
-// orchestrator. Copies the shared label/desc slices before appending so
-// the orchestrator-only 3rd item never leaks into the worker's list.
+// a 3rd "None" entry is appended only when editing the orchestrator or
+// grader (see settingsTargetOptional). Copies the shared label/desc
+// slices before appending so that 3rd item never leaks into the
+// worker's list.
 func (m appModel) renderProviderChoice() string {
 	labels := append([]string{}, settingsOptionLabels...)
 	descs := append([]string{}, settingsOptionDescs...)
-	if m.settingsEditing == settingsTargetOrchestrator {
+	switch m.settingsEditing {
+	case settingsTargetOrchestrator:
 		labels = append(labels, "None (disable routing)")
 		descs = append(descs, "Answer every turn with the worker model only")
+	case settingsTargetGrader:
+		labels = append(labels, "None (use worker model)")
+		descs = append(descs, "Grade design submissions with the worker model")
 	}
 
 	var b strings.Builder
 	title := "Worker model"
-	if m.settingsEditing == settingsTargetOrchestrator {
+	switch m.settingsEditing {
+	case settingsTargetOrchestrator:
 		title = "Orchestrator model"
+	case settingsTargetGrader:
+		title = "Grader model"
 	}
 	b.WriteString(hintStyle.Render(title))
 	b.WriteString("\n\n")
@@ -2126,8 +2232,11 @@ func (m appModel) renderProviderChoice() string {
 // renderOpenRouterKeyEntry's) — a model slug isn't a secret.
 func (m appModel) renderAPIModelEntry() string {
 	currentModel := m.cfg.TutorModel
-	if m.settingsEditing == settingsTargetOrchestrator {
+	switch m.settingsEditing {
+	case settingsTargetOrchestrator:
 		currentModel = m.cfg.OrchestratorModel
+	case settingsTargetGrader:
+		currentModel = m.cfg.GraderModel
 	}
 
 	var b strings.Builder

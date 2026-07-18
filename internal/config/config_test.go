@@ -19,8 +19,13 @@ func chdir(t *testing.T, dir string) {
 	t.Cleanup(func() { os.Chdir(orig) })
 }
 
-func TestLoad_DefaultsToCWD(t *testing.T) {
-	dir := t.TempDir()
+// TestLoad_DefaultsToCWDWhenCWDLooksLikeCheckout covers the ordinary
+// "ballroom run from inside the checkout" case: no PRACTICE_ROOT, cwd
+// itself has docker/Dockerfile, so Root/ExercisesDir/TestsDir/DBPath
+// all resolve straight off it, same as before ResolveRoot existed.
+func TestLoad_DefaultsToCWDWhenCWDLooksLikeCheckout(t *testing.T) {
+	withRootCache(t)
+	dir := checkoutDir(t)
 	// resolve symlinks (macOS TempDir can be under /var -> /private/var)
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {
@@ -48,6 +53,53 @@ func TestLoad_DefaultsToCWD(t *testing.T) {
 	}
 }
 
+// TestLoad_FallsBackToCachedRootWhenCWDIsNotACheckout is issue #255's
+// core fix: `go install ./cmd/ballroom` then running `ballroom` from
+// $HOME (or anywhere else outside the checkout) must still populate
+// real exercises/tests/data dirs, not silently resolve them under
+// $HOME. It does, via the same cached-checkout-root fallback the
+// docker build root already used (see ResolveRoot).
+func TestLoad_FallsBackToCachedRootWhenCWDIsNotACheckout(t *testing.T) {
+	cachePath := withRootCache(t)
+	realCheckout := checkoutDir(t)
+	cacheRoot(cachePath, realCheckout)
+
+	chdir(t, t.TempDir()) // stand-in for $HOME: not a checkout
+	t.Setenv("PRACTICE_ROOT", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Root != realCheckout {
+		t.Errorf("Root = %q, want the cached checkout %q", cfg.Root, realCheckout)
+	}
+	if want := filepath.Join(realCheckout, "exercises"); cfg.ExercisesDir != want {
+		t.Errorf("ExercisesDir = %q, want %q", cfg.ExercisesDir, want)
+	}
+	if want := filepath.Join(realCheckout, "data", "tracker.db"); cfg.DBPath != want {
+		t.Errorf("DBPath = %q, want %q", cfg.DBPath, want)
+	}
+}
+
+// TestLoad_ErrorsClearlyWhenCWDIsNotACheckoutAndNoCacheExists is the
+// other half of the fallback: a genuinely fresh machine (never run
+// ballroom from inside the checkout, so nothing is cached) must fail
+// loud with an explanation, not silently boot into an empty picker.
+func TestLoad_ErrorsClearlyWhenCWDIsNotACheckoutAndNoCacheExists(t *testing.T) {
+	withRootCache(t) // isolated, empty cache
+	chdir(t, t.TempDir())
+	t.Setenv("PRACTICE_ROOT", "")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected Load to error when cwd isn't a checkout and nothing is cached")
+	}
+	if !strings.Contains(err.Error(), "docker/Dockerfile") {
+		t.Errorf("Load err = %v, want it to explain the missing checkout", err)
+	}
+}
+
 func TestLoad_RespectsRootEnvOverride(t *testing.T) {
 	dir := t.TempDir()
 	resolved, err := filepath.EvalSymlinks(dir)
@@ -65,7 +117,31 @@ func TestLoad_RespectsRootEnvOverride(t *testing.T) {
 	}
 }
 
+// TestLoad_RootEnvOverrideBypassesCheckoutValidation: PRACTICE_ROOT is
+// trusted as-is even when it doesn't look like a real checkout (no
+// docker/Dockerfile) -- the explicit escape hatch this codebase's own
+// tests rely on to sandbox Load into a throwaway temp dir, distinct
+// from the no-override fallback-to-cache path.
+func TestLoad_RootEnvOverrideBypassesCheckoutValidation(t *testing.T) {
+	withRootCache(t) // empty cache -- if this were consulted, Load would error
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	t.Setenv("PRACTICE_ROOT", resolved)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v, want PRACTICE_ROOT trusted without checkout validation", err)
+	}
+	if cfg.Root != resolved {
+		t.Errorf("Root = %q, want %q", cfg.Root, resolved)
+	}
+}
+
 func TestLoad_DefaultDockerImage(t *testing.T) {
+	t.Setenv("PRACTICE_ROOT", t.TempDir())
 	t.Setenv("PRACTICE_DOCKER_IMAGE", "")
 	cfg, err := Load()
 	if err != nil {
@@ -77,6 +153,7 @@ func TestLoad_DefaultDockerImage(t *testing.T) {
 }
 
 func TestLoad_DockerImageOverride(t *testing.T) {
+	t.Setenv("PRACTICE_ROOT", t.TempDir())
 	t.Setenv("PRACTICE_DOCKER_IMAGE", "custom-image")
 	cfg, err := Load()
 	if err != nil {
@@ -444,5 +521,68 @@ func TestLoad_InvalidDefaultLanguageFailsLoud(t *testing.T) {
 	_, err := Load()
 	if err == nil || !strings.Contains(err.Error(), "default_language") {
 		t.Fatalf("Load err = %v, want an error naming default_language", err)
+	}
+}
+
+// TestSaveSettings_ThenLoadRoundTripsTutorModeOverride and its Load
+// sibling below mirror DefaultLanguage's exact round-trip/validation
+// shape (issue #255's per-session tutor-mode override) -- same "" =
+// exercise default, hand-edited garbage fails loud rather than silently
+// falling back.
+func TestSaveSettings_ThenLoadRoundTripsTutorModeOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	in := Settings{TutorModel: "m", TutorModeOverride: "syntax-only"}
+	if err := SaveSettings(path, in); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	got, err := LoadSettings(path)
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if got.TutorModeOverride != "syntax-only" {
+		t.Errorf("TutorModeOverride = %q, want %q", got.TutorModeOverride, "syntax-only")
+	}
+}
+
+func TestLoad_ReadsPersistedTutorModeOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PRACTICE_ROOT", dir)
+	if err := SaveSettings(filepath.Join(dir, "data", "settings.json"), Settings{TutorModeOverride: "hints-first"}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.TutorModeOverride != "hints-first" {
+		t.Errorf("TutorModeOverride = %q, want %q", cfg.TutorModeOverride, "hints-first")
+	}
+}
+
+func TestLoad_TutorModeOverrideEmptyByDefault(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PRACTICE_ROOT", dir)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.TutorModeOverride != "" {
+		t.Errorf("TutorModeOverride = %q, want empty (exercise default) when nothing persisted", cfg.TutorModeOverride)
+	}
+}
+
+// TestLoad_InvalidTutorModeOverrideFailsLoud: same fail-loud contract
+// as TestLoad_InvalidDefaultLanguageFailsLoud -- a hand-edited
+// settings.json with an unsupported value must not silently be treated
+// as "exercise default".
+func TestLoad_InvalidTutorModeOverrideFailsLoud(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PRACTICE_ROOT", dir)
+	if err := SaveSettings(filepath.Join(dir, "data", "settings.json"), Settings{TutorModeOverride: "godmode"}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "tutor_mode_override") {
+		t.Fatalf("Load err = %v, want an error naming tutor_mode_override", err)
 	}
 }
