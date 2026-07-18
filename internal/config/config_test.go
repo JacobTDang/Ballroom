@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -389,5 +390,51 @@ func TestLoad_OrchestratorModelEmptyByDefault(t *testing.T) {
 	}
 	if cfg.OrchestratorModel != "" {
 		t.Errorf("OrchestratorModel = %q, want empty (routing off by default)", cfg.OrchestratorModel)
+	}
+}
+
+func TestSaveSettings_ThenLoadRoundTripsDefaultLanguageAndNotesToggle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	in := Settings{TutorModel: "m", DefaultLanguage: "go", DisableTutorNotes: true}
+	if err := SaveSettings(path, in); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	got, err := LoadSettings(path)
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if got.DefaultLanguage != "go" || !got.DisableTutorNotes {
+		t.Errorf("round-trip = %+v, want DefaultLanguage go and DisableTutorNotes true", got)
+	}
+}
+
+func TestLoad_ReadsPersistedDefaultLanguageAndNotesToggle(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PRACTICE_ROOT", dir)
+	if err := SaveSettings(filepath.Join(dir, "data", "settings.json"), Settings{DefaultLanguage: "cpp", DisableTutorNotes: true}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DefaultLanguage != "cpp" || !cfg.DisableTutorNotes {
+		t.Errorf("cfg = DefaultLanguage %q DisableTutorNotes %v, want cpp/true", cfg.DefaultLanguage, cfg.DisableTutorNotes)
+	}
+}
+
+// TestLoad_InvalidDefaultLanguageFailsLoud: a hand-edited settings.json
+// with an unsupported language must fail Load rather than silently
+// behaving as "ask every time" — the user asked for a default and
+// would otherwise never learn it isn't being honored.
+func TestLoad_InvalidDefaultLanguageFailsLoud(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PRACTICE_ROOT", dir)
+	if err := SaveSettings(filepath.Join(dir, "data", "settings.json"), Settings{DefaultLanguage: "java"}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "default_language") {
+		t.Fatalf("Load err = %v, want an error naming default_language", err)
 	}
 }

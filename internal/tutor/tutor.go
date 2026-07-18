@@ -77,6 +77,12 @@ type Config struct {
 	// tests and headless callers. A real session gets the workspace
 	// copy plus a mirror under the persistent /data mount.
 	TranscriptPaths []string
+	// DisableEditorNotes removes the highlight_lines tool from the
+	// session entirely (the Settings toggle, forwarded as
+	// PRACTICE_TUTOR_NOTES=off) -- notes stop at the source, unlike the
+	// in-session M-h keybind, which only hides rendering of notes that
+	// already exist.
+	DisableEditorNotes bool
 }
 
 // providerEndpoint returns a human-readable description of where a

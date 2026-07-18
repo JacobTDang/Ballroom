@@ -395,6 +395,10 @@ func tutorCmd() error {
 		NvimSocket:      os.Getenv("NVIM_SOCKET"),
 		MaxContextBytes: maxContextBytes,
 		TranscriptPaths: transcriptPaths(workDir),
+		// The Settings toggle rides the session env (see
+		// orchestrator's tutorNotesEnvValue): "off" is the only
+		// disabling value, anything else keeps the tool.
+		DisableEditorNotes: os.Getenv("PRACTICE_TUTOR_NOTES") == "off",
 	}
 	return tutor.Run(context.Background(), cfg, os.Stdin, os.Stdout)
 }
