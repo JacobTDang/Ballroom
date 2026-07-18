@@ -30,7 +30,7 @@ import (
 // (an exercise with no draft saved), is a complete no-op: today's
 // behavior, unchanged.
 func PrepareWorkspace(repoPath, videoURL, draftDir string) (workspaceDir string, cleanup func(), err error) {
-	dir, err := os.MkdirTemp("", "practice-workspace-")
+	dir, err := os.MkdirTemp("", workspaceDirPrefix)
 	if err != nil {
 		return "", nil, fmt.Errorf("orchestrator: create workspace dir: %w", err)
 	}

@@ -20,6 +20,13 @@ import (
 )
 
 func main() {
+	// Best-effort, non-blocking: reclaims practice-workspace-*/
+	// practice-control-* dirs a past session never got the chance to
+	// clean up after itself (e.g. the terminal window was closed before
+	// issue #231's signal handling existed). Fire-and-forget so it never
+	// delays startup -- there's always a next launch to catch up on it.
+	go orchestrator.SweepStaleSessionDirs()
+
 	args := os.Args[1:]
 
 	if len(args) == 0 {
