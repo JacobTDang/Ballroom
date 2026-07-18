@@ -11,6 +11,31 @@ SESSION="${SESSION_NAME:-practice}"
 WORKDIR="${WORKDIR:-/workspace}"
 TMUX_CONF="${TMUX_CONF:-/etc/practice/tmux.conf}"
 
+# NVIM_SOCKET is resolved and exported here -- before the tmux server
+# starts below -- so it lands in the server's captured global
+# environment: every pane tmux spawns afterward (send-keys, split-window)
+# inherits that environment, which is what lets both the M-h keybinding
+# (tmux.conf's run-shell string, `${NVIM_SOCKET:-...}`) and this script's
+# own later `nvim --listen` invocation agree on the same socket path
+# instead of each hardcoding the default separately.
+export NVIM_SOCKET="${NVIM_SOCKET:-/tmp/ballroom-nvim.sock}"
+
+# Container uptime at session start, in seconds since this container's
+# kernel booted (the Docker Desktop Linux VM, on a Mac host) -- read and
+# exported here for the same env-propagation reason as NVIM_SOCKET
+# above. internal/session's Submit reads this back (PRACTICE_START_UPTIME)
+# to compute time_spent_min against uptime instead of wall clock: the VM
+# is suspended along with the host laptop, so uptime elapsed reflects
+# real working time across a sleep/lid-close, unlike PRACTICE_STARTED_AT's
+# wall-clock RFC3339 timestamp, which keeps advancing through a suspend
+# (issue #229; see docker/clock.sh for the matching fix to the visible
+# countdown). `|| true` degrades to leaving the var unset rather than
+# aborting the whole session under `set -e` in the -- essentially
+# theoretical -- case /proc/uptime can't be read; every consumer already
+# treats an absent/empty value as "fall back to wall clock".
+read -r PRACTICE_START_UPTIME _ < /proc/uptime || true
+export PRACTICE_START_UPTIME
+
 # A session created detached (-d, no client ever attached) has no
 # established window size on this image's tmux (3.4) until a client
 # attaches — and `split-window -p` (percentage) errors with "size
@@ -32,20 +57,30 @@ BOTTOM_LINES=$((REAL_ROWS / 4))
 
 tmux -f "$TMUX_CONF" new-session -d -s "$SESSION" -n MAIN -c "$WORKDIR" -x "$REAL_COLS" -y "$REAL_ROWS"
 
-# Visible countdown clock: timed exercise sessions carry the same two
-# env vars the tutor's own interview-clock note reads (forwarded by the
-# host's orchestrator), so the status bar can show the user the clock
-# the model already sees. Appended to status-right at the far-right
-# edge; refreshes on the conf's status-interval. Sandbox sessions set
-# neither var and keep the plain status bar. The numeric guard matters
-# under set -e: a bare `[ ... -gt 0 ]` on a non-numeric value would
-# abort the whole entrypoint.
+# Visible countdown clock: timed exercise sessions carry PRACTICE_STARTED_AT
+# and PRACTICE_TIME_LIMIT_MIN (forwarded by the host's orchestrator; the
+# tutor's own interview-clock note reads the same two), so the status
+# bar can show the user the clock the model already sees. Appended to
+# status-right at the far-right edge; refreshes on the conf's
+# status-interval. Sandbox sessions set neither var and keep the plain
+# status bar. The numeric guard matters under set -e: a bare
+# `[ ... -gt 0 ]` on a non-numeric value would abort the whole
+# entrypoint.
+#
+# The deadline itself is computed in uptime terms (PRACTICE_START_UPTIME,
+# read above), not from PRACTICE_STARTED_AT -- clock.sh diffs it against
+# a live /proc/uptime read on every status-bar refresh (issue #229).
+# PRACTICE_STARTED_AT's presence is still the "is this a real timed
+# session" guard, matching PRACTICE_TIME_LIMIT_MIN's own presence check
+# in the exercise-session args (see internal/orchestrator's
+# exerciseRunArgs, which sets both together).
 if [ -n "${PRACTICE_STARTED_AT:-}" ] \
+  && [ -n "${PRACTICE_START_UPTIME:-}" ] \
   && [[ "${PRACTICE_TIME_LIMIT_MIN:-}" =~ ^[0-9]+$ ]] \
-  && [ "$PRACTICE_TIME_LIMIT_MIN" -gt 0 ] \
-  && START_EPOCH=$(date -d "$PRACTICE_STARTED_AT" +%s 2>/dev/null); then
-  DEADLINE=$((START_EPOCH + PRACTICE_TIME_LIMIT_MIN * 60))
-  tmux set -g status-right "$(tmux show -gv status-right)#[fg=#E0468C]·#[default]  #(/etc/practice/clock.sh $DEADLINE) "
+  && [ "$PRACTICE_TIME_LIMIT_MIN" -gt 0 ]; then
+  START_UPTIME_S="${PRACTICE_START_UPTIME%.*}"
+  DEADLINE_UPTIME=$((START_UPTIME_S + PRACTICE_TIME_LIMIT_MIN * 60))
+  tmux set -g status-right "$(tmux show -gv status-right)#[fg=#E0468C]·#[default]  #(/etc/practice/clock.sh $DEADLINE_UPTIME) "
 fi
 
 # pane 0 (top, full width): editor. Open directly into the solution file
@@ -59,14 +94,11 @@ fi
 # all, e.g. sandbox mode) when there's no problem.md.
 #
 # --listen exposes an RPC socket so the tutor pane can drive
-# highlights/notes in the running nvim instance (issue #24). The socket
-# path is a well-known /tmp location (shared by every process in the
-# container, regardless of WORKDIR) rather than something discovered via
-# tmux env propagation — we're already constructing every pane's command
-# right here, so just pass it to the ones that need it explicitly. rm -f
-# first: a stale socket file from a previous run in the same container
-# would otherwise make nvim refuse to bind.
-NVIM_SOCKET="${NVIM_SOCKET:-/tmp/ballroom-nvim.sock}"
+# highlights/notes in the running nvim instance (issue #24), at the
+# well-known /tmp location NVIM_SOCKET was resolved to above (shared by
+# every process in the container, regardless of WORKDIR). rm -f first: a
+# stale socket file from a previous run in the same container would
+# otherwise make nvim refuse to bind.
 rm -f "$NVIM_SOCKET"
 SOLUTION_FILE=$(find "$WORKDIR" -maxdepth 1 -name 'solution.*' -type f | head -n1)
 # Prefer the plain-text render (problem.txt, written by the host's

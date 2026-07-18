@@ -208,20 +208,23 @@ func submitCmd() error {
 	if err != nil {
 		return fmt.Errorf("submit: parse PRACTICE_STARTED_AT: %w", err)
 	}
+	startUptime, hasStartUptime := startUptimeFromEnv()
 
 	cfg := session.Config{
-		ControlDir:    os.Getenv("PRACTICE_CONTROL_DIR"),
-		WorkspaceDir:  os.Getenv("PRACTICE_WORKSPACE_DIR"),
-		TestCommand:   os.Getenv("PRACTICE_TEST_COMMAND"),
-		ExerciseID:    os.Getenv("PRACTICE_EXERCISE_ID"),
-		Category:      os.Getenv("PRACTICE_CATEGORY"),
-		Language:      os.Getenv("PRACTICE_LANGUAGE"),
-		Kind:          os.Getenv("PRACTICE_KIND"),
-		VideoURL:      os.Getenv("PRACTICE_VIDEO_URL"),
-		StartedAt:     startedAt,
-		DBPath:        os.Getenv("PRACTICE_DB_PATH"),
-		PollInterval:  200 * time.Millisecond,
-		RevealTimeout: 30 * time.Second,
+		ControlDir:     os.Getenv("PRACTICE_CONTROL_DIR"),
+		WorkspaceDir:   os.Getenv("PRACTICE_WORKSPACE_DIR"),
+		TestCommand:    os.Getenv("PRACTICE_TEST_COMMAND"),
+		ExerciseID:     os.Getenv("PRACTICE_EXERCISE_ID"),
+		Category:       os.Getenv("PRACTICE_CATEGORY"),
+		Language:       os.Getenv("PRACTICE_LANGUAGE"),
+		Kind:           os.Getenv("PRACTICE_KIND"),
+		VideoURL:       os.Getenv("PRACTICE_VIDEO_URL"),
+		StartedAt:      startedAt,
+		StartUptime:    startUptime,
+		HasStartUptime: hasStartUptime,
+		DBPath:         os.Getenv("PRACTICE_DB_PATH"),
+		PollInterval:   200 * time.Millisecond,
+		RevealTimeout:  30 * time.Second,
 	}
 
 	if cfg.Kind == exercise.KindDesign {
@@ -237,6 +240,26 @@ func submitCmd() error {
 	}
 	fmt.Printf("logged attempt #%d\n", attempt.ID)
 	return nil
+}
+
+// startUptimeFromEnv parses PRACTICE_START_UPTIME -- the container's
+// /proc/uptime reading at session start, exported by
+// docker/entrypoint.sh before the tmux server starts so every pane
+// (including this one, however much later `ballroom submit` runs here)
+// inherits it. ok is false when the var is unset or unparsable (an
+// older container image, or a non-Linux/test host), telling
+// session.Submit to fall back to wall clock (see
+// internal/session/clock.go).
+func startUptimeFromEnv() (float64, bool) {
+	raw := os.Getenv("PRACTICE_START_UPTIME")
+	if raw == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
 }
 
 // graderModelFromEnv picks the model design grading runs on: the
