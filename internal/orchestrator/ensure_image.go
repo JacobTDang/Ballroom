@@ -16,25 +16,46 @@ import (
 // the same machine.
 const ballroomImageLabel = "com.ballroom.app"
 
-// EnsureImage builds cfg.DockerImage if it doesn't already exist,
-// printing docker build's output directly to stdout as it runs — used by
-// the CLI's direct exercise/sandbox launch paths (`ballroom practice`,
+// contentLabel is the docker image label BuildImage stamps with the
+// building checkout's contentHash, and EnsureImage later reads back to
+// decide whether cfg.DockerImage is still up to date — see
+// imageNeedsRebuild.
+const contentLabel = "com.ballroom.content"
+
+// EnsureImage builds cfg.DockerImage if it doesn't already exist, or
+// rebuilds it if the checkout's content has drifted from what the
+// existing image was built from (see contentHash, imageNeedsRebuild) —
+// e.g. an edited docker/tmux.conf, a docker/nvim/ tweak, or a change
+// under cmd/ or internal/ that changes the in-container ballroom binary.
+// Build output is printed directly to stdout as it runs — used by the
+// CLI's direct exercise/sandbox launch paths (`ballroom practice`,
 // `ballroom sandbox`), which don't go through the boot screen's own
-// live-streaming build UI. Errors are non-fatal: if Docker itself isn't
-// reachable, there's nothing to do here — the boot screen's own checks
-// surface that clearly instead.
+// live-streaming build UI. Errors are non-fatal only in one case: if
+// Docker itself isn't reachable, there's nothing to do here — the boot
+// screen's own checks surface that clearly instead.
 func EnsureImage(cfg config.Config) error {
 	if exec.Command("docker", "info").Run() != nil {
 		return nil
 	}
 
-	out, err := exec.Command("docker", "image", "inspect", cfg.DockerImage, "--format", "{{.Id}}").Output()
-	if err == nil && strings.TrimSpace(string(out)) != "" {
+	root, err := dockerBuildRoot(cfg.Root)
+	if err != nil {
+		return err
+	}
+
+	want, err := contentHash(root)
+	if err != nil {
+		return err
+	}
+
+	labelFormat := fmt.Sprintf(`{{index .Config.Labels %q}}`, contentLabel)
+	out, err := exec.Command("docker", "image", "inspect", cfg.DockerImage, "--format", labelFormat).Output()
+	if err == nil && !imageNeedsRebuild(strings.TrimSpace(string(out)), want) {
 		cleanupDanglingBallroomImages()
 		return nil
 	}
 
-	fmt.Printf("Practice image %q not found — building it now (this can take a minute or two)...\n\n", cfg.DockerImage)
+	fmt.Printf("Practice image %q needs building (this can take a minute or two)...\n\n", cfg.DockerImage)
 	lineCh, errCh := BuildImage(cfg)
 	for line := range lineCh {
 		fmt.Println(line)
@@ -44,12 +65,26 @@ func EnsureImage(cfg config.Config) error {
 	return buildErr
 }
 
-// BuildImage runs `docker build` for cfg.DockerImage, streaming each
-// output line on the returned channel (closed once the build's output
-// ends) and sending exactly one final result (nil on success) on the
-// error channel. On success, also cleans up stale ballroom images left
-// over from a previous build (see cleanupDanglingBallroomImages) — the
-// caller doesn't need to do this separately.
+// imageNeedsRebuild reports whether an image whose recorded contentLabel
+// value is label should be rebuilt to match want, the freshly computed
+// hash of the current checkout. An empty label means either the image
+// doesn't exist yet or it predates this label existing at all (built by
+// an older ballroom binary) — treated the same as a mismatch, so it
+// rebuilds exactly once to pick up labeling and never again for that
+// reason alone.
+func imageNeedsRebuild(label, want string) bool {
+	return label == "" || label != want
+}
+
+// BuildImage runs `docker build` for cfg.DockerImage, tagging it with
+// contentLabel set to the current checkout's contentHash so a later
+// EnsureImage call can tell whether it's still up to date (see
+// imageNeedsRebuild). Streams each output line on the returned channel
+// (closed once the build's output ends) and sends exactly one final
+// result (nil on success) on the error channel. On success, also cleans
+// up stale ballroom images left over from a previous build (see
+// cleanupDanglingBallroomImages) — the caller doesn't need to do this
+// separately.
 func BuildImage(cfg config.Config) (<-chan string, <-chan error) {
 	lineCh := make(chan string, 200)
 	errCh := make(chan error, 1)
@@ -64,8 +99,20 @@ func BuildImage(cfg config.Config) (<-chan string, <-chan error) {
 			return
 		}
 
+		hash, err := contentHash(root)
+		if err != nil {
+			close(lineCh)
+			errCh <- err
+			return
+		}
+
 		pr, pw := io.Pipe()
-		cmd := exec.Command("docker", "build", "-f", "docker/Dockerfile", "-t", cfg.DockerImage, ".")
+		cmd := exec.Command("docker", "build",
+			"-f", "docker/Dockerfile",
+			"-t", cfg.DockerImage,
+			"--label", contentLabel+"="+hash,
+			".",
+		)
 		cmd.Dir = root
 		cmd.Stdout = pw
 		cmd.Stderr = pw
