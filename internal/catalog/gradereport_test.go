@@ -99,6 +99,25 @@ func TestCodingWeakSpots_RanksByFailRatioWithThreshold(t *testing.T) {
 	}
 }
 
+// TestCodingWeakSpots_CountsGaveUpAsAFail covers issue #238: asking to
+// see the reference before solving it is a miss just like an outright
+// failure -- it must count on the fail side of the ratio, not vanish
+// as if it were a pass or never happened at all.
+func TestCodingWeakSpots_CountsGaveUpAsAFail(t *testing.T) {
+	attempts := []tracker.Attempt{
+		{Category: "backtracking", Result: tracker.ResultGaveUp},
+		{Category: "backtracking", Result: tracker.ResultGaveUp},
+		{Category: "backtracking", Result: tracker.ResultPass},
+	}
+	got := CodingWeakSpots(attempts, 3)
+	if len(got) != 1 {
+		t.Fatalf("CodingWeakSpots = %+v, want backtracking counted as a weak spot", got)
+	}
+	if got[0].Category != "backtracking" || got[0].Fails != 2 || got[0].Attempts != 3 {
+		t.Errorf("weak spot = %+v, want backtracking 2/3 (both gave-ups counted as fails)", got[0])
+	}
+}
+
 func TestCodingWeakSpots_ExcludesDesignAndBehavioralTracks(t *testing.T) {
 	attempts := []tracker.Attempt{
 		{Category: "system-design", Result: tracker.ResultFail},

@@ -119,6 +119,29 @@ func TestRenderHomeboard_ShowsTracksDueDailyStreakRecent(t *testing.T) {
 	}
 }
 
+// TestRenderHomeboard_GaveUpGetsItsOwnThirdGlyph covers issue #238: the
+// recent-activity row must distinguish "gave up" from both a genuine
+// pass and a genuine fail, not silently collapse into the fail glyph.
+func TestRenderHomeboard_GaveUpGetsItsOwnThirdGlyph(t *testing.T) {
+	attempts := []tracker.Attempt{
+		{ExerciseID: "two-pointers-01-go", Result: tracker.ResultPass, Date: "2026-07-16"},
+		{ExerciseID: "off-by-one-01-python", Result: tracker.ResultFail, Date: "2026-07-17"},
+		{ExerciseID: "bloom-filter-01-go", Result: tracker.ResultGaveUp, Date: "2026-07-18"},
+	}
+
+	got := stripAnsiTUI(renderHomeboard(homeboardFixtureProblems(), attempts, time.Now()))
+
+	if !strings.Contains(got, "~ bloom-filter-01-go") {
+		t.Errorf("homeboard missing a distinct gave-up glyph for bloom-filter-01-go:\n%s", got)
+	}
+	if !strings.Contains(got, "✗ off-by-one-01-python") {
+		t.Errorf("homeboard missing the fail glyph for off-by-one-01-python:\n%s", got)
+	}
+	if !strings.Contains(got, "✓ two-pointers-01-go") {
+		t.Errorf("homeboard missing the pass glyph for two-pointers-01-go:\n%s", got)
+	}
+}
+
 func TestRenderHomeboard_EmptyDataDegradesQuietly(t *testing.T) {
 	got := stripAnsiTUI(renderHomeboard(nil, nil, time.Now()))
 	if strings.TrimSpace(got) != "" {
