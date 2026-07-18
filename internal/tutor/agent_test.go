@@ -176,16 +176,19 @@ func TestNewAgent_SurvivesManyToolCallRoundsWithinRaisedMaxStep(t *testing.T) {
 func TestNewChatModel_RoutesOpenRouterPrefixedModelToOpenAICompatibleClient(t *testing.T) {
 	var gotModel string
 	var gotAuth string
+	var gotTemperature *float32
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		var req struct {
-			Model string `json:"model"`
+			Model       string   `json:"model"`
+			Temperature *float32 `json:"temperature"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		gotModel = req.Model
+		gotTemperature = req.Temperature
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": "chatcmpl-test", "object": "chat.completion", "created": 1,
@@ -224,6 +227,12 @@ func TestNewChatModel_RoutesOpenRouterPrefixedModelToOpenAICompatibleClient(t *t
 	}
 	if gotAuth != "Bearer sk-test-key" {
 		t.Errorf("Authorization header = %q, want %q", gotAuth, "Bearer sk-test-key")
+	}
+	// Both providers should run the tutor at the same low temperature —
+	// the OpenRouter path used to omit it entirely, leaving tone/behavior
+	// consistency to whatever the provider's default sampling was.
+	if gotTemperature == nil || *gotTemperature != 0.2 {
+		t.Errorf("request temperature = %v, want the Ollama path's 0.2 on OpenRouter requests too", gotTemperature)
 	}
 }
 
