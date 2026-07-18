@@ -1,0 +1,12 @@
+{
+  "id": "webhooks-01-interviewer",
+  "problem_id": "webhooks-01",
+  "title": "Order Events: the Webhook Surface",
+  "kind": "design",
+  "category": "api-design",
+  "language": "interviewer",
+  "time_limit_min": 45,
+  "tutor_mode": "interviewer",
+  "repo_path": "./repo",
+  "difficulty": "hard"
+}
