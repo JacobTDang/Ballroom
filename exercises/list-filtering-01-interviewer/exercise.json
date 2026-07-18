@@ -1,0 +1,12 @@
+{
+  "id": "list-filtering-01-interviewer",
+  "problem_id": "list-filtering-01",
+  "title": "Filter and Order the Fleet",
+  "kind": "design",
+  "category": "api-design",
+  "language": "interviewer",
+  "time_limit_min": 45,
+  "tutor_mode": "interviewer",
+  "repo_path": "./repo",
+  "difficulty": "hard"
+}
