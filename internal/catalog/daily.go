@@ -33,11 +33,17 @@ func DailyPick(problems []ProblemStatus, now time.Time) (ProblemStatus, bool) {
 		}
 	}
 	// Nothing at the gated difficulty (every easy problem solved while
-	// still under the next threshold): widen rather than leave the day
-	// without an assignment.
-	if len(candidates) == 0 {
+	// still under the next threshold): widen one rank at a time rather
+	// than all the way open. Jumping straight to "anything unsolved"
+	// would hand out exactly the hard problem the gate existed to
+	// withhold, when a medium was sitting right there.
+	for rank := 0; len(candidates) == 0 && rank < len(difficultyRanks); rank++ {
+		widened := map[string]bool{"": true}
+		for i := 0; i <= rank; i++ {
+			widened[difficultyRanks[i]] = true
+		}
 		for _, p := range problems {
-			if Due(p, now) || !p.Solved {
+			if !p.Solved && widened[problemDifficulty(p)] {
 				candidates = append(candidates, p)
 			}
 		}
