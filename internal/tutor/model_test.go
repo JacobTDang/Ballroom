@@ -96,9 +96,9 @@ func TestTutorModel_WindowSizeMsg_ViewportAndTextareaHeightsSumWithinTerminal(t 
 	got := newM.(tutorModel)
 
 	border := textareaBoxStyle.GetVerticalFrameSize()
-	total := got.viewport.Height + got.textarea.Height() + border
+	total := got.viewport.Height + got.textarea.Height() + border + statusBarHeight
 	if total > 30 {
-		t.Errorf("viewport(%d) + textarea(%d) + border(%d) = %d, want <= terminal height 30", got.viewport.Height, got.textarea.Height(), border, total)
+		t.Errorf("viewport(%d) + textarea(%d) + border(%d) + statusbar(%d) = %d, want <= terminal height 30", got.viewport.Height, got.textarea.Height(), border, statusBarHeight, total)
 	}
 }
 
@@ -194,24 +194,22 @@ func TestTutorModel_View_RendersBothViewportAndTextarea(t *testing.T) {
 	}
 }
 
-// TestTutorModel_TextareaHasTopRuleOnlyNoSideBorder is a regression test
-// for a real UI complaint: the input box's full rounded border used to
-// have a colored left edge running the full height of the box, which
-// read visually as a persistent vertical "sidebar" down the pane. Only
-// a top rule should separate the input from the conversation above it
-// now, with no left/right/bottom border characters.
-func TestTutorModel_TextareaHasTopRuleOnlyNoSideBorder(t *testing.T) {
+// TestTutorModel_InputIsFullRoundedBox pins the input's opencode-style
+// full rounded frame — an explicit user choice (2026-07-17 restyle)
+// superseding the earlier top-rule-only design. The original
+// "sidebar" complaint that killed the first full box was about its
+// bright teal left edge; this frame is the dim structural paneRule,
+// which the user accepted knowingly (see textareaBoxStyle's doc
+// comment in styles.go).
+func TestTutorModel_InputIsFullRoundedBox(t *testing.T) {
 	m := newTutorLayoutOnly()
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = newM.(tutorModel)
 
 	out := m.View()
-	if !strings.Contains(out, "─") {
-		t.Error("View() missing the top rule separating input from the conversation")
-	}
-	for _, sideChar := range []string{"│", "╭", "╮", "╰", "╯"} {
-		if strings.Contains(out, sideChar) {
-			t.Errorf("View() contains %q, want no left/right/bottom border characters (the box should be a top rule only)", sideChar)
+	for _, corner := range []string{"╭", "╮", "╰", "╯"} {
+		if !strings.Contains(out, corner) {
+			t.Errorf("View() missing %q, want the input framed as a full rounded box", corner)
 		}
 	}
 }
@@ -416,36 +414,21 @@ func TestNewTutorModel_NoRoutingHeaderAndHistorySeededWithSystemPrompt(t *testin
 	if len(m.history) != 1 || m.history[0].Role != schema.System {
 		t.Fatalf("history = %+v, want exactly one System message seeded", m.history)
 	}
-	status := m.headerStatusText()
-	if !strings.Contains(status, cfg.Model) || !strings.Contains(status, cfg.Mode) || strings.Contains(status, "+") {
-		t.Errorf("header status = %q, want it to name the model and mode and not mention a second model", status)
+	status := m.statusLeftText()
+	if !strings.Contains(status, cfg.Model) || strings.Contains(status, "+") {
+		t.Errorf("status bar left = %q, want it to name the model and not mention a second model", status)
 	}
-	if header := m.headerView(); strings.Contains(header, "orchestrator") {
-		t.Errorf("header = %q, want no routing mention without an orchestrator", header)
-	}
-}
-
-func TestNewTutorModel_RoutingEnabledHeaderNamesBothModels(t *testing.T) {
-	mock := newSequencedOllama(t, "reply")
-	cfg := testConfig(mock.URL)
-	cfg.Model = "worker-model"
-	cfg.OrchestratorModel = "orchestrator-model"
-
-	m, err := newTutorModel(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("newTutorModel: %v", err)
-	}
-	status := m.headerStatusText()
-	if !strings.Contains(status, "worker-model") || !strings.Contains(status, "orchestrator-model") {
-		t.Errorf("header status = %q, want it to name both models", status)
+	if bar := m.statusBarView(); strings.Contains(bar, "orchestrator") {
+		t.Errorf("status bar = %q, want no routing mention without an orchestrator", bar)
 	}
 }
 
-// TestTutorModel_HeaderPinnedAboveViewportWithEndpointAndExitHint pins
-// the header's contract: it renders at the top of every frame (not as
-// a transcript entry that scrolls away), shows the endpoint, and keeps
-// the exit hint the old banner used to carry.
-func TestTutorModel_HeaderPinnedAboveViewportWithEndpointAndExitHint(t *testing.T) {
+// TestTutorModel_StatusBarPinnedBelowInputWithEndpointAndExitHint pins
+// the status bar's contract: it renders as the last line of every
+// frame (not as a transcript entry that scrolls away), shows the
+// session's identity and endpoint, and keeps the exit hint the old
+// header carried.
+func TestTutorModel_StatusBarPinnedBelowInputWithEndpointAndExitHint(t *testing.T) {
 	mock := newSequencedOllama(t, "reply")
 	cfg := testConfig(mock.URL)
 	cfg.Mode = exercise.TutorModeSyntaxOnly
@@ -458,49 +441,19 @@ func TestTutorModel_HeaderPinnedAboveViewportWithEndpointAndExitHint(t *testing.
 	m = newM.(tutorModel)
 
 	view := m.View()
-	topLine := strings.SplitN(view, "\n", 2)[0]
-	plainTop := stripAnsiTest(topLine)
-	if !strings.Contains(plainTop, "tutor") || !strings.Contains(plainTop, cfg.Model) {
-		t.Errorf("View's first line = %q, want the header status line pinned there", plainTop)
+	lines := strings.Split(view, "\n")
+	plainLast := stripAnsiTest(lines[len(lines)-1])
+	if !strings.Contains(plainLast, cfg.Model) || !strings.Contains(plainLast, strings.ToUpper(cfg.Mode)) {
+		t.Errorf("View's last line = %q, want the model and mode pill pinned there", plainLast)
 	}
-	if !strings.Contains(plainTop, mock.URL) {
-		t.Errorf("View's first line = %q, want the endpoint (%s) shown on the right", plainTop, mock.URL)
+	if !strings.Contains(plainLast, mock.URL) {
+		t.Errorf("View's last line = %q, want the endpoint (%s) shown on the right", plainLast, mock.URL)
 	}
-	if !strings.Contains(plainTop, "Ctrl-D") {
-		t.Errorf("View's first line = %q, want the Ctrl-D exit hint kept from the old banner", plainTop)
+	if !strings.Contains(plainLast, "ctrl+d") {
+		t.Errorf("View's last line = %q, want the ctrl+d exit hint kept from the old header", plainLast)
 	}
 	if len(m.displayBlocks) != 0 {
 		t.Errorf("displayBlocks = %+v, want the transcript to start empty -- no banner block", m.displayBlocks)
-	}
-}
-
-// TestTutorModel_HeaderTooNarrowDropsEndpointNotTheStatus: at widths
-// where both halves can't fit, the endpoint side gives way and the
-// header never wraps to a second row (which would corrupt the fixed
-// layout arithmetic).
-func TestTutorModel_HeaderTooNarrowDropsEndpointNotTheStatus(t *testing.T) {
-	mock := newSequencedOllama(t, "reply")
-	cfg := testConfig(mock.URL)
-
-	m, err := newTutorModel(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("newTutorModel: %v", err)
-	}
-	newM, _ := m.Update(tea.WindowSizeMsg{Width: 24, Height: 24})
-	m = newM.(tutorModel)
-
-	header := m.headerView()
-	lines := strings.Split(header, "\n")
-	if len(lines) != headerHeight {
-		t.Fatalf("headerView has %d lines, want exactly %d", len(lines), headerHeight)
-	}
-	for _, line := range lines {
-		if w := lipgloss.Width(line); w > 24 {
-			t.Errorf("header line %q is %d cells wide, want it within the 24-wide pane", stripAnsiTest(line), w)
-		}
-	}
-	if !strings.Contains(stripAnsiTest(lines[0]), "tutor") {
-		t.Errorf("header first line = %q, want the status half kept", stripAnsiTest(lines[0]))
 	}
 }
 
@@ -1410,8 +1363,8 @@ func TestTutorModel_OpenRouterModelShowsOpenRouterInBannerAndErrors(t *testing.T
 	if err != nil {
 		t.Fatalf("newTutorModel: %v", err)
 	}
-	if endpoint := m.headerEndpointText(); !strings.Contains(endpoint, "OpenRouter") {
-		t.Errorf("header endpoint = %q, want it to say \"OpenRouter\"", endpoint)
+	if endpoint := m.statusEndpointText(); !strings.Contains(endpoint, "OpenRouter") {
+		t.Errorf("status bar endpoint = %q, want it to say \"OpenRouter\"", endpoint)
 	}
 
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -1689,31 +1642,5 @@ func TestTutorModel_RetainsConversationHistoryAcrossTurns(t *testing.T) {
 	}
 	if second[4].Content != "second line" {
 		t.Errorf("second request messages[4] (user2) = %q, want %q", second[4].Content, "second line")
-	}
-}
-
-// TestHeaderStatusText_HintsFirstShowsTheHintBudget: hints-first's
-// whole contract revolves around "first ask vs repeat ask", but the
-// count lived only in model state the user couldn't see. The header is
-// the always-visible place for it.
-func TestHeaderStatusText_HintsFirstShowsTheHintBudget(t *testing.T) {
-	m := newTutorLayoutOnly()
-	m.cfg = Config{Model: "test-model", Mode: exercise.TutorModeHintsFirst}
-
-	if got := m.headerStatusText(); !strings.Contains(got, "hints: 0") {
-		t.Errorf("headerStatusText() = %q, want the zero hint count shown before any request", got)
-	}
-	m.helpRequestCount = 3
-	if got := m.headerStatusText(); !strings.Contains(got, "hints: 3") {
-		t.Errorf("headerStatusText() = %q, want the live hint count", got)
-	}
-}
-
-func TestHeaderStatusText_OtherModesShowNoHintCount(t *testing.T) {
-	m := newTutorLayoutOnly()
-	m.cfg = Config{Model: "test-model", Mode: exercise.TutorModeFullAssist}
-	m.helpRequestCount = 2
-	if got := m.headerStatusText(); strings.Contains(got, "hints") {
-		t.Errorf("headerStatusText() = %q, want no hint count outside hints-first", got)
 	}
 }
