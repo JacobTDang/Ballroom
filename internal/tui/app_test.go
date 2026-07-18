@@ -70,6 +70,17 @@ func fakeAllAttempts(attempts []tracker.Attempt, err error) func() {
 	return func() { allAttemptsFn = orig }
 }
 
+// fakeAttemptsFor substitutes attemptsForFn in tests so no real sqlite db
+// is touched -- same indirection pattern as fakeRecentAttempts/
+// fakeAllAttempts. Ignores which exerciseID it was called with; tests
+// that need to assert on that argument stub attemptsForFn directly
+// instead of using this fixture.
+func fakeAttemptsFor(attempts []tracker.Attempt, err error) func() {
+	orig := attemptsForFn
+	attemptsForFn = func(config.Config, string) ([]tracker.Attempt, error) { return attempts, err }
+	return func() { attemptsForFn = orig }
+}
+
 func practiceFixture() []catalog.ExerciseStatus {
 	return []catalog.ExerciseStatus{
 		fakeStatusIn("two-pointers", "two-pointers-01"),
@@ -274,14 +285,247 @@ func TestAppModel_Stats_TooFewCodingAttemptsHidesCodingWeakSpots(t *testing.T) {
 	}
 }
 
-func TestAppModel_StatsAnyKeyGoesBackToMain(t *testing.T) {
+// --- stageStats: navigable recent-activity list (issue #252) ---
+//
+// Before this, updateStats mapped ANY keypress to "go back" (except "?",
+// carved out for help by issue #242) -- exactly why the screen was
+// unreadable: you couldn't scroll to see a specific problem's history.
+// These pin the replacement: a real cursor, Enter drilling into
+// attemptsForFn's per-exercise history, and a deliberate (tested)
+// decision about what an unmapped key does now instead of an inherited
+// catch-all.
+
+func statsRecentFixture() []tracker.Attempt {
+	return []tracker.Attempt{
+		{ExerciseID: "two-pointers-01-python", Date: "2026-07-17", Result: tracker.ResultPass},
+		{ExerciseID: "trees-04-go", Date: "2026-07-16", Result: tracker.ResultFail},
+		{ExerciseID: "graphs-02-cpp", Date: "2026-07-15", Result: tracker.ResultGaveUp},
+	}
+}
+
+func TestAppModel_Stats_ArrowsAndJKMoveCursorWithoutExiting(t *testing.T) {
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyDown}, {Type: tea.KeyRunes, Runes: []rune("j")}} {
+		m := appModel{stage: stageStats, statsRecent: statsRecentFixture()}
+		newM, cmd := m.Update(key)
+		if cmd != nil {
+			t.Errorf("%v: expected no external command", key)
+		}
+		got := newM.(appModel)
+		if got.stage != stageStats {
+			t.Fatalf("%v: stage = %v, want stageStats (arrows must not exit)", key, got.stage)
+		}
+		if got.statsCursor != 1 {
+			t.Errorf("%v: statsCursor = %d, want 1", key, got.statsCursor)
+		}
+	}
+
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyUp}, {Type: tea.KeyRunes, Runes: []rune("k")}} {
+		m := appModel{stage: stageStats, statsRecent: statsRecentFixture(), statsCursor: 2}
+		newM, _ := m.Update(key)
+		got := newM.(appModel)
+		if got.stage != stageStats {
+			t.Fatalf("%v: stage = %v, want stageStats", key, got.stage)
+		}
+		if got.statsCursor != 1 {
+			t.Errorf("%v: statsCursor = %d, want 1", key, got.statsCursor)
+		}
+	}
+}
+
+func TestAppModel_Stats_CursorClampsAtBothEnds(t *testing.T) {
+	m := appModel{stage: stageStats, statsRecent: statsRecentFixture(), statsCursor: 0}
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if got := newM.(appModel).statsCursor; got != 0 {
+		t.Errorf("statsCursor = %d, want 0 (clamped at top)", got)
+	}
+
+	m = appModel{stage: stageStats, statsRecent: statsRecentFixture(), statsCursor: 2}
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if got := newM.(appModel).statsCursor; got != 2 {
+		t.Errorf("statsCursor = %d, want 2 (clamped at bottom)", got)
+	}
+}
+
+func manyRecentAttempts(n int) []tracker.Attempt {
+	recent := make([]tracker.Attempt, n)
+	for i := range recent {
+		recent[i] = tracker.Attempt{ExerciseID: fmt.Sprintf("ex-%02d", i), Date: "2026-07-17", Result: tracker.ResultPass}
+	}
+	return recent
+}
+
+func TestAppModel_Stats_PgDownAndPgUpPageAndClampAtBothEnds(t *testing.T) {
+	recent := manyRecentAttempts(30)
+
+	m := appModel{stage: stageStats, statsRecent: recent, statsCursor: 0}
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	got := newM.(appModel)
+	if got.statsCursor <= 0 || got.statsCursor >= len(recent) {
+		t.Fatalf("statsCursor after PgDown = %d, want it to advance within [0,%d)", got.statsCursor, len(recent))
+	}
+
+	for i := 0; i < 20; i++ {
+		newM, _ = newM.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	}
+	if got := newM.(appModel).statsCursor; got != len(recent)-1 {
+		t.Errorf("statsCursor = %d after repeated PgDown, want %d (clamped at the last row)", got, len(recent)-1)
+	}
+
+	for i := 0; i < 20; i++ {
+		newM, _ = newM.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	}
+	if got := newM.(appModel).statsCursor; got != 0 {
+		t.Errorf("statsCursor = %d after repeated PgUp, want 0 (clamped at the top)", got)
+	}
+}
+
+func TestAppModel_Stats_EnterOpensDrillDownForTheRightExercise(t *testing.T) {
+	orig := attemptsForFn
+	defer func() { attemptsForFn = orig }()
+	var gotID string
+	attemptsForFn = func(_ config.Config, exerciseID string) ([]tracker.Attempt, error) {
+		gotID = exerciseID
+		return []tracker.Attempt{{ExerciseID: exerciseID, Result: tracker.ResultPass}}, nil
+	}
+
+	m := appModel{stage: stageStats, statsRecent: statsRecentFixture(), statsCursor: 1}
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command — the drill-down loads inline")
+	}
+	got := newM.(appModel)
+	if got.stage != stageStatsDetail {
+		t.Fatalf("stage = %v, want stageStatsDetail", got.stage)
+	}
+	if want := "trees-04-go"; gotID != want {
+		t.Errorf("attemptsForFn called with exerciseID = %q, want %q (statsRecent[1], the row under the cursor)", gotID, want)
+	}
+	if got.statsDetailExerciseID != "trees-04-go" {
+		t.Errorf("statsDetailExerciseID = %q, want %q", got.statsDetailExerciseID, "trees-04-go")
+	}
+}
+
+func TestAppModel_Stats_EnterOnPopulatedRecentEntersDrillDown(t *testing.T) {
+	defer fakeAttemptsFor([]tracker.Attempt{{ExerciseID: "two-pointers-01-python", Result: tracker.ResultPass}}, nil)()
+
+	m := appModel{stage: stageStats, statsRecent: statsRecentFixture(), statsCursor: 0}
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := newM.(appModel)
+	if got.stage != stageStatsDetail {
+		t.Fatalf("stage = %v, want stageStatsDetail", got.stage)
+	}
+	if len(got.statsDetailAttempts) != 1 {
+		t.Errorf("statsDetailAttempts = %v, want 1 entry", got.statsDetailAttempts)
+	}
+}
+
+func TestAppModel_Stats_EnterOnEmptyRecentDoesNothing(t *testing.T) {
 	m := appModel{stage: stageStats}
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	if newM.(appModel).stage != stageStats {
+		t.Error("expected Enter on an empty list to stay on stageStats")
+	}
+}
+
+func TestAppModel_Stats_DrillDownFailurePropagatesErrAndStaysOnStats(t *testing.T) {
+	orig := attemptsForFn
+	defer func() { attemptsForFn = orig }()
+	boom := errors.New("boom")
+	attemptsForFn = func(config.Config, string) ([]tracker.Attempt, error) { return nil, boom }
+
+	m := appModel{stage: stageStats, statsRecent: statsRecentFixture(), statsCursor: 0}
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := newM.(appModel)
+	if got.stage != stageStats {
+		t.Fatalf("stage = %v, want stageStats (stay put on a load failure, like every other load in this program)", got.stage)
+	}
+	if got.err == nil {
+		t.Error("expected err to be set, not silently swallowed")
+	}
+	if !strings.Contains(got.View(), "boom") {
+		t.Errorf("expected the error to actually render on the stats screen:\n%s", got.View())
+	}
+}
+
+func TestAppModel_Stats_EscAndQGoBackToMain(t *testing.T) {
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyEsc}, {Type: tea.KeyRunes, Runes: []rune("q")}} {
+		m := appModel{stage: stageStats, statsRecent: statsRecentFixture(), statsCursor: 1}
+		newM, cmd := m.Update(key)
+		if cmd != nil {
+			t.Errorf("%v: expected no external command", key)
+		}
+		if got := newM.(appModel).stage; got != stageMain {
+			t.Errorf("%v: stage = %v, want stageMain", key, got)
+		}
+	}
+}
+
+func TestAppModel_Stats_QuestionMarkOpensHelpAndPreservesCursorOnReturn(t *testing.T) {
+	m := appModel{stage: stageStats, statsCursor: 1}
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	got := newM.(appModel)
+	if got.stage != stageHelp {
+		t.Fatalf("stage = %v, want stageHelp", got.stage)
+	}
+	if got.helpOrigin != stageStats {
+		t.Errorf("helpOrigin = %v, want stageStats", got.helpOrigin)
+	}
+
+	// Closing help must restore the cursor position too -- returning to
+	// a reloaded, cursor-reset Stats would be a worse regression than
+	// the one issue #252 fixes.
+	back, _ := got.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	backGot := back.(appModel)
+	if backGot.stage != stageStats || backGot.statsCursor != 1 {
+		t.Errorf("after closing help: stage=%v statsCursor=%d, want stageStats with statsCursor=1 preserved", backGot.stage, backGot.statsCursor)
+	}
+}
+
+func TestAppModel_Stats_UnmappedKeyIsNoop(t *testing.T) {
+	// The deliberate replacement for the old "any key goes back"
+	// catch-all: an unmapped key does nothing, the same convention every
+	// other list stage in this program already uses (updateCategories,
+	// updateDSACategories, ... simply fall through their switch).
+	m := appModel{stage: stageStats, statsRecent: statsRecentFixture(), statsCursor: 1}
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 	if cmd != nil {
-		t.Error("expected no external command — back to main is an internal stage change")
+		t.Error("expected no external command")
 	}
-	if newM.(appModel).stage != stageMain {
-		t.Error("expected any key to return to stageMain")
+	got := newM.(appModel)
+	if got.stage != stageStats {
+		t.Errorf("stage = %v, want stageStats (an unmapped key must not exit)", got.stage)
+	}
+	if got.statsCursor != 1 {
+		t.Errorf("statsCursor = %d, want 1 (unchanged)", got.statsCursor)
+	}
+}
+
+func TestRecentAttemptsLimit_RaisedPastOldTenRowCap(t *testing.T) {
+	if recentAttemptsLimit <= 10 {
+		t.Errorf("recentAttemptsLimit = %d, want it raised past the old 10-row hard cap (issue #252) now that the list windows/paginates instead of truncating silently", recentAttemptsLimit)
+	}
+}
+
+func TestRenderStats_RecentActivityWindowsWithMoreIndicatorInsteadOfSilentTruncation(t *testing.T) {
+	m := appModel{stage: stageStats, statsRecent: manyRecentAttempts(20), width: 220, height: 60}
+	view := stripAnsiTUI(m.View())
+	if !strings.Contains(view, "more") {
+		t.Errorf("expected a windowed list with a '... more' indicator, not a silent truncation:\n%s", view)
+	}
+	// The whole point: every one of the 20 rows is still reachable, just
+	// not all on screen at once -- the cursor starts at row 0, so the
+	// last row must be scrolled out of the initial window.
+	if strings.Contains(view, "ex-19") {
+		t.Errorf("expected the last row to start outside the visible window:\n%s", view)
 	}
 }
 

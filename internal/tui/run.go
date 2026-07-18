@@ -126,3 +126,15 @@ func recentAttempts(cfg config.Config, n int) ([]tracker.Attempt, error) {
 	}
 	return recent, nil
 }
+
+// attemptsFor returns every attempt logged against exerciseID, newest
+// first -- the Stats drill-down's data source (issue #252, see
+// statsdetail.go).
+func attemptsFor(cfg config.Config, exerciseID string) ([]tracker.Attempt, error) {
+	tr, err := tracker.Open(cfg.DBPath)
+	if err != nil {
+		return nil, err
+	}
+	defer tr.Close()
+	return tr.ListAttemptsFor(exerciseID)
+}
