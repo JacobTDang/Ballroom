@@ -179,6 +179,10 @@ const (
 	// start from the exercise's starter -- see resumedraft.go. Entered
 	// from launchExercise, which every launch path funnels through.
 	stageResumeDraft
+	// stageSearch is the catalog-wide problem search ("/" from the menu
+	// or a picker) -- see search.go. The pickers' own filter only sees
+	// one category, which is the step this skips.
+	stageSearch
 	stageStats
 	// stageSettings is the Settings menu entry's landing screen: a
 	// Worker model / Orchestrator model role choice (see settingsTarget)
@@ -358,6 +362,10 @@ type appModel struct {
 	resumeCursor    int
 	draftDirToUse   string
 
+	// stageSearch — the live query and which result is selected.
+	searchQuery  string
+	searchCursor int
+
 	// stageStats
 	statsStatuses   []catalog.ExerciseStatus
 	statsRecent     []tracker.Attempt
@@ -534,6 +542,8 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateLanguage(msg)
 		case stageResumeDraft:
 			return m.updateResumeDraft(msg)
+		case stageSearch:
+			return m.updateSearch(msg)
 		case stageStats:
 			return m.updateStats(msg)
 		case stageSettings:
@@ -566,6 +576,10 @@ func (m appModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "1", "2", "3", "4", "5":
 		n, _ := strconv.Atoi(msg.String())
 		m.cursor = n - 1
+	case "/":
+		m.searchQuery = ""
+		m.searchCursor = 0
+		m.stage = stageSearch
 	case "enter":
 		return m.chooseMain()
 	case "q", "ctrl+c":
@@ -880,18 +894,15 @@ func (m appModel) updateDSACategories(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // filterProblems returns the problems whose title contains filter
 // (case-insensitive), preserving order — the picker-list sibling of
 // filterModels, so due-first ordering survives filtering.
+// filterProblems is the in-category picker filter. It delegates to the
+// same matcher stageSearch uses so an exercise id typed here finds its
+// problem instead of silently matching nothing -- the two filters
+// behaving differently was its own small surprise.
 func filterProblems(problems []catalog.ProblemStatus, filter string) []catalog.ProblemStatus {
 	if filter == "" {
 		return problems
 	}
-	lower := strings.ToLower(filter)
-	var out []catalog.ProblemStatus
-	for _, p := range problems {
-		if strings.Contains(strings.ToLower(p.Title), lower) {
-			out = append(out, p)
-		}
-	}
-	return out
+	return catalog.Search(problems, filter)
 }
 
 // visibleProblems is what the picker actually shows and navigates:
@@ -1442,6 +1453,8 @@ func (m appModel) renderRight() string {
 		return m.renderLanguage()
 	case stageResumeDraft:
 		return m.renderResumeDraft()
+	case stageSearch:
+		return m.renderSearch()
 	case stageStats:
 		return m.renderStats()
 	case stageSettings:
