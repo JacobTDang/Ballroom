@@ -101,3 +101,7 @@ category's systems half (bloom filter, consistent hashing, retry with
 backoff — see docs/implementation-roadmap.md) pairs naturally: build
 the component single-threaded there, then ask "what breaks under
 concurrency?" here.
+
+The API-design ladder (`docs/api-design-roadmap.md`) designs the
+surfaces these primitives end up defending — rate limiters, idempotency
+stores, and upload sessions all live behind the APIs specified there.

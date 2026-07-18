@@ -209,6 +209,25 @@ func TestLoad_ValidExercise(t *testing.T) {
 	}
 }
 
+// TestLoad_AcceptsAPIDesignCategory: the api-design track is
+// design-kind like system-design — coach/interviewer variants, no
+// test command — under its own top-level category.
+func TestLoad_AcceptsAPIDesignCategory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "repo"), 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	path := writeDesignExercise(t, dir, map[string]any{"category": CategoryAPIDesign})
+
+	ex, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load with category %q: %v", CategoryAPIDesign, err)
+	}
+	if ex.Category != CategoryAPIDesign || ex.Kind != KindDesign {
+		t.Errorf("Category, Kind = %q, %q, want %q design-kind", ex.Category, ex.Kind, CategoryAPIDesign)
+	}
+}
+
 func TestLoad_AcceptsEveryNeetCodeCategory(t *testing.T) {
 	categories := []string{
 		CategoryArraysHashing,

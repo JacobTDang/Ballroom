@@ -71,6 +71,12 @@ const CategoryOODesign = "oo-design"
 // is a STAR story, graded against a STAR rubric on submit.
 const CategoryBehavioral = "behavioral"
 
+// CategoryAPIDesign holds the API-design questions (see
+// docs/api-design-roadmap.md): design-kind coach/interviewer sessions
+// like system-design, graded against rubrics grounded in Google's API
+// design guide and the AIPs. Its own top-level picker entry.
+const CategoryAPIDesign = "api-design"
+
 const (
 	LanguageGo     = "go"
 	LanguageCpp    = "cpp"
@@ -139,6 +145,7 @@ var validCategories = map[string]bool{
 	CategoryBitManipulation: true,
 
 	CategorySystemDesign: true,
+	CategoryAPIDesign:    true,
 	CategoryOODesign:     true,
 	CategoryBehavioral:   true,
 }

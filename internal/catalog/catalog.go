@@ -43,8 +43,9 @@ var categoryOrder = map[string]int{
 	exercise.CategoryBitManipulation: 22,
 
 	exercise.CategorySystemDesign: 23,
-	exercise.CategoryOODesign:     24,
-	exercise.CategoryBehavioral:   25,
+	exercise.CategoryAPIDesign:    24,
+	exercise.CategoryOODesign:     25,
+	exercise.CategoryBehavioral:   26,
 }
 
 // languageOrder ranks language variants of the same problem so Python
@@ -84,6 +85,8 @@ var categoryDisplayNames = map[string]string{
 	exercise.CategoryBitManipulation: "Bit Manipulation",
 
 	exercise.CategoryOODesign: "OO Design",
+	// The title-case fallback would render "Api Design".
+	exercise.CategoryAPIDesign: "API Design",
 }
 
 // DisplayCategory maps a raw category id to how it's shown in the UI.
