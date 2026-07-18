@@ -1,0 +1,12 @@
+{
+  "id": "memo-key-01-python",
+  "problem_id": "memo-key-01",
+  "title": "Stale cache in shipping_cost",
+  "category": "debug",
+  "language": "python",
+  "time_limit_min": 30,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q",
+  "difficulty": "hard"
+}

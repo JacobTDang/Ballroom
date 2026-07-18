@@ -83,6 +83,8 @@ func homeboardFixtureProblems() []catalog.ProblemStatus {
 			Variants: []catalog.ExerciseStatus{{Exercise: exercise.Exercise{Language: "go"}}}},
 		{ProblemID: "bloom-filter-01", Title: "Bloom Filter", Category: exercise.CategoryImplementation,
 			Variants: []catalog.ExerciseStatus{{Exercise: exercise.Exercise{Language: "go"}}}},
+		{ProblemID: "off-by-one-01", Title: "Off-by-one IndexError in max_of", Category: exercise.CategoryDebug,
+			Variants: []catalog.ExerciseStatus{{Exercise: exercise.Exercise{Language: "python"}}}},
 	}
 }
 
@@ -94,7 +96,7 @@ func TestRenderHomeboard_ShowsTracksDueDailyStreakRecent(t *testing.T) {
 
 	got := stripAnsiTUI(renderHomeboard(homeboardFixtureProblems(), attempts, time.Now()))
 
-	for _, want := range []string{"DSA", "Concurrency", "Implementation", "System Design", "API Design", "OO Design", "Behavioral"} {
+	for _, want := range []string{"DSA", "Debug", "Concurrency", "Implementation", "System Design", "API Design", "OO Design", "Behavioral"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("homeboard missing the %s track:\n%s", want, got)
 		}
