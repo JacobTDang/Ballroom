@@ -75,6 +75,39 @@ func clearSessionEnv(t *testing.T) {
 	t.Setenv("PRACTICE_CONTROL_DIR", "")
 	t.Setenv("PRACTICE_STARTED_AT", "")
 	t.Setenv("PRACTICE_SANDBOX", "")
+	// PRACTICE_START_UPTIME is exported by docker/entrypoint.sh itself
+	// (not by the host's `docker run -e`, unlike the vars above), but it's
+	// still a session-scoped var tests should start clean on -- see
+	// startUptimeFromEnv.
+	t.Setenv("PRACTICE_START_UPTIME", "")
+}
+
+func TestStartUptimeFromEnv_ParsesValidValue(t *testing.T) {
+	t.Setenv("PRACTICE_START_UPTIME", "12345.67")
+
+	v, ok := startUptimeFromEnv()
+	if !ok {
+		t.Fatal("ok = false, want true for a well-formed value")
+	}
+	if v != 12345.67 {
+		t.Errorf("v = %v, want 12345.67", v)
+	}
+}
+
+func TestStartUptimeFromEnv_AbsentReturnsFalse(t *testing.T) {
+	t.Setenv("PRACTICE_START_UPTIME", "")
+
+	if _, ok := startUptimeFromEnv(); ok {
+		t.Error("ok = true for an absent env var, want false (older container image, non-Linux host)")
+	}
+}
+
+func TestStartUptimeFromEnv_UnparsableReturnsFalse(t *testing.T) {
+	t.Setenv("PRACTICE_START_UPTIME", "not-a-number")
+
+	if _, ok := startUptimeFromEnv(); ok {
+		t.Error("ok = true for an unparsable env var, want false")
+	}
 }
 
 func TestGraderModelFromEnv_PrefersDedicatedGraderModel(t *testing.T) {
