@@ -36,6 +36,11 @@ const (
 	// The header bar's three traffic-light dots.
 	trafficRed  = "#F03C3C"
 	trafficGold = "#E8A93C"
+
+	// paneStatusBg is the bottom status bar's row background — the same
+	// near-black as the editor cards' header bar, so the pane's two
+	// pieces of fixed chrome read as one system.
+	paneStatusBg = cardHeaderBg
 )
 
 // ansiFg renders a palette hex color as a raw truecolor foreground
