@@ -35,7 +35,8 @@ The first launch runs boot checks (Docker daemon, practice image —
 built automatically — Ollama, tutor model) and lands on the home menu:
 **Practice** (pick a category and problem), **Daily** (today's pick,
 one keypress), **Sandbox** (ungraded scratch environment), **Stats**
-(progress, recent attempts, rubric weak spots), **Settings** (models).
+(progress, recent attempts, rubric and coding weak spots),
+**Settings** (models, default language, tutor notes).
 
 ### Configuring the tutor models
 
@@ -93,7 +94,9 @@ specificity, stakes, ownership, evidence, reflection.
 ## The practice loop
 
 1. Pick a problem (or press `2` for **Daily** — a date-stable pick
-   among due and unsolved problems).
+   among due and unsolved problems). The picker searches as you type,
+   long categories scroll, and every row carries its `[E]`/`[M]`/`[H]`
+   difficulty badge.
 2. Work in the session; talk to the tutor as much as the mode allows
    (coding exercises choose syntax-only / hints-first / full-assist
    per exercise; design and behavioral sessions choose coach or
@@ -126,6 +129,7 @@ specificity, stakes, ownership, evidence, reflection.
 | `M-1` / `M-2` / `M-3` | jump to editor / tutor / terminal pane |
 | `Ctrl-Tab` | cycle panes |
 | `M-q` | submit (pre-types the command; Enter confirms) |
+| `M-0` | leave the session and return to the picker (y/n confirm) |
 | `M-h` | toggle tutor highlights in the editor |
 | `Ctrl-D` (tutor pane) | exit the tutor chat |
 
@@ -135,8 +139,12 @@ PgUp/PgDn or the mouse wheel, renders code as editor cards, and shows
 the tools the model calls in real time. Estimation help for design
 sessions: `less ~/back-of-envelope.md` in the terminal pane.
 
-The tutor's fixed header shows the model, mode, and — in hints-first
-sessions — a live count of the hints you've used.
+The tutor pane reads like a modern terminal-agent chat: your messages
+carry a pink accent bar, replies render markdown (lists, quotes,
+links) with code as bordered editor cards, tool calls settle into
+one-line summaries, and the input sits in a rounded box above a
+status bar — mode pill, model, hints count (hints-first), scroll
+position, and the exit hint.
 
 **Voice input**, two ways (the container never needs mic access):
 
@@ -156,6 +164,7 @@ sessions — a live count of the hints you've used.
 go test -race ./internal/...   # unit/integration tests (mocked providers)
 go vet ./cmd/... ./internal/...
 go run ./cmd/verify-exercises  # structural check of every exercise
+go run ./cmd/tutor-preview     # tutor pane on canned fixtures, no network
 go run ./cmd/tutor-eval        # live model-behavior eval (needs Ollama; slow)
 ```
 
