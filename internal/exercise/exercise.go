@@ -187,6 +187,25 @@ type Exercise struct {
 	// the problem statement footer and with submit results. Empty means
 	// none.
 	VideoURL string
+	// Difficulty optionally rates the problem — one of DifficultyEasy/
+	// Medium/Hard, or empty for unrated. Lowercase-only on disk: the
+	// NeetCode site data's "Easy"/"Medium"/"Hard" is normalized at fill
+	// time so every consumer (picker badges, sorting) matches one
+	// vocabulary.
+	Difficulty string
+}
+
+// The difficulty vocabulary. Values are the on-disk strings.
+const (
+	DifficultyEasy   = "easy"
+	DifficultyMedium = "medium"
+	DifficultyHard   = "hard"
+)
+
+var validDifficulties = map[string]bool{
+	DifficultyEasy:   true,
+	DifficultyMedium: true,
+	DifficultyHard:   true,
 }
 
 // raw mirrors the on-disk JSON shape before validation/path resolution.
@@ -202,6 +221,7 @@ type raw struct {
 	RepoPath     string `json:"repo_path"`
 	TestCommand  string `json:"test_command"`
 	VideoURL     string `json:"video_url"`
+	Difficulty   string `json:"difficulty"`
 }
 
 // Load reads and validates the exercise definition at path (exercise.json).
@@ -274,6 +294,10 @@ func Load(path string) (Exercise, error) {
 		return Exercise{}, fmt.Errorf("exercise: %s: video_url must be https, got %q", path, r.VideoURL)
 	}
 
+	if r.Difficulty != "" && !validDifficulties[r.Difficulty] {
+		return Exercise{}, fmt.Errorf("exercise: %s: invalid difficulty %q (want easy|medium|hard)", path, r.Difficulty)
+	}
+
 	problemID := r.ProblemID
 	if problemID == "" {
 		// Standalone exercises with no language siblings don't need to
@@ -293,5 +317,6 @@ func Load(path string) (Exercise, error) {
 		RepoPath:     repoPath,
 		TestCommand:  r.TestCommand,
 		VideoURL:     r.VideoURL,
+		Difficulty:   r.Difficulty,
 	}, nil
 }

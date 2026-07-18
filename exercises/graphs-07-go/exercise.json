@@ -8,5 +8,6 @@
   "tutor_mode": "hints-first",
   "repo_path": "./repo",
   "test_command": "go test ./...",
-  "video_url": "https://youtu.be/9z2BunfoZ5Y"
+  "video_url": "https://youtu.be/9z2BunfoZ5Y",
+  "difficulty": "medium"
 }

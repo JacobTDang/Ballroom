@@ -326,15 +326,22 @@ type appModel struct {
 	category         string
 	categoryProblems []catalog.ProblemStatus
 	problemCursor    int
+	// problemFilter is the picker's live type-to-search text — same UX
+	// as the model picker's filter (see updateModelPicker's KeyRunes
+	// case): letters feed it, backspace trims it, and it resets on
+	// every entry into stageProblems. The cursor indexes
+	// visibleProblems(), not categoryProblems, while a filter is live.
+	problemFilter string
 
 	// stageLanguage
 	selectedProblem catalog.ProblemStatus
 	langCursor      int
 
 	// stageStats
-	statsStatuses []catalog.ExerciseStatus
-	statsRecent   []tracker.Attempt
-	statsWeakDims []catalog.DimensionWeakness
+	statsStatuses   []catalog.ExerciseStatus
+	statsRecent     []tracker.Attempt
+	statsWeakDims   []catalog.DimensionWeakness
+	statsCodingWeak []catalog.CategoryWeakness
 
 	// stageSettings: settingsCursor is 0 = Worker model, 1 = Orchestrator
 	// model there; reused by stageProviderChoice as 0 = Local (Ollama),
@@ -411,6 +418,7 @@ func newAppModel(cfg config.Config, resume appResume) appModel {
 			m.category = resume.category
 			m.categoryProblems = filterByCategory(m.problems, resume.category)
 			m.problemCursor = 0
+			m.problemFilter = ""
 			m.stage = stageProblems
 		}
 	}
@@ -612,6 +620,7 @@ func (m appModel) loadDaily() appModel {
 	}
 	m.categoryProblems = filterByCategory(m.problems, pick.Category)
 	m.problemCursor = 0
+	m.problemFilter = ""
 	for i, p := range m.categoryProblems {
 		if p.ProblemID == pick.ProblemID {
 			m.problemCursor = i
@@ -640,6 +649,7 @@ func (m appModel) loadStats() appModel {
 		return m
 	}
 	m.statsWeakDims = catalog.WeakDimensions(all)
+	m.statsCodingWeak = catalog.CodingWeakSpots(all, codingWeakSpotMinAttempts)
 	m.err = nil
 	m.statsStatuses = statuses
 	m.statsRecent = recent
@@ -806,6 +816,7 @@ func (m appModel) updateCategories(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.category = selected
 			m.categoryProblems = filterByCategory(m.problems, selected)
 			m.problemCursor = 0
+			m.problemFilter = ""
 			m.stage = stageProblems
 		}
 	case "q", "esc", "ctrl+c":
@@ -833,6 +844,7 @@ func (m appModel) updateDSACategories(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.category = m.dsaCategories[m.dsaCategoryCursor]
 		m.categoryProblems = filterByCategory(m.problems, m.category)
 		m.problemCursor = 0
+		m.problemFilter = ""
 		m.stage = stageProblems
 	case "q", "esc", "ctrl+c":
 		m.stage = stageCategories
@@ -842,30 +854,74 @@ func (m appModel) updateDSACategories(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // --- stageProblems ---
 
+// filterProblems returns the problems whose title contains filter
+// (case-insensitive), preserving order — the picker-list sibling of
+// filterModels, so due-first ordering survives filtering.
+func filterProblems(problems []catalog.ProblemStatus, filter string) []catalog.ProblemStatus {
+	if filter == "" {
+		return problems
+	}
+	lower := strings.ToLower(filter)
+	var out []catalog.ProblemStatus
+	for _, p := range problems {
+		if strings.Contains(strings.ToLower(p.Title), lower) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// visibleProblems is what the picker actually shows and navigates:
+// categoryProblems through the live filter.
+func (m appModel) visibleProblems() []catalog.ProblemStatus {
+	return filterProblems(m.categoryProblems, m.problemFilter)
+}
+
+func (m appModel) leaveProblems() (tea.Model, tea.Cmd) {
+	if catalog.IsGroupedCategory(m.category) {
+		m.stage = stageDSACategories
+	} else {
+		m.stage = stageCategories
+	}
+	return m, nil
+}
+
 func (m appModel) updateProblems(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "up", "k":
+	visible := m.visibleProblems()
+	switch msg.Type {
+	case tea.KeyUp:
 		if m.problemCursor > 0 {
 			m.problemCursor--
 		}
-	case "down", "j":
-		if m.problemCursor < len(m.categoryProblems)-1 {
+	case tea.KeyDown:
+		if m.problemCursor < len(visible)-1 {
 			m.problemCursor++
 		}
-	case "enter":
-		if len(m.categoryProblems) == 0 {
+	case tea.KeyBackspace:
+		if len(m.problemFilter) > 0 {
+			m.problemFilter = m.problemFilter[:len(m.problemFilter)-1]
+			m.problemCursor = 0
+		}
+	case tea.KeyEnter:
+		if len(visible) == 0 || m.problemCursor >= len(visible) {
 			return m, nil
 		}
-		m.selectedProblem = m.categoryProblems[m.problemCursor]
+		m.selectedProblem = visible[m.problemCursor]
 		m.langCursor = 0
 		m.stage = stageLanguage
 		return m.resolveLanguageStage()
-	case "q", "esc", "ctrl+c":
-		if catalog.IsGroupedCategory(m.category) {
-			m.stage = stageDSACategories
-		} else {
-			m.stage = stageCategories
+	case tea.KeyEsc, tea.KeyCtrlC:
+		return m.leaveProblems()
+	case tea.KeyRunes:
+		// "q" with nothing typed yet backs out, matching every other
+		// stage — once the user has started typing, every rune
+		// (including "q") feeds the filter, since it might be part of
+		// a real title. Same contract as the model picker.
+		if m.problemFilter == "" && string(msg.Runes) == "q" {
+			return m.leaveProblems()
 		}
+		m.problemFilter += string(msg.Runes)
+		m.problemCursor = 0
 	}
 	return m, nil
 }
@@ -1474,8 +1530,24 @@ func (m appModel) renderProblems() string {
 	b.WriteString(checkDimStyle.Render("choose a problem"))
 	b.WriteString("\n\n")
 
-	for i, p := range m.categoryProblems {
+	b.WriteString(fmt.Sprintf("%s%s", checkDimStyle.Render("› "), m.problemFilter))
+	b.WriteString("\n\n")
+
+	visible := m.visibleProblems()
+	if len(visible) == 0 {
+		b.WriteString(checkDimStyle.Render("no matches"))
+		b.WriteString("\n")
+	}
+	cursor := min(m.problemCursor, max(len(visible)-1, 0))
+	start, end := problemWindow(cursor, len(visible))
+	if start > 0 {
+		b.WriteString(checkDimStyle.Render(fmt.Sprintf("  ↑ %d more", start)))
+		b.WriteString("\n")
+	}
+	for i := start; i < end; i++ {
+		p := visible[i]
 		label := fmt.Sprintf("%-30s", truncateTitle(p.Title, 30))
+		badge := fmt.Sprintf("%-5s", renderDifficultyBadge(p))
 		status := "not attempted"
 		statusStyle := checkDimStyle
 		if p.Attempts > 0 {
@@ -1500,17 +1572,96 @@ func (m appModel) renderProblems() string {
 			// problem gone untouched for a month.
 			marker = "  · review due"
 		}
-		if i == m.problemCursor {
-			b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s %s%s", label, status, marker)))
+		if i == cursor {
+			b.WriteString(cursorRowStyle.Render(fmt.Sprintf("❯ %s %s %s%s", label, stripBadgeStyle(p), status, marker)))
 		} else {
-			b.WriteString(fmt.Sprintf("  %s %s%s", label, statusStyle.Render(status), dueMarkerStyle.Render(marker)))
+			b.WriteString(fmt.Sprintf("  %s %s %s%s", label, badge, statusStyle.Render(status), dueMarkerStyle.Render(marker)))
 		}
+		b.WriteString("\n")
+	}
+	if end < len(visible) {
+		b.WriteString(checkDimStyle.Render(fmt.Sprintf("  ↓ %d more", len(visible)-end)))
 		b.WriteString("\n")
 	}
 
 	b.WriteString("\n")
-	b.WriteString(checkDimStyle.Render("↑/↓ move · enter select · q back"))
+	b.WriteString(checkDimStyle.Render("type to search · ↑/↓ move · enter select · esc back"))
 	return b.String()
+}
+
+// maxVisibleProblems bounds the picker window so long categories
+// (trees has 15 problems) never overflow a short terminal; the window
+// slides to keep the cursor visible with ↑/↓ "N more" indicators.
+const maxVisibleProblems = 12
+
+// problemWindow returns the [start, end) slice of an n-problem list to
+// draw with the cursor kept in view — centered when there's room,
+// clamped at the edges. Pure so the windowing math is testable without
+// rendering.
+func problemWindow(cursor, n int) (int, int) {
+	if n <= maxVisibleProblems {
+		return 0, n
+	}
+	start := cursor - maxVisibleProblems/2
+	start = max(0, min(start, n-maxVisibleProblems))
+	return start, start + maxVisibleProblems
+}
+
+// difficultyBadge is the letter(s) for a problem's difficulty: one of
+// E/M/H when its variants agree (coding variants always do — the fill
+// rates the problem, not the language), or a range like "M/H" when
+// they differ (system design rates coach sessions medium and
+// interviewer mocks hard). Empty for unrated.
+func difficultyBadge(p catalog.ProblemStatus) string {
+	letters := map[string]string{
+		exercise.DifficultyEasy:   "E",
+		exercise.DifficultyMedium: "M",
+		exercise.DifficultyHard:   "H",
+	}
+	var parts []string
+	for _, d := range []string{exercise.DifficultyEasy, exercise.DifficultyMedium, exercise.DifficultyHard} {
+		for _, v := range p.Variants {
+			if v.Exercise.Difficulty == d {
+				parts = append(parts, letters[d])
+				break
+			}
+		}
+	}
+	return strings.Join(parts, "/")
+}
+
+// difficultyBadgeStyles maps each letter to the app palette: teal for
+// easy (the palette's "good" color — no green exists, same reasoning
+// as passStyle), gold for medium, red for hard.
+var difficultyBadgeStyles = map[string]lipgloss.Style{
+	"E": passStyle,
+	"M": dueMarkerStyle,
+	"H": failStyle,
+}
+
+// renderDifficultyBadge wraps the badge letters in [ ] with their
+// per-letter colors; empty difficulty renders as empty (no brackets).
+func renderDifficultyBadge(p catalog.ProblemStatus) string {
+	badge := difficultyBadge(p)
+	if badge == "" {
+		return ""
+	}
+	var styled []string
+	for _, letter := range strings.Split(badge, "/") {
+		styled = append(styled, difficultyBadgeStyles[letter].Render(letter))
+	}
+	return checkDimStyle.Render("[") + strings.Join(styled, checkDimStyle.Render("/")) + checkDimStyle.Render("]")
+}
+
+// stripBadgeStyle is the cursor row's badge: cursorRowStyle re-renders
+// the whole row, so the badge goes in plain to keep the row's single
+// highlight style from fighting per-letter colors.
+func stripBadgeStyle(p catalog.ProblemStatus) string {
+	badge := difficultyBadge(p)
+	if badge == "" {
+		return fmt.Sprintf("%-5s", "")
+	}
+	return fmt.Sprintf("%-5s", "["+badge+"]")
 }
 
 func (m appModel) renderLanguage() string {
@@ -1552,6 +1703,11 @@ func (m appModel) renderLanguage() string {
 	return b.String()
 }
 
+// codingWeakSpotMinAttempts is the evidence bar for calling a coding
+// category weak — under this many attempts, one bad day would brand a
+// whole topic.
+const codingWeakSpotMinAttempts = 3
+
 func (m appModel) renderStats() string {
 	var b strings.Builder
 	b.WriteString(hintStyle.Render("Stats"))
@@ -1585,6 +1741,28 @@ func (m appModel) renderStats() string {
 			line := fmt.Sprintf("  %-32s missing %d/%d · adequate %d/%d", d.Name, d.Missing, d.Total(), d.Adequate, d.Total())
 			style := checkDimStyle
 			if d.Missing > 0 {
+				style = failStyle
+			}
+			b.WriteString(style.Render(line))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
+	if len(m.statsCodingWeak) > 0 {
+		b.WriteString(hintStyle.Render("Coding weak spots"))
+		b.WriteString("\n")
+		shown := m.statsCodingWeak
+		if len(shown) > 5 {
+			shown = shown[:5]
+		}
+		for _, c := range shown {
+			line := fmt.Sprintf("  %-32s failed %d/%d", catalog.DisplayCategory(c.Category), c.Fails, c.Attempts)
+			// Half-or-worse is a real problem area; anything listed at
+			// all is still worth a dim line (it has fails by
+			// construction).
+			style := checkDimStyle
+			if c.FailRatio() >= 0.5 {
 				style = failStyle
 			}
 			b.WriteString(style.Render(line))

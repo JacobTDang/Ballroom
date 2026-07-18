@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // styleMarkdown is display-only styling for the chat pane -- the raw
@@ -112,6 +114,188 @@ func TestStyleMarkdown_UnknownLanguageFenceFallsBackToFlatColor(t *testing.T) {
 	}
 	if !strings.Contains(stripAnsiTest(got), "blorp blip 42") {
 		t.Errorf("code content lost:\n%s", stripAnsiTest(got))
+	}
+}
+
+// TestStyleMarkdown_BulletListStyledMarkerAndHangIndent: a long item
+// must wrap HERE with a hang indent, not in refreshViewport's outer
+// pass — the outer wrap is indent-blind and would fold continuations
+// flush-left.
+func TestStyleMarkdown_BulletListStyledMarkerAndHangIndent(t *testing.T) {
+	got := styleMarkdown("- alpha beta gamma delta epsilon zeta eta theta iota kappa lambda", 40)
+	if !strings.Contains(got, mdCodeColor+"-"+mdColorReset) {
+		t.Errorf("bullet marker not styled in the accent color: %q", got)
+	}
+	lines := strings.Split(got, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("long bullet item did not wrap: %q", got)
+	}
+	if first := stripAnsiTest(lines[0]); !strings.HasPrefix(first, "- alpha") {
+		t.Errorf("first line = %q, want it to start with the marker and item text", first)
+	}
+	for i, line := range lines[1:] {
+		if plain := stripAnsiTest(line); !strings.HasPrefix(plain, "  ") {
+			t.Errorf("continuation line %d = %q, want it hang-indented under the item text", i+1, plain)
+		}
+	}
+	for i, line := range lines {
+		if w := lipgloss.Width(line); w > 40 {
+			t.Errorf("list line %d is %d cells wide, want <= 40 so the outer wrap never re-breaks it", i, w)
+		}
+	}
+}
+
+func TestStyleMarkdown_NestedBulletKeepsIndent(t *testing.T) {
+	got := styleMarkdown("  - nested item", 0)
+	if plain := stripAnsiTest(got); plain != "  - nested item" {
+		t.Errorf("stripped = %q, want the nested indent and text preserved", plain)
+	}
+	if !strings.Contains(got, mdCodeColor+"-"+mdColorReset) {
+		t.Errorf("nested bullet marker not styled: %q", got)
+	}
+}
+
+func TestStyleMarkdown_OrderedListDimNumberAndHangIndent(t *testing.T) {
+	got := styleMarkdown("12. alpha beta gamma delta epsilon zeta eta theta iota kappa", 40)
+	if !strings.Contains(got, mdDimColor+"12."+mdColorReset) {
+		t.Errorf("ordered marker not dimmed: %q", got)
+	}
+	lines := strings.Split(got, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("long ordered item did not wrap: %q", got)
+	}
+	if first := stripAnsiTest(lines[0]); !strings.HasPrefix(first, "12. alpha") {
+		t.Errorf("first line = %q, want marker then text", first)
+	}
+	if cont := stripAnsiTest(lines[1]); !strings.HasPrefix(cont, "    ") {
+		t.Errorf("continuation = %q, want 4-cell hang indent aligning under the text", cont)
+	}
+}
+
+func TestStyleMarkdown_BlockquoteBarAndDimText(t *testing.T) {
+	got := styleMarkdown("> stay with the invariant", 0)
+	plain := stripAnsiTest(got)
+	if plain != "│ stay with the invariant" {
+		t.Errorf("stripped = %q, want the bar replacing the > marker", plain)
+	}
+	if !strings.Contains(got, ansiFg(paneRule)+"│") {
+		t.Errorf("quote bar missing the structural rule color: %q", got)
+	}
+	if !strings.Contains(got, mdDimColor) {
+		t.Errorf("quote text not dimmed: %q", got)
+	}
+
+	if bare := stripAnsiTest(styleMarkdown(">", 0)); !strings.HasPrefix(bare, "│") {
+		t.Errorf("bare > line = %q, want just the bar", bare)
+	}
+}
+
+// TestStyleMarkdown_BlockquoteInlineCodeStaysDimAfterSpan: an inline
+// code span inside a quote closes with a default-foreground reset —
+// the quote must re-arm its dim color after it or the rest of the
+// line "leaks" back to full brightness (same re-arm trick the editor
+// cards use on chroma's resets).
+func TestStyleMarkdown_BlockquoteInlineCodeStaysDimAfterSpan(t *testing.T) {
+	got := styleMarkdown("> use `seen` before the loop ends", 0)
+	if !strings.Contains(got, mdCodeColor+"seen"+mdDimColor) {
+		t.Errorf("code span inside a quote must close back into dim, got %q", got)
+	}
+	if !strings.Contains(stripAnsiTest(got), "before the loop ends") {
+		t.Errorf("quote text after the span lost: %q", got)
+	}
+}
+
+// TestStyleMarkdown_LongBlockquoteKeepsBarOnEveryWrappedLine: like
+// list items, a quote must wrap itself — the outer pass would fold a
+// long quote flush-left and orphan the continuation from its bar
+// (seen live in the preview harness at 44 cols).
+func TestStyleMarkdown_LongBlockquoteKeepsBarOnEveryWrappedLine(t *testing.T) {
+	got := styleMarkdown("> the invariant is that everything left of the write pointer is already final and sorted", 40)
+	lines := strings.Split(got, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("long quote did not wrap: %q", got)
+	}
+	for i, line := range lines {
+		if plain := stripAnsiTest(line); !strings.HasPrefix(plain, "│ ") {
+			t.Errorf("quote line %d = %q, want the bar on every wrapped line", i, plain)
+		}
+		if w := lipgloss.Width(line); w > 40 {
+			t.Errorf("quote line %d is %d cells wide, want <= 40", i, w)
+		}
+	}
+}
+
+func TestStyleMarkdown_HorizontalRuleRendersDashes(t *testing.T) {
+	if got := stripAnsiTest(styleMarkdown("---", 20)); got != strings.Repeat("─", 20) {
+		t.Errorf("hr at width 20 = %q, want 20 rule cells", got)
+	}
+	if got := stripAnsiTest(styleMarkdown("***", 0)); got != strings.Repeat("─", 40) {
+		t.Errorf("hr at width 0 = %q, want the 40-cell default", got)
+	}
+	if got := styleMarkdown("-- not a rule", 20); stripAnsiTest(got) != "-- not a rule" {
+		t.Errorf("two dashes = %q, want untouched (three+ makes a rule)", got)
+	}
+}
+
+func TestStyleMarkdown_LinkUnderlinedWithDimURL(t *testing.T) {
+	got := styleMarkdown("see [the docs](https://ex.am/p) for more", 0)
+	if strings.Contains(stripAnsiTest(got), "[") {
+		t.Errorf("raw link brackets left in %q", got)
+	}
+	if !strings.Contains(got, "\x1b[4m"+"the docs"+"\x1b[24m") {
+		t.Errorf("link text not underlined: %q", got)
+	}
+	if !strings.Contains(got, mdDimColor+" (https://ex.am/p)"+mdColorReset) {
+		t.Errorf("link URL not shown dim in parens: %q", got)
+	}
+}
+
+func TestStyleMarkdown_ImageSyntaxLeftRaw(t *testing.T) {
+	in := "diagram: ![flow](https://ex.am/f.png)"
+	if got := styleMarkdown(in, 0); got != in {
+		t.Errorf("image syntax = %q, want left raw (the pane can't render it)", got)
+	}
+}
+
+func TestStyleMarkdown_LinkInsideBackticksStaysLiteral(t *testing.T) {
+	got := styleMarkdown("the pattern is `[text](url)` exactly", 0)
+	if strings.Contains(got, "\x1b[4m") {
+		t.Errorf("link inside a code span must stay literal, got underline in %q", got)
+	}
+	if !strings.Contains(stripAnsiTest(got), "[text](url)") {
+		t.Errorf("code span content lost: %q", got)
+	}
+}
+
+func TestStyleMarkdown_NewConstructsInertInsideFences(t *testing.T) {
+	in := "```\n- item\n> quote\n---\n[a](b)\n```"
+	got := styleMarkdown(in, 0)
+	if strings.Contains(got, "\x1b[4m") {
+		t.Errorf("link styling leaked into a fence: %q", got)
+	}
+	plain := stripAnsiTest(got)
+	for _, want := range []string{"- item", "> quote", "---", "[a](b)"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("fence content %q mangled:\n%s", want, plain)
+		}
+	}
+}
+
+// TestStyleMarkdown_PartialStreamedListSafe: styleMarkdown runs on the
+// in-flight partial reply every streaming tick — a list cut mid-item
+// must render, not panic or drop lines.
+func TestStyleMarkdown_PartialStreamedListSafe(t *testing.T) {
+	got := styleMarkdown("- item one\n- it", 40)
+	plain := stripAnsiTest(got)
+	if !strings.Contains(plain, "item one") || !strings.HasSuffix(strings.TrimRight(plain, " "), "- it") {
+		t.Errorf("partial list = %q, want both lines rendered (trailing pad spaces aside)", plain)
+	}
+}
+
+func TestStyleMarkdown_EmphasisAtLineStartNotABullet(t *testing.T) {
+	in := "*emphasis* is not a bullet"
+	if got := styleMarkdown(in, 0); got != in {
+		t.Errorf("styleMarkdown(%q) = %q, want unchanged — no space after the star means no list marker", in, got)
 	}
 }
 
