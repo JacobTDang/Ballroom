@@ -130,6 +130,10 @@ const activityDotGlyph = "o"
 // internal/catalog/theme.go: #2FA6A6), so the tutor pane's own animation
 // reads as the same app rather than a mismatched accent. This is the
 // pulse's trough, not a floor to dim below (see activityPulseGlow*).
+// Kept as untyped constants, not derived from palette at runtime: the
+// blend math uses them in both integer and float contexts, which only
+// untyped constants satisfy. TestActivityColorsMatchPalette guarantees
+// they stay equal to their palette source.
 const (
 	activityPulseBaseR = 0x2F
 	activityPulseBaseG = 0xA6

@@ -120,6 +120,23 @@ func renderHomeboard(problems []catalog.ProblemStatus, attempts []tracker.Attemp
 	}
 	b.WriteString("\n")
 
+	// What to work on next, with the reason it's being suggested --
+	// progress bars alone say where you stand but never what to do,
+	// which is the harder question with 645 exercises in the catalog.
+	// Numbered so they launch straight from the menu.
+	if recs := catalog.Recommend(problems, attempts, now); len(recs) > 0 {
+		b.WriteString(checkDimStyle.Render("next up"))
+		b.WriteString("\n")
+		for i, r := range recs {
+			b.WriteString(hintStyle.Render(fmt.Sprintf("  %d. ", i+1)))
+			b.WriteString(r.Problem.Title)
+			b.WriteString("\n")
+			b.WriteString(checkDimStyle.Render("     " + r.Reason))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
 	for _, track := range homeTracks {
 		solved, total := groupCounts(problems, track.group)
 		if total == 0 {

@@ -1,68 +1,50 @@
 package tutor
 
-import "fmt"
+import "github.com/JacobTDang/Ballroom/internal/palette"
 
-// The tutor pane's palette, defined once -- every hardcoded escape
-// that used to live at its point of use references these now, so the
-// pane reads as one deliberate visual system instead of accumulated
-// per-feature choices. Hex values shared with the wider app palette
-// (internal/tui/styles.go, docker/tmux.conf) where a color plays the
-// same role there.
+// The tutor pane's colors, named for their role in this pane and
+// sourced from internal/palette so the pane, the host TUI, the banner,
+// and the container's chrome can never drift apart. The local names
+// stay because they carry pane-specific meaning ("the user's voice",
+// "the card gutter") that the palette's role names deliberately don't.
 const (
 	// paneTeal is the pane's accent: inline/fenced code, the input
-	// prompt glyph, the header's live dot -- same #2FA6A6 as the status
-	// bar's own teal.
-	paneTeal = "#2FA6A6"
-	// panePink marks the user's own voice (the › in "you ›"), same
-	// #E0468C as the status bar's separators.
-	panePink = "#E0468C"
-	// paneDimText is metadata text: fence labels, the "you" in the echo
-	// prefix, the header's endpoint.
-	paneDimText = "#96918B"
-	// paneRule is structural chrome: the header rule, card borders.
-	paneRule = "#3A3D4D"
-	// paneInputRule is the input box's top rule -- a dimmed teal, so the
-	// separation reads without the line competing with real content.
-	paneInputRule = "#1E5A5A"
+	// prompt glyph, the status bar's live dot.
+	paneTeal = palette.Teal
+	// panePink marks the user's own voice -- the accent bar down the
+	// left of every message they send.
+	panePink = palette.Pink
+	// paneDimText is metadata: fence labels, tool-call detail, the
+	// status bar's right half.
+	paneDimText = palette.WarmGray
+	// paneRule is structural chrome: rules and card borders.
+	paneRule = palette.Rule
+	// paneInputRule is the input box's frame -- a dimmed teal, so the
+	// box reads as structure without competing with real content.
+	paneInputRule = palette.InputRule
 
 	// Editor-card colors (card.go): the card floats on its own
-	// near-black background with a slightly lighter header bar, framed
-	// by the same paneRule chrome as the header rule.
-	cardBg       = "#14151C"
-	cardHeaderBg = "#1E2029"
+	// near-black background with a slightly lighter header bar.
+	cardBg       = palette.CardBg
+	cardHeaderBg = palette.CardHeaderBg
 	// cardGutterFg is the line-number gutter -- warm and dim, present
 	// without competing with the code.
-	cardGutterFg = "#5C5852"
-	// The header bar's three traffic-light dots.
-	trafficRed  = "#F03C3C"
-	trafficGold = "#E8A93C"
+	cardGutterFg = palette.GutterFg
+	// The card header bar's three traffic-light dots.
+	trafficRed  = palette.Red
+	trafficGold = palette.Gold
 
-	// paneStatusBg is the bottom status bar's row background — the same
-	// near-black as the editor cards' header bar, so the pane's two
-	// pieces of fixed chrome read as one system.
+	// paneStatusBg is the bottom status bar's row background -- the
+	// same near-black as the card header, so the pane's two pieces of
+	// fixed chrome read as one system.
 	paneStatusBg = cardHeaderBg
 )
 
-// ansiFg renders a palette hex color as a raw truecolor foreground
-// escape, for the strings this package styles by hand (markdown
-// styling operates on raw escapes rather than lipgloss styles -- see
-// markdown.go). Called at package init to build the md* escape vars;
-// panics on a malformed constant rather than silently rendering
-// garbage.
-func ansiFg(hex string) string {
-	var r, g, b int
-	if n, err := fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b); n != 3 || err != nil {
-		panic("tutor: ansiFg wants #RRGGBB, got " + hex)
-	}
-	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b)
-}
+// ansiFg and ansiBg render a palette color as a raw truecolor escape.
+// The pane styles many strings by hand rather than through lipgloss
+// because lipgloss routes colors through terminal-profile detection,
+// which strips them when there's no TTY -- including under `go test`,
+// where these strings are asserted on.
+func ansiFg(hex string) string { return palette.ANSIFg(hex) }
 
-// ansiBg is ansiFg's background counterpart, for the editor cards'
-// per-row backgrounds (card.go).
-func ansiBg(hex string) string {
-	var r, g, b int
-	if n, err := fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b); n != 3 || err != nil {
-		panic("tutor: ansiBg wants #RRGGBB, got " + hex)
-	}
-	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", r, g, b)
-}
+func ansiBg(hex string) string { return palette.ANSIBg(hex) }

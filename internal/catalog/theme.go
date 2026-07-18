@@ -3,6 +3,8 @@ package catalog
 import (
 	"os"
 	"strings"
+
+	"github.com/JacobTDang/Ballroom/internal/palette"
 )
 
 // Bold/saturated retro palette, truecolor (24-bit) ANSI so the exact hex
@@ -10,17 +12,23 @@ import (
 const (
 	ansiReset = "\x1b[0m"
 	ansiBold  = "\x1b[1m"
+)
 
-	colorRed    = "\x1b[38;2;240;60;60m"  // #F03C3C — dominant
-	colorOrange = "\x1b[38;2;240;134;46m" // #F0862E
-	colorGold   = "\x1b[38;2;232;169;60m" // #E8A93C
-	colorPink   = "\x1b[38;2;224;70;140m" // #E0468C
-	colorPurple = "\x1b[38;2;155;95;176m" // #9B5FB0
-	colorBlue   = "\x1b[38;2;60;125;196m" // #3C7DC4
-	colorTeal   = "\x1b[38;2;47;166;166m" // #2FA6A6
+// The banner's colors, rendered as raw truecolor escapes rather than
+// through lipgloss because this path writes to plain stdout (and is the
+// one place that honors NO_COLOR). Sourced from internal/palette so the
+// banner can't drift from the screens it introduces.
+var (
+	colorRed    = palette.ANSIFg(palette.Red) // dominant
+	colorOrange = palette.ANSIFg(palette.Orange)
+	colorGold   = palette.ANSIFg(palette.Gold)
+	colorPink   = palette.ANSIFg(palette.Pink)
+	colorPurple = palette.ANSIFg(palette.Purple)
+	colorBlue   = palette.ANSIFg(palette.Blue)
+	colorTeal   = palette.ANSIFg(palette.Teal)
 
-	colorCream    = "\x1b[38;2;242;235;221m" // #F2EBDD — warm off-white
-	colorPaleGray = "\x1b[38;2;217;211;196m" // #D9D3C4
+	colorCream    = palette.ANSIFg(palette.Cream) // warm off-white
+	colorPaleGray = palette.ANSIFg(palette.PaleGray)
 
 	colorDim = colorPaleGray
 )
