@@ -1,0 +1,12 @@
+{
+  "id": "api-quotas-01-coach",
+  "problem_id": "api-quotas-01",
+  "title": "Rate Limits & Quotas for the Platform",
+  "kind": "design",
+  "category": "api-design",
+  "language": "coach",
+  "time_limit_min": 90,
+  "tutor_mode": "design-coach",
+  "repo_path": "./repo",
+  "difficulty": "medium"
+}
