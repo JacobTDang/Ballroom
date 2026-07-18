@@ -120,6 +120,19 @@ type Config struct {
 	// sessions run without editor highlights/notes at all — a durable
 	// alternative to the in-session M-h rendering toggle.
 	DisableTutorNotes bool
+	// TutorModeOverride, when non-empty (one of "syntax-only"/
+	// "hints-first"/"full-assist" -- the exercise.TutorMode* coding
+	// vocabulary, duplicated here as raw literals rather than importing
+	// internal/exercise, matching DefaultLanguage's own precedent of
+	// keeping this package leaf-level), overrides a coding exercise's
+	// own tutor_mode for every session until changed again; empty means
+	// use whatever each exercise.json declares (the original behavior).
+	// Deliberately exercise.Kind-gated at the one place that applies it
+	// (internal/orchestrator.exerciseRunArgs) rather than here: a design
+	// or behavioral exercise's TutorMode is its session persona
+	// (interviewer, story coach, ...), not a coding assistance level, so
+	// it must never be overridden by this setting.
+	TutorModeOverride string
 }
 
 // Settings holds user preferences persisted across invocations, e.g. the
@@ -146,6 +159,10 @@ type Settings struct {
 	// DisableTutorNotes mirrors Config.DisableTutorNotes (issue #25's
 	// durable variant: notes off at the source, not just hidden).
 	DisableTutorNotes bool `json:"disable_tutor_notes,omitempty"`
+	// TutorModeOverride mirrors Config.TutorModeOverride ("" = each
+	// exercise's own tutor_mode). Validated on Load, not here — same
+	// dumb-reader rationale as DefaultLanguage.
+	TutorModeOverride string `json:"tutor_mode_override,omitempty"`
 }
 
 // SettingsPath returns the path to the persisted settings file.
@@ -192,20 +209,39 @@ func SaveSettings(path string, s Settings) error {
 // working directory, overridable via PRACTICE_ROOT (paths are resolved
 // through EvalSymlinks so tests/comparisons aren't tripped up by symlinked
 // temp dirs, e.g. /tmp -> /private/tmp on macOS).
+//
+// An explicit PRACTICE_ROOT is trusted as-is, no questions asked — the
+// documented escape hatch, and how this codebase's own tests sandbox
+// Load into a throwaway temp dir. Without it, the working directory
+// must actually look like a ballroom checkout (see ResolveRoot), else
+// this falls back to the last checkout root cached from a previous run.
+// Without that fallback, `ballroom` launched from PATH outside the
+// checkout (its usual location once installed via `go install`) would
+// silently resolve ExercisesDir/TestsDir/DataDir under whatever
+// directory it happened to be launched from (e.g. $HOME) — an empty
+// picker and "couldn't load your progress", not a working boot.
 func Load() (Config, error) {
-	root := os.Getenv("PRACTICE_ROOT")
-	if root == "" {
+	var root string
+	if envRoot := os.Getenv("PRACTICE_ROOT"); envRoot != "" {
+		resolved, err := filepath.EvalSymlinks(envRoot)
+		if err != nil {
+			return Config{}, fmt.Errorf("config: resolve root %s: %w", envRoot, err)
+		}
+		root = resolved
+	} else {
 		wd, err := os.Getwd()
 		if err != nil {
 			return Config{}, fmt.Errorf("config: getwd: %w", err)
 		}
-		root = wd
+		resolved, err := filepath.EvalSymlinks(wd)
+		if err != nil {
+			return Config{}, fmt.Errorf("config: resolve root %s: %w", wd, err)
+		}
+		root, err = ResolveRoot(resolved)
+		if err != nil {
+			return Config{}, err
+		}
 	}
-	resolved, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return Config{}, fmt.Errorf("config: resolve root %s: %w", root, err)
-	}
-	root = resolved
 
 	image := os.Getenv("PRACTICE_DOCKER_IMAGE")
 	if image == "" {
@@ -245,6 +281,17 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: default_language %q in %s: want python, go, cpp, or empty", settings.DefaultLanguage, cfg.SettingsPath())
 	}
 	cfg.DisableTutorNotes = settings.DisableTutorNotes
+	// Same fail-loud contract as default_language above: a hand-edited,
+	// unsupported value must not be silently treated as "exercise
+	// default". The vocabulary (syntax-only/hints-first/full-assist) is
+	// exercise.TutorMode*, duplicated as literals rather than imported —
+	// see TutorModeOverride's doc comment.
+	switch settings.TutorModeOverride {
+	case "", "syntax-only", "hints-first", "full-assist":
+		cfg.TutorModeOverride = settings.TutorModeOverride
+	default:
+		return Config{}, fmt.Errorf("config: tutor_mode_override %q in %s: want syntax-only, hints-first, full-assist, or empty", settings.TutorModeOverride, cfg.SettingsPath())
+	}
 
 	return cfg, nil
 }

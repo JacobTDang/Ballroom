@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/JacobTDang/Ballroom/internal/catalog"
 	"github.com/JacobTDang/Ballroom/internal/draft"
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 )
@@ -24,6 +25,20 @@ const (
 	resumeChoiceResume = iota
 	resumeChoiceFresh
 )
+
+// problemHasDraft reports whether any of p's language variants has a
+// saved draft under dataDir — used by the problem picker (renderProblems)
+// to mark rows so the resume prompt above is never a surprise. Backed
+// by draft.Exists, a cheap existence check (no file content reads), so
+// this is safe to call once per visible row on every render.
+func problemHasDraft(dataDir string, p catalog.ProblemStatus) bool {
+	for _, v := range p.Variants {
+		if draft.Exists(dataDir, v.Exercise.ID) {
+			return true
+		}
+	}
+	return false
+}
 
 // launchExercise is the single door into a session. Every path that
 // starts an exercise goes through it (the language picker's Enter and

@@ -181,6 +181,52 @@ func TestUpdateResumeDraft_EscBacksOutWithoutTouchingTheDraft(t *testing.T) {
 	}
 }
 
+// TestProblemHasDraft_* and TestRenderProblems_DraftMarker_* cover
+// issue #255: the picker should mark rows that have a saved draft, so
+// the resume prompt (above) is never a surprise. problemHasDraft must
+// check cheaply (draft.Exists -- directory/glob presence only, no file
+// content reads) since renderProblems calls it once per visible row on
+// every render.
+
+func TestProblemHasDraft_TrueWhenAnyVariantHasADraft(t *testing.T) {
+	problem := codingProblem("two-sum-01", "Two Sum", "easy")
+	ex := problem.Variants[0].Exercise
+	dataDir := seedDraft(t, ex.ID, "package main\n")
+
+	if !problemHasDraft(dataDir, problem) {
+		t.Error("expected problemHasDraft to be true for a problem whose variant has a saved draft")
+	}
+}
+
+func TestProblemHasDraft_FalseWhenNoVariantHasADraft(t *testing.T) {
+	problem := codingProblem("two-sum-01", "Two Sum", "easy")
+	if problemHasDraft(t.TempDir(), problem) {
+		t.Error("expected problemHasDraft to be false when nothing was ever snapshotted")
+	}
+}
+
+func TestRenderProblems_DraftMarker_ShownWhenDraftExists(t *testing.T) {
+	problem := codingProblem("two-sum-01", "Two Sum", "easy")
+	ex := problem.Variants[0].Exercise
+	dataDir := seedDraft(t, ex.ID, "package main\n")
+
+	m := appModel{stage: stageProblems, category: "two-pointers", cfg: config.Config{DataDir: dataDir}, categoryProblems: []catalog.ProblemStatus{problem}}
+	out := stripAnsiTUI(m.renderProblems())
+	if !strings.Contains(out, "· draft") {
+		t.Errorf("renderProblems missing the draft marker for a problem with a saved draft, got:\n%s", out)
+	}
+}
+
+func TestRenderProblems_DraftMarker_AbsentWhenNoDraft(t *testing.T) {
+	problem := codingProblem("two-sum-01", "Two Sum", "easy")
+
+	m := appModel{stage: stageProblems, category: "two-pointers", cfg: config.Config{DataDir: t.TempDir()}, categoryProblems: []catalog.ProblemStatus{problem}}
+	out := stripAnsiTUI(m.renderProblems())
+	if strings.Contains(out, "· draft") {
+		t.Errorf("renderProblems should not show a draft marker with no saved draft, got:\n%s", out)
+	}
+}
+
 func TestRenderResumeDraft_ShowsAgeAndPreview(t *testing.T) {
 	problem := codingProblem("two-sum-01", "Two Sum", "easy")
 	ex := problem.Variants[0].Exercise

@@ -6,8 +6,17 @@ import (
 	"testing"
 )
 
+// rootCacheEnvVar mirrors internal/config's unexported const of the same
+// name (see that package's root.go) — this package no longer owns the
+// cached-root logic itself (issue #255: dockerBuildRoot now just
+// delegates to config.ResolveRoot), but its tests still need to point
+// the cache at an isolated temp path so they never read or write the
+// developer's real machine-wide cache.
+const rootCacheEnvVar = "PRACTICE_ROOT_CACHE_FILE"
+
 // checkoutDir creates a temp dir containing docker/Dockerfile, so it
-// passes looksLikeCheckout — a stand-in for a real ballroom repo clone.
+// passes config.ResolveRoot's checkout check — a stand-in for a real
+// ballroom repo clone.
 func checkoutDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -20,9 +29,9 @@ func checkoutDir(t *testing.T) string {
 	return dir
 }
 
-// withRootCache points rootCacheFile at a fresh, not-yet-existing path
-// under a temp dir for the duration of the test, so tests never read or
-// write the developer's real machine-wide cache.
+// withRootCache points the cache at a fresh, not-yet-existing path under
+// a temp dir for the duration of the test, so tests never read or write
+// the developer's real machine-wide cache.
 func withRootCache(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "root-cache", "root")
@@ -30,46 +39,10 @@ func withRootCache(t *testing.T) string {
 	return path
 }
 
-func TestLooksLikeCheckout_TrueWhenDockerfileExists(t *testing.T) {
-	if !looksLikeCheckout(checkoutDir(t)) {
-		t.Error("expected a dir with docker/Dockerfile to look like a checkout")
-	}
-}
-
-func TestLooksLikeCheckout_FalseWhenDockerfileMissing(t *testing.T) {
-	if looksLikeCheckout(t.TempDir()) {
-		t.Error("expected a plain empty dir not to look like a checkout")
-	}
-}
-
-func TestCacheRootAndLoadCachedRoot_RoundTrips(t *testing.T) {
-	path := withRootCache(t)
-	cacheRoot(path, "/some/checkout/path")
-
-	got, ok := loadCachedRoot(path)
-	if !ok {
-		t.Fatal("expected loadCachedRoot to find the cached value")
-	}
-	if got != "/some/checkout/path" {
-		t.Errorf("got %q, want /some/checkout/path", got)
-	}
-}
-
-func TestLoadCachedRoot_MissingFileReturnsFalse(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "does-not-exist")
-	_, ok := loadCachedRoot(path)
-	if ok {
-		t.Error("expected loadCachedRoot to report false for a missing file")
-	}
-}
-
-func TestCacheRoot_CreatesParentDirIfMissing(t *testing.T) {
-	path := withRootCache(t)
-	cacheRoot(path, "/x")
-	if _, err := os.Stat(path); err != nil {
-		t.Errorf("expected cache file to exist at %s: %v", path, err)
-	}
-}
+// The exhaustive looks-like-a-checkout / cache-fallback / error-message
+// behavior is now tested once, in internal/config (root_test.go), since
+// that's where the logic actually lives. These two just confirm
+// dockerBuildRoot still delegates to it correctly.
 
 func TestDockerBuildRoot_ReturnsCfgRootWhenItLooksLikeCheckout(t *testing.T) {
 	withRootCache(t)
@@ -84,35 +57,6 @@ func TestDockerBuildRoot_ReturnsCfgRootWhenItLooksLikeCheckout(t *testing.T) {
 	}
 }
 
-func TestDockerBuildRoot_ValidRootIsCachedForFutureFallback(t *testing.T) {
-	cachePath := withRootCache(t)
-	dir := checkoutDir(t)
-
-	if _, err := dockerBuildRoot(dir); err != nil {
-		t.Fatalf("dockerBuildRoot: %v", err)
-	}
-
-	cached, ok := loadCachedRoot(cachePath)
-	if !ok || cached != dir {
-		t.Errorf("expected %q to be cached, got %q (ok=%v)", dir, cached, ok)
-	}
-}
-
-func TestDockerBuildRoot_FallsBackToCachedRootWhenCfgRootIsNotACheckout(t *testing.T) {
-	cachePath := withRootCache(t)
-	realCheckout := checkoutDir(t)
-	cacheRoot(cachePath, realCheckout)
-
-	notACheckout := t.TempDir()
-	got, err := dockerBuildRoot(notACheckout)
-	if err != nil {
-		t.Fatalf("dockerBuildRoot: %v", err)
-	}
-	if got != realCheckout {
-		t.Errorf("got %q, want cached checkout %q", got, realCheckout)
-	}
-}
-
 func TestDockerBuildRoot_ErrorsWhenNeitherCfgRootNorCacheIsACheckout(t *testing.T) {
 	withRootCache(t) // empty cache, nothing saved yet
 	notACheckout := t.TempDir()
@@ -120,16 +64,5 @@ func TestDockerBuildRoot_ErrorsWhenNeitherCfgRootNorCacheIsACheckout(t *testing.
 	_, err := dockerBuildRoot(notACheckout)
 	if err == nil {
 		t.Fatal("expected an error when neither cfgRoot nor the cache resolves to a real checkout")
-	}
-}
-
-func TestDockerBuildRoot_IgnoresStaleCachedRootThatNoLongerLooksLikeACheckout(t *testing.T) {
-	cachePath := withRootCache(t)
-	staleDir := t.TempDir() // once a checkout, now just an empty dir (e.g. repo moved/deleted)
-	cacheRoot(cachePath, staleDir)
-
-	_, err := dockerBuildRoot(t.TempDir())
-	if err == nil {
-		t.Fatal("expected an error since the cached root no longer looks like a real checkout")
 	}
 }

@@ -85,6 +85,8 @@ func homeboardFixtureProblems() []catalog.ProblemStatus {
 			Variants: []catalog.ExerciseStatus{{Exercise: exercise.Exercise{Language: "go"}}}},
 		{ProblemID: "off-by-one-01", Title: "Off-by-one IndexError in max_of", Category: exercise.CategoryDebug,
 			Variants: []catalog.ExerciseStatus{{Exercise: exercise.Exercise{Language: "python"}}}},
+		{ProblemID: "prompt-injection-01", Title: "Spot the Prompt Injection", Category: exercise.CategoryAIAssisted,
+			Variants: []catalog.ExerciseStatus{{Exercise: exercise.Exercise{Language: "python"}}}},
 	}
 }
 
@@ -96,7 +98,7 @@ func TestRenderHomeboard_ShowsTracksDueDailyStreakRecent(t *testing.T) {
 
 	got := stripAnsiTUI(renderHomeboard(homeboardFixtureProblems(), attempts, time.Now()))
 
-	for _, want := range []string{"DSA", "Debug", "Concurrency", "Implementation", "System Design", "API Design", "OO Design", "Behavioral"} {
+	for _, want := range []string{"DSA", "Debug", "Concurrency", "Implementation", "AI-Assisted", "System Design", "API Design", "OO Design", "Behavioral"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("homeboard missing the %s track:\n%s", want, got)
 		}
@@ -116,6 +118,33 @@ func TestRenderHomeboard_ShowsTracksDueDailyStreakRecent(t *testing.T) {
 	}
 	if !strings.Contains(got, "two-pointers-01-go") {
 		t.Errorf("homeboard missing recent attempts:\n%s", got)
+	}
+}
+
+// TestRenderHomeboard_IncludesAIAssistedTrack covers issue #255: the
+// ai-assisted category has real content (3 exercises, 1 problem) and
+// shows up in the practice picker, so a homeboard with no row for it
+// was the actual inconsistency -- not the category's size. The row must
+// carry a real solved/total count, in the same picker order as every
+// other track (right after Implementation, before System Design).
+func TestRenderHomeboard_IncludesAIAssistedTrack(t *testing.T) {
+	got := stripAnsiTUI(renderHomeboard(homeboardFixtureProblems(), nil, time.Now()))
+
+	if !strings.Contains(got, "AI-Assisted") {
+		t.Fatalf("homeboard missing the AI-Assisted track:\n%s", got)
+	}
+	implIdx := strings.Index(got, "Implementation")
+	aiIdx := strings.Index(got, "AI-Assisted")
+	sdIdx := strings.Index(got, "System Design")
+	if !(implIdx < aiIdx && aiIdx < sdIdx) {
+		t.Errorf("expected AI-Assisted between Implementation and System Design (picker order), got Implementation@%d AI-Assisted@%d SystemDesign@%d:\n%s", implIdx, aiIdx, sdIdx, got)
+	}
+
+	lineStart := strings.LastIndex(got[:aiIdx], "\n")
+	lineEnd := strings.Index(got[aiIdx:], "\n")
+	line := got[lineStart+1 : aiIdx+lineEnd]
+	if !strings.Contains(line, "0/1") {
+		t.Errorf("expected the AI-Assisted row to show 0/1 (one exercise, unsolved), got line %q", line)
 	}
 }
 

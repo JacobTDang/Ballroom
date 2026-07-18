@@ -208,7 +208,7 @@ func exerciseRunArgs(cfg config.Config, ex exercise.Exercise, controlDir, worksp
 		"-e", "PRACTICE_CATEGORY=" + ex.Category,
 		"-e", "PRACTICE_LANGUAGE=" + ex.Language,
 		"-e", "PRACTICE_KIND=" + ex.Kind,
-		"-e", "PRACTICE_TUTOR_MODE=" + ex.TutorMode,
+		"-e", "PRACTICE_TUTOR_MODE=" + tutorMode(cfg, ex),
 		"-e", "PRACTICE_TIME_LIMIT_MIN=" + strconv.Itoa(ex.TimeLimitMin),
 		"-e", "PRACTICE_STARTED_AT=" + startedAt.Format(time.RFC3339),
 		"-e", "PRACTICE_DB_PATH=/data/tracker.db",
@@ -242,6 +242,20 @@ func exerciseRunArgs(cfg config.Config, ex exercise.Exercise, controlDir, worksp
 		"-e", "PRACTICE_TUTOR_NOTES=" + tutorNotesEnvValue(cfg),
 		cfg.DockerImage,
 	}
+}
+
+// tutorMode picks the PRACTICE_TUTOR_MODE value for a session:
+// cfg.TutorModeOverride when set and ex is a coding exercise, else
+// ex.TutorMode unchanged. A design or behavioral exercise's TutorMode is
+// its session persona (interviewer, design-coach, story-coach, ...) —
+// what kind of session this even is — not a coding assistance level, so
+// the override (syntax-only/hints-first/full-assist) never applies to
+// it regardless of whether one is set.
+func tutorMode(cfg config.Config, ex exercise.Exercise) string {
+	if cfg.TutorModeOverride != "" && ex.Kind == exercise.KindCoding {
+		return cfg.TutorModeOverride
+	}
+	return ex.TutorMode
 }
 
 // tutorNotesEnvValue renders cfg.DisableTutorNotes for the container

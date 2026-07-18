@@ -333,6 +333,99 @@ func TestAppModel_Settings_SelectingOrchestratorGoesToProviderChoiceTargetingOrc
 	}
 }
 
+// TestAppModel_Settings_SelectingGraderGoesToProviderChoiceTargetingGrader
+// covers issue #255: the grader model (config.Settings.GraderModel,
+// already settable via `ballroom config set-grader-model` but until now
+// CLI-only) must round-trip through the same Settings -> provider
+// choice -> model picker flow Worker and Orchestrator already use.
+func TestAppModel_Settings_SelectingGraderGoesToProviderChoiceTargetingGrader(t *testing.T) {
+	m := appModel{stage: stageSettings, settingsCursor: 2} // 2 = Grader model
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	got := newM.(appModel)
+	if got.stage != stageProviderChoice {
+		t.Fatalf("stage = %v, want stageProviderChoice", got.stage)
+	}
+	if got.settingsEditing != settingsTargetGrader {
+		t.Errorf("settingsEditing = %v, want settingsTargetGrader", got.settingsEditing)
+	}
+}
+
+// TestAppModel_Settings_DefaultLanguageAndNotesShiftedByGraderInsertion
+// pins the settingsCursor indices for the two in-place preferences now
+// that Grader model was inserted before them -- a regression guard so a
+// future reordering can't silently misroute enter on these rows into
+// the provider choice instead of cycling/toggling in place.
+func TestAppModel_Settings_DefaultLanguageAndNotesShiftedByGraderInsertion(t *testing.T) {
+	dir := t.TempDir()
+	m := appModel{cfg: config.Config{DataDir: dir}, stage: stageSettings, settingsCursor: 3} // 3 = Default language
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command — cycling is an in-place save")
+	}
+	got := newM.(appModel)
+	if got.stage != stageSettings {
+		t.Errorf("stage = %v, want to stay on stageSettings after cycling default language", got.stage)
+	}
+	if got.cfg.DefaultLanguage != "python" {
+		t.Errorf("DefaultLanguage = %q, want python (first step of the cycle)", got.cfg.DefaultLanguage)
+	}
+
+	m2 := appModel{cfg: config.Config{DataDir: dir}, stage: stageSettings, settingsCursor: 4} // 4 = Tutor editor notes
+	newM2, _ := m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got2 := newM2.(appModel)
+	if !got2.cfg.DisableTutorNotes {
+		t.Error("expected settingsCursor 4 to toggle DisableTutorNotes in place")
+	}
+}
+
+func TestAppModel_ProviderChoice_GraderGetsAThirdNoneOption(t *testing.T) {
+	m := appModel{
+		cfg:             config.Config{DataDir: t.TempDir(), TutorModel: "worker-model", OrchestratorModel: "orchestrator-model", GraderModel: "grader-model"},
+		stage:           stageProviderChoice,
+		settingsCursor:  2, // None (use worker model) -- only present for the grader target
+		settingsEditing: settingsTargetGrader,
+	}
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no external command")
+	}
+	got := newM.(appModel)
+	if got.stage != stageSettings {
+		t.Fatalf("stage = %v, want stageSettings (back out after clearing)", got.stage)
+	}
+	if got.cfg.GraderModel != "" {
+		t.Errorf("cfg.GraderModel = %q, want empty after selecting None", got.cfg.GraderModel)
+	}
+	if got.cfg.TutorModel != "worker-model" || got.cfg.OrchestratorModel != "orchestrator-model" {
+		t.Errorf("expected TutorModel/OrchestratorModel preserved, got %q/%q", got.cfg.TutorModel, got.cfg.OrchestratorModel)
+	}
+
+	saved, err := config.LoadSettings(m.cfg.SettingsPath())
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if saved.GraderModel != "" {
+		t.Errorf("persisted GraderModel = %q, want empty", saved.GraderModel)
+	}
+	if saved.TutorModel != "worker-model" || saved.OrchestratorModel != "orchestrator-model" {
+		t.Errorf("expected persisted TutorModel/OrchestratorModel preserved, got %q/%q", saved.TutorModel, saved.OrchestratorModel)
+	}
+}
+
+func TestAppModel_ProviderChoice_WorkerTargetStillHasNoNoneOptionAfterGraderAdded(t *testing.T) {
+	// Regression guard: adding the grader's 3rd option must not leak
+	// into the worker target's list.
+	m := appModel{stage: stageProviderChoice, settingsCursor: 1, settingsEditing: settingsTargetWorker}
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := newM.(appModel)
+	if got.settingsCursor != 1 {
+		t.Errorf("settingsCursor = %d, want to stay at 1 (only 2 items: Local, API)", got.settingsCursor)
+	}
+}
+
 func TestAppModel_ProviderChoice_SelectingLocalKicksOffAsyncModelLoad(t *testing.T) {
 	defer fakeListModels([]string{"a", "b"}, nil)()
 
@@ -988,6 +1081,55 @@ func TestRenderProblems_ShowsDifficultyBadgesAndSearchPrompt(t *testing.T) {
 	for _, want := range []string{"[E]", "[M]", "[H]", "type to search"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("renderProblems missing %q", want)
+		}
+	}
+}
+
+// TestRenderProblems_RoadmapFooter_* cover issue #255: the problem
+// picker should name the current category's planning doc under docs/
+// when one exists, as a dim one-liner, and say nothing for categories
+// that don't have one (most of them -- ai-assisted, oo-design,
+// behavioral, and every individual DSA subcategory).
+func TestRenderProblems_RoadmapFooter_ShownForCategoryWithARoadmapDoc(t *testing.T) {
+	m := appModel{stage: stageProblems, category: exercise.CategoryDebug, categoryProblems: []catalog.ProblemStatus{
+		codingProblem("p1", "Off-by-one", "easy"),
+	}}
+	out := stripAnsiTUI(m.renderProblems())
+	if !strings.Contains(out, "roadmap: docs/debug-roadmap.md") {
+		t.Errorf("renderProblems missing the debug roadmap footer, got:\n%s", out)
+	}
+}
+
+func TestRenderProblems_RoadmapFooter_NamesTheRightDocPerCategory(t *testing.T) {
+	cases := []struct {
+		category string
+		wantDoc  string
+	}{
+		{exercise.CategorySystemDesign, "docs/system-design-roadmap.md"},
+		{exercise.CategoryAPIDesign, "docs/api-design-roadmap.md"},
+		{exercise.CategoryConcurrency, "docs/concurrency-roadmap.md"},
+		{exercise.CategoryDebug, "docs/debug-roadmap.md"},
+		{exercise.CategoryImplementation, "docs/implementation-roadmap.md"},
+	}
+	for _, c := range cases {
+		m := appModel{stage: stageProblems, category: c.category, categoryProblems: []catalog.ProblemStatus{
+			codingProblem("p1", "Some Problem", "easy"),
+		}}
+		out := stripAnsiTUI(m.renderProblems())
+		if !strings.Contains(out, "roadmap: "+c.wantDoc) {
+			t.Errorf("category %q: renderProblems missing %q, got:\n%s", c.category, "roadmap: "+c.wantDoc, out)
+		}
+	}
+}
+
+func TestRenderProblems_RoadmapFooter_AbsentForCategoryWithNoRoadmapDoc(t *testing.T) {
+	for _, category := range []string{exercise.CategoryAIAssisted, exercise.CategoryOODesign, exercise.CategoryBehavioral, "two-pointers"} {
+		m := appModel{stage: stageProblems, category: category, categoryProblems: []catalog.ProblemStatus{
+			codingProblem("p1", "Some Problem", "easy"),
+		}}
+		out := stripAnsiTUI(m.renderProblems())
+		if strings.Contains(out, "roadmap:") {
+			t.Errorf("category %q: expected no roadmap footer, got:\n%s", category, out)
 		}
 	}
 }
@@ -1691,6 +1833,96 @@ func TestAppModel_SelectModel_WritesOrchestratorModelWhenTargetingOrchestrator(t
 	}
 }
 
+func TestAppModel_SelectModel_WritesGraderModelWhenTargetingGrader(t *testing.T) {
+	defer fakeCheckToolCalling(true, nil)()
+
+	dir := t.TempDir()
+	cfg := config.Config{DataDir: dir, TutorModel: "worker-model", OrchestratorModel: "orchestrator-model"}
+	m := appModel{cfg: cfg, settingsEditing: settingsTargetGrader}
+
+	newM, _ := m.selectModel("grader-model")
+	got := newM.(appModel)
+	if got.cfg.GraderModel != "grader-model" {
+		t.Errorf("cfg.GraderModel = %q, want %q", got.cfg.GraderModel, "grader-model")
+	}
+	if got.cfg.TutorModel != "worker-model" || got.cfg.OrchestratorModel != "orchestrator-model" {
+		t.Errorf("expected TutorModel/OrchestratorModel preserved (unaffected by a grader pick), got %q/%q", got.cfg.TutorModel, got.cfg.OrchestratorModel)
+	}
+
+	saved, err := config.LoadSettings(cfg.SettingsPath())
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if saved.GraderModel != "grader-model" {
+		t.Errorf("persisted GraderModel = %q, want %q", saved.GraderModel, "grader-model")
+	}
+	if saved.TutorModel != "worker-model" || saved.OrchestratorModel != "orchestrator-model" {
+		t.Errorf("expected persisted TutorModel/OrchestratorModel preserved, got %q/%q", saved.TutorModel, saved.OrchestratorModel)
+	}
+}
+
+func TestAppModel_RenderSettings_ShowsGraderModelStatus(t *testing.T) {
+	m := appModel{cfg: config.Config{TutorModel: "worker-model", GraderModel: "grader-model"}, stage: stageSettings}
+	view := stripAnsiTUI(m.View())
+	if !strings.Contains(view, "Grader model") || !strings.Contains(view, "grader-model") {
+		t.Errorf("expected the grader model status in the view, got:\n%s", view)
+	}
+}
+
+func TestAppModel_RenderSettings_ShowsGraderModelNoneWhenEmpty(t *testing.T) {
+	m := appModel{cfg: config.Config{TutorModel: "worker-model"}, stage: stageSettings}
+	view := stripAnsiTUI(m.View())
+	if !strings.Contains(view, "Grader model") {
+		t.Errorf("expected a Grader model row even when unset, got:\n%s", view)
+	}
+}
+
+// --- Tutor mode override (issue #255) ---
+
+func TestAppModel_Settings_TutorModeOverrideCyclesThroughValuesAndPersists(t *testing.T) {
+	dir := t.TempDir()
+	m := appModel{cfg: config.Config{DataDir: dir}, stage: stageSettings, settingsCursor: 5} // 5 = Tutor mode override
+
+	steps := []string{"syntax-only", "hints-first", "full-assist", ""}
+	for _, want := range steps {
+		newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd != nil {
+			t.Error("expected no external command — cycling is an in-place save")
+		}
+		got := newM.(appModel)
+		if got.stage != stageSettings {
+			t.Errorf("stage = %v, want to stay on stageSettings while cycling", got.stage)
+		}
+		if got.cfg.TutorModeOverride != want {
+			t.Errorf("TutorModeOverride = %q, want %q", got.cfg.TutorModeOverride, want)
+		}
+		saved, err := config.LoadSettings(m.cfg.SettingsPath())
+		if err != nil {
+			t.Fatalf("LoadSettings: %v", err)
+		}
+		if saved.TutorModeOverride != want {
+			t.Errorf("persisted TutorModeOverride = %q, want %q", saved.TutorModeOverride, want)
+		}
+		m = got
+	}
+}
+
+func TestAppModel_RenderSettings_ShowsTutorModeOverrideStatus(t *testing.T) {
+	m := appModel{cfg: config.Config{TutorModel: "worker-model", TutorModeOverride: "hints-first"}, stage: stageSettings}
+	view := stripAnsiTUI(m.View())
+	if !strings.Contains(view, "hints-first") {
+		t.Errorf("expected the tutor mode override status in the view, got:\n%s", view)
+	}
+}
+
+func TestAppModel_RenderSettings_ShowsExerciseDefaultWhenTutorModeOverrideEmpty(t *testing.T) {
+	m := appModel{cfg: config.Config{TutorModel: "worker-model"}, stage: stageSettings}
+	view := stripAnsiTUI(m.View())
+	if !strings.Contains(view, "exercise default") {
+		t.Errorf("expected 'exercise default' shown for an empty override, got:\n%s", view)
+	}
+}
+
 func TestAppModel_RenderOpenRouterKeyEntry_MasksTypedKey(t *testing.T) {
 	m := appModel{cfg: config.Config{}, stage: stageOpenRouterKeyEntry, openRouterPendingModel: "openrouter:x/y", openRouterKeyInput: "sk-secret-value"}
 	view := stripAnsiTUI(m.View())
@@ -1925,7 +2157,7 @@ func TestUpdateProblems_DefaultLanguageWithoutMatchingVariantStillAsks(t *testin
 }
 
 func TestUpdateSettings_CycleDefaultLanguagePersists(t *testing.T) {
-	m := appModel{stage: stageSettings, settingsCursor: 2, cfg: config.Config{DataDir: t.TempDir()}}
+	m := appModel{stage: stageSettings, settingsCursor: 3, cfg: config.Config{DataDir: t.TempDir()}} // 3 = Default language (issue #255 inserted Grader model at 2)
 	for _, want := range []string{"python", "go", "cpp", ""} {
 		newM, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
 		m = newM.(appModel)
@@ -1943,7 +2175,7 @@ func TestUpdateSettings_CycleDefaultLanguagePersists(t *testing.T) {
 }
 
 func TestUpdateSettings_ToggleTutorNotesPersists(t *testing.T) {
-	m := appModel{stage: stageSettings, settingsCursor: 3, cfg: config.Config{DataDir: t.TempDir()}}
+	m := appModel{stage: stageSettings, settingsCursor: 4, cfg: config.Config{DataDir: t.TempDir()}} // 4 = Tutor editor notes (issue #255 inserted Grader model at 2)
 	newM, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
 	m = newM.(appModel)
 	if !m.cfg.DisableTutorNotes {
