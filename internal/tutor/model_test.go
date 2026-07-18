@@ -2000,3 +2000,78 @@ func TestTutorModel_StaleTurnCompleteMsgAfterCancelIsIgnored(t *testing.T) {
 		t.Errorf("displayBlocks = %+v, want untouched by a stale message", got.displayBlocks)
 	}
 }
+
+// --- Stage 6: bounded conversation history and distinguishable turn
+// failures, issue #240 -- before this, m.history grew unbounded and was
+// resent in full every turn, so a long session got slower and slower
+// before eventually failing outright with a provider context-length
+// error that surfaced as the exact same generic "could not reach
+// <model>" wording as a real network problem. trimHistory/
+// classifyTurnError themselves are unit-tested directly in
+// history_test.go; these prove the wiring into the real turn path.
+
+func TestTutorModel_HistoryIsTrimmedToBudgetAfterEachTurn(t *testing.T) {
+	origBudget := historyBudgetChars
+	historyBudgetChars = 60 // tiny -- room for roughly one short pair
+	t.Cleanup(func() { historyBudgetChars = origBudget })
+
+	mock := newSequencedOllama(t, "short reply one", "short reply two", "short reply three")
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "first question")
+	got = submitAndRun(t, got, "second question")
+	got = submitAndRun(t, got, "third question")
+
+	// Untrimmed, 3 turns would leave 1 (system) + 2*3 (pairs) = 7
+	// messages -- a tiny budget must keep it well below that.
+	if untrimmed := 1 + 2*3; len(got.history) >= untrimmed {
+		t.Errorf("history has %d messages after 3 turns under a tiny budget, want it trimmed below the untrimmed %d", len(got.history), untrimmed)
+	}
+	if got.history[0].Role != schema.System {
+		t.Errorf("history[0].Role = %v, want System -- the persona prompt must survive trimming", got.history[0].Role)
+	}
+	last := got.history[len(got.history)-1]
+	if last.Content != "short reply three" {
+		t.Errorf("history's last message = %q, want the most recent reply always kept regardless of budget", last.Content)
+	}
+}
+
+// TestTutorModel_ContextOverflowFailureShowsDistinctNoteFromNetworkFailure
+// drives a real (mocked) provider context-length rejection through the
+// actual Update path, not just classifyTurnError in isolation -- proving
+// the wiring, not just the classifier.
+func TestTutorModel_ContextOverflowFailureShowsDistinctNoteFromNetworkFailure(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"this model's maximum context length is 4096 tokens"}`))
+	}))
+	defer mock.Close()
+
+	cfg := testConfig(mock.URL)
+	cfg.Mode = exercise.TutorModeSyntaxOnly
+
+	m, err := newTutorModel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newTutorModel: %v", err)
+	}
+	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = newM.(tutorModel)
+
+	got := submitAndRun(t, m, "hello")
+
+	view := ansi.Strip(got.viewport.View())
+	if !strings.Contains(view, "context window") {
+		t.Errorf("viewport view %q, want a context-overflow note", view)
+	}
+	if strings.Contains(view, "could not reach") {
+		t.Errorf("viewport view %q, want the overflow note distinct from the generic connectivity wording", view)
+	}
+}
