@@ -103,6 +103,14 @@ func TestTestsPath(t *testing.T) {
 	}
 }
 
+func TestReferencePath(t *testing.T) {
+	cfg := Config{ExercisesDir: "/root/exercises"}
+	want := filepath.Join("/root/exercises", "two-pointers-01", ".reference")
+	if got := cfg.ReferencePath("two-pointers-01"); got != want {
+		t.Errorf("ReferencePath = %q, want %q", got, want)
+	}
+}
+
 func TestSettingsPath(t *testing.T) {
 	cfg := Config{DataDir: "/root/data"}
 	want := filepath.Join("/root/data", "settings.json")

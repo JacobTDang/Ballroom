@@ -102,6 +102,16 @@ func RunExercise(cfg config.Config, ex exercise.Exercise, draftDir string) error
 		revealErr <- WaitAndReveal(ctx, controlDir, cfg.TestsPath(ex.ID), workspaceDir, revealPollInterval)
 	}()
 
+	// Independent of the submit watcher above (see WaitAndRevealReference's
+	// own doc comment): the reference solution can be requested by `ballroom
+	// reference` (M-g) or by a passing `ballroom submit`, in any order or
+	// not at all, so it gets its own watcher rather than being folded into
+	// revealErr's single-purpose loop.
+	referenceErr := make(chan error, 1)
+	go func() {
+		referenceErr <- WaitAndRevealReference(ctx, controlDir, cfg.ReferencePath(ex.ID), cfg.TestsPath(ex.ID), workspaceDir, revealPollInterval)
+	}()
+
 	snapshotErr := make(chan error, 1)
 	go func() {
 		snapshotErr <- SnapshotLoop(ctx, cfg.DataDir, ex.ID, workspaceDir, draftSnapshotInterval)
@@ -120,6 +130,9 @@ func RunExercise(cfg config.Config, ex exercise.Exercise, draftDir string) error
 		// Only surface reveal-side errors that happened for a reason other
 		// than us cancelling the context on normal container exit.
 		fmt.Fprintf(os.Stderr, "orchestrator: reveal watcher: %v\n", err)
+	}
+	if err := <-referenceErr; err != nil && ctx.Err() == nil {
+		fmt.Fprintf(os.Stderr, "orchestrator: reference watcher: %v\n", err)
 	}
 	if err := <-snapshotErr; err != nil {
 		fmt.Fprintf(os.Stderr, "orchestrator: draft snapshot loop: %v\n", err)

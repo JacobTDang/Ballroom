@@ -406,3 +406,52 @@ func TestReadCursorPosition_ReturnsPosition(t *testing.T) {
 		t.Errorf("result = %q, want it to look like a JSON object", out)
 	}
 }
+
+func TestOpenInSplitExpr_EscapesEmbeddedQuotes(t *testing.T) {
+	got := openInSplitExpr("/tmp/it's/solution.py")
+	want := "execute('vsplit ' . fnameescape('/tmp/it''s/solution.py'))"
+	if got != want {
+		t.Errorf("openInSplitExpr = %q, want %q", got, want)
+	}
+}
+
+func TestOpenInSplit_EmptySocketReturnsNilNoError(t *testing.T) {
+	// Same graceful-degradation contract as remoteExpr itself: no editor
+	// pane attached is an expected state (e.g. driven headless), not a
+	// command failure -- the revealed file is still on disk regardless.
+	if err := OpenInSplit(context.Background(), "", "/workspace/reference/solution.py"); err != nil {
+		t.Fatalf("OpenInSplit with empty socket: %v", err)
+	}
+}
+
+func TestOpenInSplit_OpensFileAsNewSplitAndFocusesIt(t *testing.T) {
+	socket := startTestNvim(t)
+	ctx := context.Background()
+
+	target := filepath.Join(t.TempDir(), "solution.py")
+	if err := os.WriteFile(target, []byte("print('reference')\n"), 0o644); err != nil {
+		t.Fatalf("write target file: %v", err)
+	}
+
+	if err := OpenInSplit(ctx, socket, target); err != nil {
+		t.Fatalf("OpenInSplit: %v", err)
+	}
+
+	winCount, err := remoteExpr(ctx, socket, "winnr('$')")
+	if err != nil {
+		t.Fatalf("remoteExpr: %v", err)
+	}
+	if winCount != "2" {
+		t.Errorf("winnr('$') = %s, want 2 (the original window plus the new split)", winCount)
+	}
+
+	// The split takes focus and shows the target file -- not left behind
+	// in the original (now background) window.
+	focused, err := remoteExpr(ctx, socket, "fnamemodify(bufname('%'), ':t')")
+	if err != nil {
+		t.Fatalf("remoteExpr: %v", err)
+	}
+	if focused != "solution.py" {
+		t.Errorf("focused buffer = %q, want %q", focused, "solution.py")
+	}
+}

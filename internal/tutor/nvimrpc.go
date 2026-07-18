@@ -52,6 +52,31 @@ func cursorPositionExpr() string {
 	return `json_encode({'file': expand('%:t'), 'line': line('.'), 'col': col('.'), 'total_lines': line('$')})`
 }
 
+// openInSplitExpr builds the --remote-expr call that opens path as a new
+// vertical split and focuses it. execute() is itself an expression (it
+// runs an Ex command and returns its :execute output, empty here on
+// success), so this reuses the same --remote-expr RPC path
+// highlightExpr/cursorPositionExpr already use rather than needing
+// --remote-send. path isn't model/user-controlled in this codebase (it's
+// a filesystem path OpenInSplit's own caller constructs), but it's
+// escaped the same way regardless -- cheap, and one less thing to ever
+// have to reason about if that changes.
+func openInSplitExpr(path string) string {
+	return fmt.Sprintf("execute('vsplit ' . fnameescape('%s'))", escapeVimSingleQuoted(path))
+}
+
+// OpenInSplit opens path as a vertical split in the nvim instance
+// listening on socket, focusing it — used by `ballroom reference` (cmd/
+// ballroom) to show the revealed reference solution alongside the user's
+// own solution file rather than replacing it. Same graceful-degradation
+// contract as remoteExpr: an empty or unreachable socket is not an error
+// (no editor pane attached is an expected state, e.g. driven headless),
+// only a genuine RPC failure is.
+func OpenInSplit(ctx context.Context, socket, path string) error {
+	_, err := remoteExpr(ctx, socket, openInSplitExpr(path))
+	return err
+}
+
 // remoteExpr evaluates expr in the nvim instance listening on socket via
 // `nvim --server socket --remote-expr expr` and returns its raw string
 // result. Returns ("", nil) — not an error — when socket is empty or
