@@ -39,9 +39,14 @@ const sandboxVolume = "ballroom-sandbox"
 // draft.Snapshot call (deferred below, before cleanupWorkspace) catches
 // whatever was last saved on every exit path -- normal completion,
 // submit, `ballroom return`, a killed container, or a docker error
-// (issue #221). PrepareWorkspace's draftDir overlay is what makes a
-// saved draft actually resumed on the next run of the same exercise.
-func RunExercise(cfg config.Config, ex exercise.Exercise) error {
+// (issue #221).
+//
+// draftDir is the caller's answer to "resume or start fresh": the
+// draft directory to overlay onto the starter, or empty for a pristine
+// start. The decision belongs to the caller (the TUI asks the user;
+// see internal/tui/resumedraft.go) rather than to this function, so a
+// saved draft is never silently resumed or silently discarded.
+func RunExercise(cfg config.Config, ex exercise.Exercise, draftDir string) error {
 	if err := EnsureImage(cfg); err != nil {
 		return err
 	}
@@ -50,7 +55,7 @@ func RunExercise(cfg config.Config, ex exercise.Exercise) error {
 		return fmt.Errorf("orchestrator: create data dir: %w", err)
 	}
 
-	workspaceDir, cleanupWorkspace, err := PrepareWorkspace(ex.RepoPath, ex.VideoURL, draft.Dir(cfg.DataDir, ex.ID))
+	workspaceDir, cleanupWorkspace, err := PrepareWorkspace(ex.RepoPath, ex.VideoURL, draftDir)
 	if err != nil {
 		return err
 	}
