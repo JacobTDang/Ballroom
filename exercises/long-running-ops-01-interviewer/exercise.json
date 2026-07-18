@@ -1,0 +1,12 @@
+{
+  "id": "long-running-ops-01-interviewer",
+  "problem_id": "long-running-ops-01",
+  "title": "Transcode Video: Long-Running Operations",
+  "kind": "design",
+  "category": "api-design",
+  "language": "interviewer",
+  "time_limit_min": 45,
+  "tutor_mode": "interviewer",
+  "repo_path": "./repo",
+  "difficulty": "hard"
+}

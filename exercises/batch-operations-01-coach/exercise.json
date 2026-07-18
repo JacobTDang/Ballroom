@@ -1,0 +1,12 @@
+{
+  "id": "batch-operations-01-coach",
+  "problem_id": "batch-operations-01",
+  "title": "Bulk Import for Contacts",
+  "kind": "design",
+  "category": "api-design",
+  "language": "coach",
+  "time_limit_min": 90,
+  "tutor_mode": "design-coach",
+  "repo_path": "./repo",
+  "difficulty": "medium"
+}

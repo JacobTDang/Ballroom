@@ -1,0 +1,12 @@
+{
+  "id": "resumable-upload-01-interviewer",
+  "problem_id": "resumable-upload-01",
+  "title": "Upload 10 GB, Resumably",
+  "kind": "design",
+  "category": "api-design",
+  "language": "interviewer",
+  "time_limit_min": 45,
+  "tutor_mode": "interviewer",
+  "repo_path": "./repo",
+  "difficulty": "hard"
+}
