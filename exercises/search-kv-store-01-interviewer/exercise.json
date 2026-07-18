@@ -7,5 +7,6 @@
   "language": "interviewer",
   "time_limit_min": 45,
   "tutor_mode": "interviewer",
-  "repo_path": "./repo"
+  "repo_path": "./repo",
+  "difficulty": "hard"
 }

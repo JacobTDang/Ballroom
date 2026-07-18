@@ -7,5 +7,6 @@
   "time_limit_min": 35,
   "tutor_mode": "hints-first",
   "repo_path": "./repo",
-  "test_command": "go test -race ./..."
+  "test_command": "go test -race ./...",
+  "difficulty": "hard"
 }

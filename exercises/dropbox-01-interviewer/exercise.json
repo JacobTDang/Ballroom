@@ -8,5 +8,6 @@
   "time_limit_min": 45,
   "tutor_mode": "interviewer",
   "repo_path": "./repo",
-  "video_url": "https://youtu.be/_UZ1ngy-kOI"
+  "video_url": "https://youtu.be/_UZ1ngy-kOI",
+  "difficulty": "hard"
 }

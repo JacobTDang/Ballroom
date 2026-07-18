@@ -7,5 +7,6 @@
   "time_limit_min": 20,
   "tutor_mode": "hints-first",
   "repo_path": "./repo",
-  "test_command": "clang++ -std=c++17 -fsanitize=address,undefined -g -O0 -o /tmp/t solution.cpp hidden_test.cpp && /tmp/t"
+  "test_command": "clang++ -std=c++17 -fsanitize=address,undefined -g -O0 -o /tmp/t solution.cpp hidden_test.cpp && /tmp/t",
+  "difficulty": "easy"
 }
