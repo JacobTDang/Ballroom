@@ -5,8 +5,9 @@ hidden tests, system-design and behavioral mock interviews with an LLM
 interviewer, and an in-session AI tutor — all running locally in a
 Docker practice environment.
 
-<!-- screenshot: home menu -->
-<!-- screenshot: a practice session (editor + tutor + terminal panes, clock in the status bar) -->
+<p align="center"><img src="docs/img/home.svg" alt="Home menu: disco ball, menu, today's Daily pick, and per-track progress" width="920"></p>
+
+<p align="center"><img src="docs/img/session.svg" alt="A practice session: nvim editor on top, tutor chat and terminal below" width="920"></p>
 
 Every session is a tmux window with three panes: the problem statement
 and your editor (nvim) on top, the tutor chat and a terminal below.
