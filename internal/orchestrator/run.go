@@ -12,10 +12,17 @@ import (
 	"time"
 
 	"github.com/JacobTDang/Ballroom/internal/config"
+	"github.com/JacobTDang/Ballroom/internal/draft"
 	"github.com/JacobTDang/Ballroom/internal/exercise"
 )
 
 const revealPollInterval = 200 * time.Millisecond
+
+// draftSnapshotInterval is how often SnapshotLoop polls the workspace
+// for solution.* changes to persist to data/drafts/ -- cheap enough
+// (a short-circuiting hash compare on a no-op tick) to run for the
+// whole session without any noticeable cost.
+const draftSnapshotInterval = 2 * time.Second
 
 const sandboxVolume = "ballroom-sandbox"
 
@@ -25,6 +32,15 @@ const sandboxVolume = "ballroom-sandbox"
 // dir that gets mounted as /workspace and deleted on exit, so nothing
 // written during the session (edits, or hidden tests revealed on submit
 // — see WaitAndReveal) can leak back into the source repo.
+//
+// The workspace is disposable but the user's in-progress code must not
+// be: SnapshotLoop polls it into data/drafts/<exercise-id>/ every
+// draftSnapshotInterval while the session runs, and a final
+// draft.Snapshot call (deferred below, before cleanupWorkspace) catches
+// whatever was last saved on every exit path -- normal completion,
+// submit, `ballroom return`, a killed container, or a docker error
+// (issue #221). PrepareWorkspace's draftDir overlay is what makes a
+// saved draft actually resumed on the next run of the same exercise.
 func RunExercise(cfg config.Config, ex exercise.Exercise) error {
 	if err := EnsureImage(cfg); err != nil {
 		return err
@@ -34,7 +50,7 @@ func RunExercise(cfg config.Config, ex exercise.Exercise) error {
 		return fmt.Errorf("orchestrator: create data dir: %w", err)
 	}
 
-	workspaceDir, cleanupWorkspace, err := PrepareWorkspace(ex.RepoPath, ex.VideoURL)
+	workspaceDir, cleanupWorkspace, err := PrepareWorkspace(ex.RepoPath, ex.VideoURL, draft.Dir(cfg.DataDir, ex.ID))
 	if err != nil {
 		return err
 	}
@@ -51,9 +67,26 @@ func RunExercise(cfg config.Config, ex exercise.Exercise) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Registered after cleanupWorkspace above, so Go's LIFO defer order
+	// runs this snapshot FIRST on every exit path, catching whatever
+	// the user last saved before the workspace it lives in is deleted.
+	// By the time any defer runs, the explicit cancel() + channel
+	// drains below have already stopped SnapshotLoop, so this never
+	// races a concurrent in-loop snapshot.
+	defer func() {
+		if _, err := draft.Snapshot(cfg.DataDir, ex.ID, workspaceDir); err != nil {
+			fmt.Fprintf(os.Stderr, "orchestrator: final draft snapshot: %v\n", err)
+		}
+	}()
+
 	revealErr := make(chan error, 1)
 	go func() {
 		revealErr <- WaitAndReveal(ctx, controlDir, cfg.TestsPath(ex.ID), workspaceDir, revealPollInterval)
+	}()
+
+	snapshotErr := make(chan error, 1)
+	go func() {
+		snapshotErr <- SnapshotLoop(ctx, cfg.DataDir, ex.ID, workspaceDir, draftSnapshotInterval)
 	}()
 
 	args := exerciseRunArgs(cfg, ex, controlDir, workspaceDir, startedAt)
@@ -69,6 +102,9 @@ func RunExercise(cfg config.Config, ex exercise.Exercise) error {
 		// Only surface reveal-side errors that happened for a reason other
 		// than us cancelling the context on normal container exit.
 		fmt.Fprintf(os.Stderr, "orchestrator: reveal watcher: %v\n", err)
+	}
+	if err := <-snapshotErr; err != nil {
+		fmt.Fprintf(os.Stderr, "orchestrator: draft snapshot loop: %v\n", err)
 	}
 
 	if runErr != nil {
