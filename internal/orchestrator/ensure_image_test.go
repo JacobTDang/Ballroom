@@ -34,3 +34,25 @@ func TestParseImageIDs_WhitespaceOnly(t *testing.T) {
 		t.Errorf("parseImageIDs(whitespace only) = %v, want empty", got)
 	}
 }
+
+func TestImageNeedsRebuild(t *testing.T) {
+	cases := []struct {
+		name  string
+		label string
+		want  string
+		out   bool
+	}{
+		{"label matches current content hash", "abc123", "abc123", false},
+		{"label is a stale content hash", "abc123", "def456", true},
+		{"label empty (image predates this label)", "", "abc123", true},
+		{"both empty", "", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := imageNeedsRebuild(tc.label, tc.want)
+			if got != tc.out {
+				t.Errorf("imageNeedsRebuild(%q, %q) = %v, want %v", tc.label, tc.want, got, tc.out)
+			}
+		})
+	}
+}
