@@ -60,12 +60,19 @@ and OpenRouter models stream their replies progressively.
 
 ## The tracks
 
-**Coding** — DSA (the NeetCode 150, by topic), debugging, and
-OO-design exercises in Python, Go, and C++. Hidden tests are mounted
-only when you submit: the visible starter must fail them, your job is
-to make them pass. Every NeetCode problem links its official solution
-video (a spoiler-marked footer on the problem statement, and again
-with your results).
+**Coding** — DSA (the NeetCode 150, by topic) and OO-design exercises
+in Python, Go, and C++. Hidden tests are mounted only when you submit:
+the visible starter must fail them, your job is to make them pass.
+Every NeetCode problem links its official solution video (a
+spoiler-marked footer on the problem statement, and again with your
+results).
+
+**Debug** — a fourteen-rung find-and-fix ladder in all three
+languages: the starter is plausible code with one real bug, the
+hidden tests reproduce the symptom, and the rep is the smallest
+correct fix. Four phases, from bugs that crash and name their line
+to bugs that only lie on the second call — plus one that's correct
+but quadratic. Curriculum: `docs/debug-roadmap.md`.
 
 **Concurrency** — a ten-rung ladder (bounded queues, worker pools,
 barriers, graceful shutdown, a deadlock to fix) in all three
@@ -73,11 +80,13 @@ languages, with hidden tests running under the race detector
 (`go test -race`) and ThreadSanitizer — "it usually works" never
 passes. Curriculum: `docs/concurrency-roadmap.md`.
 
-**Implementation** — eleven build-it-from-scratch components: rate
+**Implementation** — fifteen build-it-from-scratch components: rate
 limiters, a bloom filter, a consistent-hash ring, a TTL cache, retry
-with backoff, plus a parsers half (tokenizer, glob matcher, INI and
-JSON parsers, event emitter). Injectable clocks make every test
-exact. Curriculum: `docs/implementation-roadmap.md`.
+with backoff, a parsers half (tokenizer, glob matcher, INI and JSON
+parsers, event emitter), and an API-mechanics half (opaque cursor
+pagination, an idempotency-key store, ETag conditional requests, a
+field-mask update engine). Injectable clocks make every test exact.
+Curriculum: `docs/implementation-roadmap.md`.
 
 **System design** — the
 [system-design-primer](https://github.com/donnemartin/system-design-primer)
@@ -86,6 +95,14 @@ a time) and timed **interviewer** mocks (bare prompt, you scope it,
 45 minutes). A hidden per-question rubric grades your `solution.md`
 on submit, and most questions link a curated walkthrough video.
 `docs/system-design-roadmap.md` is the full curriculum, start there.
+
+**API design** — twelve questions as guided **coach** sessions and
+timed **interviewer** mocks, graded against hidden rubrics grounded in
+Google's API Design Guide and the AIPs: resource-oriented CRUD,
+pagination, filtering, error models, long-running operations,
+resumable uploads, batch methods, ETags, idempotency keys, versioning,
+webhooks, and quotas. Four of them have build-it counterparts in the
+implementation track. Curriculum: `docs/api-design-roadmap.md`.
 
 **Behavioral** — eight classic "tell me about a time…" questions as
 **story-coach** sessions (build a STAR answer one section at a time)
