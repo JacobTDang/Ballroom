@@ -232,17 +232,23 @@ func renderQuote(text string, width int) string {
 // "section break" in a chat column.
 const mdRuleWidth = 40
 
+// renderRule draws a markdown hr (---/***/___) as a double rule, the
+// same weight as the editor cards' frames (card.go) and the host
+// panel's own border (lipgloss.DoubleBorder(), internal/tui/dashboard.go)
+// -- so every horizontal line in the pane reads as one system.
 func renderRule(width int) string {
 	n := mdRuleWidth
 	if width > 0 && width < n {
 		n = width
 	}
-	return mdDimColor + strings.Repeat("─", n) + mdColorReset
+	return mdDimColor + strings.Repeat("═", n) + mdColorReset
 }
 
 // renderFence renders one fenced block: an editor card (card.go) when
 // the pane gives it enough width, the width-independent rule style
-// otherwise -- dim label rule, highlighted code, closing rule.
+// otherwise -- dim label rule, highlighted code, closing rule. The rule
+// itself is double, matching renderRule and the cards it stands in for
+// when the pane is too narrow to frame one.
 func renderFence(label string, lines []string, cardWidth int, unterminated bool) []string {
 	if cardWidth > 0 {
 		return renderCodeCard(label, lines, cardWidth, unterminated)
@@ -252,10 +258,10 @@ func renderFence(label string, lines []string, cardWidth int, unterminated bool)
 		shown = "code"
 	}
 	out := make([]string, 0, len(lines)+2)
-	out = append(out, mdDimColor+"── "+shown+" ──"+mdColorReset)
+	out = append(out, mdDimColor+"══ "+shown+" ══"+mdColorReset)
 	out = append(out, highlightCode(label, lines)...)
 	if !unterminated {
-		out = append(out, mdDimColor+"──"+mdColorReset)
+		out = append(out, mdDimColor+"══"+mdColorReset)
 	}
 	return out
 }

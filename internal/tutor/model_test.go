@@ -537,7 +537,7 @@ func TestTutorModel_StatusBarPinnedBelowInputWithEndpointAndExitHint(t *testing.
 	view := m.View()
 	lines := strings.Split(view, "\n")
 	plainLast := stripAnsiTest(lines[len(lines)-1])
-	if !strings.Contains(plainLast, cfg.Model) || !strings.Contains(plainLast, strings.ToUpper(cfg.Mode)) {
+	if !strings.Contains(plainLast, cfg.Model) || !strings.Contains(plainLast, letterspacedUpper(cfg.Mode)) {
 		t.Errorf("View's last line = %q, want the model and mode pill pinned there", plainLast)
 	}
 	if !strings.Contains(plainLast, mock.URL) {

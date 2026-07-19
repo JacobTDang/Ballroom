@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Smoke tests for clock.sh's color transitions -- teal (>=10 min left),
-# gold (<10 min left), red TIME UP (deadline passed) -- using the
-# optional injected-"now" argument so this runs in well under a second
-# instead of waiting out a real countdown.
+# gold (<10 min left), red TIME UP (deadline passed) -- and its bracketed
+# framing (matching internal/tui/homeboard.go's progressBar meters),
+# using the optional injected-"now" argument so this runs in well under a
+# second instead of waiting out a real countdown.
 #
 # No shell test framework exists in this repo (see README's Development
 # section for the Go equivalent); this is a plain pass/fail script run
@@ -27,49 +28,68 @@ assert_contains() {
   fi
 }
 
+# assert_equals is used for the color-transition cases below: clock.sh's
+# output for a given (deadline, now) pair is fully deterministic, so a
+# golden exact match catches a stray/missing bracket the way a substring
+# check wouldn't.
+assert_equals() {
+  local desc="$1" got="$2" want="$3"
+  if [[ "$got" != "$want" ]]; then
+    echo "FAIL: $desc"
+    echo "  want: $want"
+    echo "  got:  $got"
+    fail=1
+  else
+    echo "ok: $desc"
+  fi
+}
+
 # clock.sh takes deadline/now as container uptime (seconds since this
 # container's kernel booted -- /proc/uptime's first field), not wall
 # clock epoch seconds (issue #229) -- these are plain small numbers, not
 # anything tied to a real clock, which is exactly what makes the
 # injected-"now" argument usable for deterministic tests.
 
-# Deadline at uptime 2000s, "now" at 1000s -> 1000s (16:40) remaining, teal.
+# Deadline at uptime 2000s, "now" at 1000s -> 1000s (16:40) remaining,
+# teal, bracketed in the meter gray.
 out="$("$CLOCK" 2000 1000)"
-assert_contains "teal when far from deadline" "$out" '#[fg=#2FA6A6]16:40#[default]'
+assert_equals "teal when far from deadline" "$out" '#[fg=#D9D3C4][#[fg=#2FA6A6]16:40#[fg=#D9D3C4]]#[default]'
 
 # "now" at 1750s -> 250s (04:10) remaining, under the 600s gold threshold.
 out="$("$CLOCK" 2000 1750)"
-assert_contains "gold under 10 minutes remaining" "$out" '#[fg=#E8A93C]04:10#[default]'
+assert_equals "gold under 10 minutes remaining" "$out" '#[fg=#D9D3C4][#[fg=#E8A93C]04:10#[fg=#D9D3C4]]#[default]'
 
 # The 600s boundary itself: strictly-less-than, so 599 remaining is gold
 # and 600 remaining is still the last teal second.
 out="$("$CLOCK" 2000 1401)"
-assert_contains "599s remaining is gold" "$out" '#[fg=#E8A93C]09:59#[default]'
+assert_equals "599s remaining is gold" "$out" '#[fg=#D9D3C4][#[fg=#E8A93C]09:59#[fg=#D9D3C4]]#[default]'
 out="$("$CLOCK" 2000 1400)"
-assert_contains "600s remaining is still teal" "$out" '#[fg=#2FA6A6]10:00#[default]'
+assert_equals "600s remaining is still teal" "$out" '#[fg=#D9D3C4][#[fg=#2FA6A6]10:00#[fg=#D9D3C4]]#[default]'
 
-# "now" at or past the deadline -> TIME UP.
+# "now" at or past the deadline -> bracketed, bold red TIME UP.
 out="$("$CLOCK" 2000 2000)"
-assert_contains "deadline exactly reached" "$out" 'TIME UP'
+assert_equals "deadline exactly reached" "$out" '#[fg=#D9D3C4][#[fg=#F03C3C]#[bold]TIME UP#[nobold]#[fg=#D9D3C4]]#[default]'
 out="$("$CLOCK" 2000 2500)"
-assert_contains "deadline passed" "$out" 'TIME UP'
+assert_equals "deadline passed" "$out" '#[fg=#D9D3C4][#[fg=#F03C3C]#[bold]TIME UP#[nobold]#[fg=#D9D3C4]]#[default]'
 
 # Fractional /proc/uptime-shaped inputs (the whole point of this fix --
 # clock.sh now reads two uptime readings, which carry decimals, not two
 # epoch-second integers) must truncate to whole seconds rather than
 # erroring out under bash's integer-only arithmetic.
 out="$("$CLOCK" 2000.87 1000.12)"
-assert_contains "fractional deadline/now truncate to whole seconds" "$out" '#[fg=#2FA6A6]16:40#[default]'
+assert_equals "fractional deadline/now truncate to whole seconds" "$out" '#[fg=#D9D3C4][#[fg=#2FA6A6]16:40#[fg=#D9D3C4]]#[default]'
 
 # No injected "now": falls through to reading /proc/uptime for real.
 # Deadline of 1 second is guaranteed already passed on any host that's
 # been up more than 1 second, so this is deterministic without depending
-# on the actual uptime value. Guarded on /proc/uptime existing so this
-# script still runs end-to-end on a macOS dev machine (no procfs there);
-# the container (this repo's real target) always has it.
+# on the actual uptime value -- the TIME UP string carries no
+# interpolated time itself, so it's still an exact match, not just a
+# substring one. Guarded on /proc/uptime existing so this script still
+# runs end-to-end on a macOS dev machine (no procfs there); the
+# container (this repo's real target) always has it.
 if [ -r /proc/uptime ]; then
   out="$("$CLOCK" 1)"
-  assert_contains "falls back to real /proc/uptime when now is omitted" "$out" 'TIME UP'
+  assert_equals "falls back to real /proc/uptime when now is omitted" "$out" '#[fg=#D9D3C4][#[fg=#F03C3C]#[bold]TIME UP#[nobold]#[fg=#D9D3C4]]#[default]'
 fi
 
 # Usage error when called with no arguments at all.

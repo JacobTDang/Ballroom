@@ -29,6 +29,39 @@ import (
 // from the viewport's budget the way headerHeight used to be.
 const statusBarHeight = 1
 
+// letterspacedUpper uppercases s and inserts a space between every
+// letter (three between words) -- the retro-modern heading treatment
+// the host screens already use for their own titles
+// (internal/tui/retro.go's heading(), e.g. "STATS" -> "S T A T S").
+// Duplicated here rather than imported: internal/tui already imports
+// internal/tutor to embed the pane, so the reverse import would be a
+// cycle. Operates on runes like its tui counterpart, not bytes, so a
+// multi-byte character can't be split into garbage -- not load-bearing
+// for today's all-ASCII mode names, but there's no reason for the copy
+// to be less correct than the original. Mode names (exercise.TutorMode*)
+// are single hyphenated tokens with no whitespace ("hints-first"), so in
+// practice this only ever spaces one "word" -- HINTS-FIRST becomes
+// "H I N T S - F I R S T" -- but it's written generally, the same as
+// heading() itself, rather than hard-coded to that shape.
+func letterspacedUpper(s string) string {
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	for i, word := range strings.Fields(strings.ToUpper(s)) {
+		if i > 0 {
+			b.WriteString("   ")
+		}
+		for j, r := range word {
+			if j > 0 {
+				b.WriteRune(' ')
+			}
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // paneModeColor is the mode pill's background: one color per mode
 // family, so the session's contract is readable at a glance — gold for
 // the hint-budget drill, pink for full assistance, teal for the
@@ -86,12 +119,13 @@ func (m tutorModel) statusEndpointText() string {
 // resort the left half truncates with an ellipsis.
 func (m tutorModel) statusBarView() string {
 	bg := ansiBg(paneStatusBg)
-	// The pill: mode name on its mode color, dark text for contrast
-	// (the pane's own card background doubles as the darkest ink in
-	// the palette). The trailing bg re-arms the row background the
-	// pill's own background replaced.
+	// The pill: mode name uppercase and letterspaced (letterspacedUpper,
+	// matching the host screens' own retro heading treatment) on its
+	// mode color, dark text for contrast (the pane's own card background
+	// doubles as the darkest ink in the palette). The trailing bg
+	// re-arms the row background the pill's own background replaced.
 	pill := ansiBg(paneModeColor(m.cfg.Mode)) + ansiFg(cardBg) + mdBoldOn +
-		" " + strings.ToUpper(m.cfg.Mode) + " " + mdBoldOff + mdColorReset + bg
+		" " + letterspacedUpper(m.cfg.Mode) + " " + mdBoldOff + mdColorReset + bg
 	left := pill + mdDimColor + m.statusLeftText() + mdColorReset
 
 	scroll := fmt.Sprintf("scroll %d%%", int(m.viewport.ScrollPercent()*100+0.5))

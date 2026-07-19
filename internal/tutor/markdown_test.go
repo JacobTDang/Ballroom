@@ -225,11 +225,11 @@ func TestStyleMarkdown_LongBlockquoteKeepsBarOnEveryWrappedLine(t *testing.T) {
 	}
 }
 
-func TestStyleMarkdown_HorizontalRuleRendersDashes(t *testing.T) {
-	if got := stripAnsiTest(styleMarkdown("---", 20)); got != strings.Repeat("─", 20) {
-		t.Errorf("hr at width 20 = %q, want 20 rule cells", got)
+func TestStyleMarkdown_HorizontalRuleRendersDoubleDashes(t *testing.T) {
+	if got := stripAnsiTest(styleMarkdown("---", 20)); got != strings.Repeat("═", 20) {
+		t.Errorf("hr at width 20 = %q, want 20 double-rule cells", got)
 	}
-	if got := stripAnsiTest(styleMarkdown("***", 0)); got != strings.Repeat("─", 40) {
+	if got := stripAnsiTest(styleMarkdown("***", 0)); got != strings.Repeat("═", 40) {
 		t.Errorf("hr at width 0 = %q, want the 40-cell default", got)
 	}
 	if got := styleMarkdown("-- not a rule", 20); stripAnsiTest(got) != "-- not a rule" {

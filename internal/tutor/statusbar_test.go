@@ -98,8 +98,8 @@ func TestStatusBarView_ModePillIsUppercaseWithModeColor(t *testing.T) {
 	m = newM.(tutorModel)
 
 	bar := m.statusBarView()
-	if !strings.Contains(stripAnsiTest(bar), "HINTS-FIRST") {
-		t.Errorf("statusBarView = %q, want the uppercase mode pill", stripAnsiTest(bar))
+	if !strings.Contains(stripAnsiTest(bar), "H I N T S - F I R S T") {
+		t.Errorf("statusBarView = %q, want the uppercase letterspaced mode pill", stripAnsiTest(bar))
 	}
 	if !strings.Contains(bar, ansiBg(trafficGold)) {
 		t.Error("statusBarView missing the hints-first pill's gold background escape")
@@ -118,22 +118,28 @@ func TestStatusBarView_WideShowsScrollEndpointAndExit(t *testing.T) {
 // TestStatusBarView_NarrowDropsEndpointThenScroll: as width shrinks the
 // right side gives way piecewise — endpoint first, then the scroll
 // percentage — and the exit hint survives the longest, mirroring how
-// the old header dropped its endpoint half.
+// the old header dropped its endpoint half. The two widths below (60,
+// 45) are wider than they'd need to be pre-letterspacing: the mode
+// pill's own width roughly doubled (e.g. "SYNTAX-ONLY" -> "S Y N T A X -
+// O N L Y"), which shifts every one of these gives-way thresholds out
+// by the same amount -- picked empirically against statusBarView's
+// actual output rather than hand-computed, the same way the pill's own
+// width isn't hand-computed elsewhere in this file.
 func TestStatusBarView_NarrowDropsEndpointThenScroll(t *testing.T) {
-	bar45 := stripAnsiTest(statusBarModel(t, 45).statusBarView())
-	if strings.Contains(bar45, "long-endpoint") {
-		t.Errorf("width 45: statusBarView = %q, want the endpoint dropped first", bar45)
+	bar60 := stripAnsiTest(statusBarModel(t, 60).statusBarView())
+	if strings.Contains(bar60, "long-endpoint") {
+		t.Errorf("width 60: statusBarView = %q, want the endpoint dropped first", bar60)
 	}
-	if !strings.Contains(bar45, "scroll") || !strings.Contains(bar45, "ctrl+d exit") {
-		t.Errorf("width 45: statusBarView = %q, want scroll %% and the exit hint kept", bar45)
+	if !strings.Contains(bar60, "scroll") || !strings.Contains(bar60, "ctrl+d exit") {
+		t.Errorf("width 60: statusBarView = %q, want scroll %% and the exit hint kept", bar60)
 	}
 
-	bar30 := stripAnsiTest(statusBarModel(t, 30).statusBarView())
-	if strings.Contains(bar30, "scroll") {
-		t.Errorf("width 30: statusBarView = %q, want the scroll %% dropped after the endpoint", bar30)
+	bar45 := stripAnsiTest(statusBarModel(t, 45).statusBarView())
+	if strings.Contains(bar45, "scroll") {
+		t.Errorf("width 45: statusBarView = %q, want the scroll %% dropped after the endpoint", bar45)
 	}
-	if !strings.Contains(bar30, "ctrl+d exit") {
-		t.Errorf("width 30: statusBarView = %q, want the exit hint kept", bar30)
+	if !strings.Contains(bar45, "ctrl+d exit") {
+		t.Errorf("width 45: statusBarView = %q, want the exit hint kept", bar45)
 	}
 }
 
@@ -145,7 +151,7 @@ func TestTutorModel_View_LastLineIsStatusBar(t *testing.T) {
 
 	lines := strings.Split(m.View(), "\n")
 	last := stripAnsiTest(lines[len(lines)-1])
-	if !strings.Contains(last, "HINTS-FIRST") || !strings.Contains(last, "ctrl+d exit") {
+	if !strings.Contains(last, "H I N T S - F I R S T") || !strings.Contains(last, "ctrl+d exit") {
 		t.Errorf("View's last line = %q, want the status bar pinned there", last)
 	}
 	first := stripAnsiTest(lines[0])
