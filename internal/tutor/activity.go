@@ -260,11 +260,16 @@ func coloredGlyph(r, g, b int, glyph string) string {
 
 // The thinking indicator's trailing dots are a traveling wave rather
 // than a static "...": each dot cycles through glyphs of increasing
-// visual height, offset from its neighbor by thinkingWaveSpreadTicks,
-// so the ripple visibly rolls left-to-right while a turn is in flight.
+// visual size, offset from its neighbor by thinkingWaveSpreadTicks, so
+// the ripple visibly rolls left-to-right while a turn is in flight.
 // Rides the same free-running pulse phase as the dot color, so no new
-// tick plumbing.
-var thinkingWaveGlyphs = []string{".", "·", "˙"}
+// tick plumbing. Plain ASCII, like every other glyph in this file (see
+// activityDotGlyph's doc comment for the history) -- an earlier version
+// of this slice used "·" (U+00B7) and "˙" (U+02D9) for the taller
+// frames, which is exactly the class of character this file has already
+// been burned by twice. TestActivityRenderingIsPlainASCII is what
+// catches a repeat of that.
+var thinkingWaveGlyphs = []string{".", "o", "O"}
 
 const (
 	thinkingWaveDotCount    = 3

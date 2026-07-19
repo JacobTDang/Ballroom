@@ -9,14 +9,15 @@ import (
 )
 
 // The editor card: fenced code blocks render as a floating editor
-// window -- rounded frame, header bar with three traffic-light dots
-// and a centered language label, a dim line-number gutter, and
-// syntax-highlighted code on the card's own background -- per the
-// user's reference screenshot ("in the tutor terminal it could display
-// a widget like this"). Cards are fixed-width constructs built per
-// frame at the current pane width (see displayBlock, model.go); code
-// wider than the card hard-truncates with a dim … rather than ever
-// wrapping inside the gutter.
+// window -- double-ruled frame (matching the host panel's own
+// lipgloss.DoubleBorder(), internal/tui/dashboard.go), header bar with
+// three traffic-light dots and a centered language label, a dim
+// line-number gutter, and syntax-highlighted code on the card's own
+// background -- per the user's reference screenshot ("in the tutor
+// terminal it could display a widget like this"). Cards are fixed-width
+// constructs built per frame at the current pane width (see
+// displayBlock, model.go); code wider than the card hard-truncates with
+// a dim … rather than ever wrapping inside the gutter.
 
 // minCardWidth is the narrowest frame that still fits borders, the
 // gutter, and enough code cells to be worth framing -- below it,
@@ -47,8 +48,8 @@ func renderCodeCard(label string, lines []string, width int, unterminated bool) 
 
 	borderFg := ansiFg(paneRule)
 	out := make([]string, 0, len(lines)+3)
-	out = append(out, borderFg+"╭"+strings.Repeat("─", interior)+"╮\x1b[0m")
-	out = append(out, borderFg+"│\x1b[0m"+cardHeaderRow(label, interior)+borderFg+"│\x1b[0m")
+	out = append(out, borderFg+"╔"+strings.Repeat("═", interior)+"╗\x1b[0m")
+	out = append(out, borderFg+"║\x1b[0m"+cardHeaderRow(label, interior)+borderFg+"║\x1b[0m")
 
 	gutterWidth := len(fmt.Sprintf("%d", max(len(lines), 1)))
 	if gutterWidth < 3 {
@@ -69,11 +70,11 @@ func renderCodeCard(label string, lines []string, width int, unterminated bool) 
 			// drop the card background mid-row -- re-arm it after each.
 			strings.ReplaceAll(code, "\x1b[0m", "\x1b[0m"+bg) +
 			bg + strings.Repeat(" ", max(pad, 0)) + "\x1b[0m"
-		out = append(out, borderFg+"│\x1b[0m"+row+borderFg+"│\x1b[0m")
+		out = append(out, borderFg+"║\x1b[0m"+row+borderFg+"║\x1b[0m")
 	}
 
 	if !unterminated {
-		out = append(out, borderFg+"╰"+strings.Repeat("─", interior)+"╯\x1b[0m")
+		out = append(out, borderFg+"╚"+strings.Repeat("═", interior)+"╝\x1b[0m")
 	}
 	return out
 }

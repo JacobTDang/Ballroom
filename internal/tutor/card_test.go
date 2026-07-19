@@ -24,8 +24,8 @@ func TestRenderCodeCard_ExactFrameShape(t *testing.T) {
 	for i, line := range lines {
 		plain[i] = stripAnsiTest(line)
 	}
-	if !strings.HasPrefix(plain[0], "╭") || !strings.HasSuffix(plain[0], "╮") {
-		t.Errorf("top border = %q, want a rounded ╭...╮ rule", plain[0])
+	if !strings.HasPrefix(plain[0], "╔") || !strings.HasSuffix(plain[0], "╗") {
+		t.Errorf("top border = %q, want a double ╔...╗ rule", plain[0])
 	}
 	if !strings.Contains(plain[1], "● ● ●") || !strings.Contains(plain[1], "python") {
 		t.Errorf("header = %q, want the three traffic-light dots and the language label", plain[1])
@@ -36,8 +36,8 @@ func TestRenderCodeCard_ExactFrameShape(t *testing.T) {
 	if !strings.Contains(plain[3], "2") || !strings.Contains(plain[3], "unique = set(nums)") {
 		t.Errorf("second code line = %q, want gutter number 2 and the code", plain[3])
 	}
-	if !strings.HasPrefix(plain[4], "╰") || !strings.HasSuffix(plain[4], "╯") {
-		t.Errorf("bottom border = %q, want a rounded ╰...╯ rule", plain[4])
+	if !strings.HasPrefix(plain[4], "╚") || !strings.HasSuffix(plain[4], "╝") {
+		t.Errorf("bottom border = %q, want a double ╚...╝ rule", plain[4])
 	}
 }
 
@@ -48,7 +48,7 @@ func TestRenderCodeCard_UnterminatedRendersBottomless(t *testing.T) {
 		t.Fatalf("bottomless card has %d lines, want 3 (top, header, 1 code line -- no bottom border):\n%s", len(lines), strings.Join(lines, "\n"))
 	}
 	last := stripAnsiTest(lines[len(lines)-1])
-	if strings.Contains(last, "╰") || strings.Contains(last, "╯") {
+	if strings.Contains(last, "╚") || strings.Contains(last, "╝") {
 		t.Errorf("last line = %q, want no closing border while the fence is still streaming", last)
 	}
 }
@@ -81,7 +81,7 @@ func TestRenderCodeCard_TooNarrowDegradesToFlatCode(t *testing.T) {
 	// rather than rendering a broken frame.
 	lines := renderCodeCard("python", []string{"x = 1"}, 8, false)
 	joined := stripAnsiTest(strings.Join(lines, "\n"))
-	if strings.Contains(joined, "╭") {
+	if strings.Contains(joined, "╔") {
 		t.Errorf("got a framed card at width 8:\n%s\nwant the flat fallback", joined)
 	}
 	if !strings.Contains(joined, "x = 1") {
@@ -93,7 +93,7 @@ func TestStyleMarkdown_FencesBecomeCardsAtRealWidths(t *testing.T) {
 	in := "look:\n```python\nx = 1\n```\ndone"
 	got := styleMarkdown(in, 60)
 
-	if !strings.Contains(got, "╭") || !strings.Contains(got, "╯") {
+	if !strings.Contains(got, "╔") || !strings.Contains(got, "╝") {
 		t.Fatalf("no card frame in output:\n%s", stripAnsiTest(got))
 	}
 	plain := stripAnsiTest(got)
@@ -111,10 +111,10 @@ func TestStyleMarkdown_WidthZeroKeepsRuleStyleFences(t *testing.T) {
 	in := "```python\nx = 1\n```"
 	got := styleMarkdown(in, 0)
 
-	if strings.Contains(got, "╭") {
+	if strings.Contains(got, "╔") {
 		t.Errorf("width<=0 must keep the width-independent rule-style fences, got a card:\n%s", stripAnsiTest(got))
 	}
-	if !strings.Contains(stripAnsiTest(got), "── python ──") {
+	if !strings.Contains(stripAnsiTest(got), "══ python ══") {
 		t.Errorf("rule-style fence label missing:\n%s", stripAnsiTest(got))
 	}
 }
@@ -123,11 +123,11 @@ func TestStyleMarkdown_UnterminatedFenceStreamsAsBottomlessCard(t *testing.T) {
 	in := "here is code:\n```python\nx = 1" // cut mid-stream, no closing fence
 	got := styleMarkdown(in, 60)
 
-	if !strings.Contains(got, "╭") {
+	if !strings.Contains(got, "╔") {
 		t.Fatalf("no card frame for the unterminated fence:\n%s", stripAnsiTest(got))
 	}
-	if strings.Contains(got, "╰") {
-		t.Errorf("unterminated fence must render bottomless (no ╰ yet):\n%s", stripAnsiTest(got))
+	if strings.Contains(got, "╚") {
+		t.Errorf("unterminated fence must render bottomless (no ╚ yet):\n%s", stripAnsiTest(got))
 	}
 }
 
@@ -142,7 +142,7 @@ func TestTutorModel_ResizeReRendersCardsAtNewWidth(t *testing.T) {
 	m.refreshViewport()
 
 	wide := m.viewport.View()
-	if !strings.Contains(stripAnsiTest(wide), "╭") {
+	if !strings.Contains(stripAnsiTest(wide), "╔") {
 		t.Fatalf("no card at width 80:\n%s", stripAnsiTest(wide))
 	}
 	wideTop := cardTopWidth(t, wide)
@@ -168,8 +168,8 @@ func cardTopWidth(t *testing.T, view string) int {
 	t.Helper()
 	for _, line := range strings.Split(view, "\n") {
 		plain := stripAnsiTest(line)
-		if idx := strings.Index(plain, "╭"); idx >= 0 {
-			end := strings.LastIndex(plain, "╮")
+		if idx := strings.Index(plain, "╔"); idx >= 0 {
+			end := strings.LastIndex(plain, "╗")
 			if end <= idx {
 				t.Fatalf("card top border has no closing corner: %q", plain)
 			}

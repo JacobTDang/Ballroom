@@ -1,7 +1,7 @@
 -- Minimum viable nvim config for the practice image (spec Section 6 risk item).
 -- Deliberately no plugin manager / LSP for MVP — bare editor with sane defaults,
--- but not an unstyled one: a built-in colorscheme and a real statusline so it
--- doesn't feel like a blank terminal you got dropped into.
+-- but not an unstyled one: the app's own colorscheme (colors/ballroom.lua) and
+-- a real statusline so it doesn't feel like a blank terminal you got dropped into.
 vim.opt.number = true
 vim.opt.relativenumber = true
 vim.opt.expandtab = true
@@ -28,7 +28,10 @@ vim.opt.clipboard = "unnamedplus"
 vim.opt.autowrite = true
 
 vim.opt.cursorline = true
-vim.cmd.colorscheme("habamax")
+-- Hand-written colorscheme mapping the app's own palette onto the
+-- editor (colors/ballroom.lua) -- replaces the stock habamax theme so
+-- the editor reads as part of this app instead of an unrelated default.
+vim.cmd.colorscheme("ballroom")
 
 vim.opt.laststatus = 3
 vim.opt.statusline = " %{toupper(mode())} │ %f %m%r%h%w%=%y  ln %l/%L col %c │ press <space>? for help "
