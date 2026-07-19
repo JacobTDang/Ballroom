@@ -257,6 +257,10 @@ func solvedCount(problems []ProblemStatus) int {
 	return n
 }
 
+// difficultyRanks is the easy-to-hard order, used when a gated pool
+// comes up empty and has to widen a rank at a time.
+var difficultyRanks = []string{exercise.DifficultyEasy, exercise.DifficultyMedium, exercise.DifficultyHard}
+
 // allowedDifficulties widens as you make progress. An unrated problem
 // is always allowed -- absent metadata should never hide content.
 func allowedDifficulties(solved int) map[string]bool {

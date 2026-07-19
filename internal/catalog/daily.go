@@ -15,10 +15,37 @@ import (
 // FNV-1a over the date string, mod the candidate count: no state to
 // store, and every session that day agrees on the pick.
 func DailyPick(problems []ProblemStatus, now time.Time) (ProblemStatus, bool) {
+	// Difficulty gates the pool by how far along you are. An unweighted
+	// hash over ~600 unsolved problems will eventually hand someone on
+	// day one an advanced graph problem -- a valid pick and a bad
+	// assignment. Due work is exempt: it's time-sensitive, and gating it
+	// would silently drop review a beginner has already started.
+	allowed := allowedDifficulties(solvedCount(problems))
+
 	var candidates []ProblemStatus
 	for _, p := range problems {
-		if Due(p, now) || !p.Solved {
+		if Due(p, now) {
 			candidates = append(candidates, p)
+			continue
+		}
+		if !p.Solved && (allowed == nil || allowed[problemDifficulty(p)]) {
+			candidates = append(candidates, p)
+		}
+	}
+	// Nothing at the gated difficulty (every easy problem solved while
+	// still under the next threshold): widen one rank at a time rather
+	// than all the way open. Jumping straight to "anything unsolved"
+	// would hand out exactly the hard problem the gate existed to
+	// withhold, when a medium was sitting right there.
+	for rank := 0; len(candidates) == 0 && rank < len(difficultyRanks); rank++ {
+		widened := map[string]bool{"": true}
+		for i := 0; i <= rank; i++ {
+			widened[difficultyRanks[i]] = true
+		}
+		for _, p := range problems {
+			if !p.Solved && widened[problemDifficulty(p)] {
+				candidates = append(candidates, p)
+			}
 		}
 	}
 	if len(candidates) == 0 {
