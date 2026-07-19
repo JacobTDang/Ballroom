@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/JacobTDang/Ballroom/internal/catalog"
 	"github.com/JacobTDang/Ballroom/internal/palette"
@@ -137,6 +138,28 @@ func dashboardBanner(phase, availWidth int) string {
 // margins — every line here needs the *same* left margin (based on the
 // block's widest line) so the banner and the body text underneath it
 // stay aligned with each other.
+// wrapRightColumn word-wraps every line of the right column to the
+// column width, so no line can exceed it and get soft-wrapped onto the
+// disco ball. Each line is wrapped independently -- the body's own
+// structure (menu rows, blank lines, dashboard rows) is preserved, and
+// only the over-long lines split. ansi.Wordwrap keeps escape codes and
+// wide characters intact, which matters because the body is styled.
+func wrapRightColumn(right string, avail int) string {
+	if avail <= 0 {
+		return right
+	}
+	lines := strings.Split(right, "\n")
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		if lipgloss.Width(l) <= avail {
+			out = append(out, l)
+			continue
+		}
+		out = append(out, strings.Split(ansi.Wordwrap(l, avail, " -"), "\n")...)
+	}
+	return strings.Join(out, "\n")
+}
+
 func centerRightColumn(right string, avail int) string {
 	lines := strings.Split(right, "\n")
 	maxW := 0
@@ -198,6 +221,13 @@ func renderDashboardPanel(termW, termH, phase int, rightBody string, layout dash
 	rightAvail := innerW - ballW - dashboardGapWidth
 
 	right := dashboardBanner(phase, rightAvail) + "\n\n" + rightBody
+	// Wrap first: a right-column line longer than its column (the
+	// Settings subtitle, a long recommendation reason, the recent list)
+	// would otherwise be soft-wrapped by the panel's fixed width, and
+	// the continuation would land at column 0 -- printed on top of the
+	// disco ball. Word-wrapping to the column keeps the overflow inside
+	// the right column where it belongs.
+	right = wrapRightColumn(right, rightAvail)
 	right = centerRightColumn(right, rightAvail)
 
 	contentH := innerH
