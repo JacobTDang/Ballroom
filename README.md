@@ -194,6 +194,8 @@ go test -race ./internal/...   # unit/integration tests (mocked providers)
 go vet ./cmd/... ./internal/...
 go run ./cmd/verify-exercises  # structural check of every exercise
 go run ./cmd/tutor-preview     # tutor pane on canned fixtures, no network
+# regenerate a README screenshot from a live pane:
+#   tmux capture-pane -e -p -t <target> | go run ./cmd/capture-svg 132 > docs/img/home.svg
 go run ./cmd/tutor-eval        # live model-behavior eval (needs Ollama; slow)
 ```
 
