@@ -195,22 +195,22 @@ func TestTutorModel_View_RendersBothViewportAndTextarea(t *testing.T) {
 	}
 }
 
-// TestTutorModel_InputIsFullRoundedBox pins the input's opencode-style
-// full rounded frame — an explicit user choice (2026-07-17 restyle)
+// TestTutorModel_InputIsFullDoubleRuledBox pins the input's full
+// double-ruled frame, matching the editor cards and the host panel — an explicit user choice (2026-07-17 restyle)
 // superseding the earlier top-rule-only design. The original
 // "sidebar" complaint that killed the first full box was about its
 // bright teal left edge; this frame is the dim structural paneRule,
 // which the user accepted knowingly (see textareaBoxStyle's doc
 // comment in styles.go).
-func TestTutorModel_InputIsFullRoundedBox(t *testing.T) {
+func TestTutorModel_InputIsFullDoubleRuledBox(t *testing.T) {
 	m := newTutorLayoutOnly()
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = newM.(tutorModel)
 
 	out := m.View()
-	for _, corner := range []string{"╭", "╮", "╰", "╯"} {
+	for _, corner := range []string{"╔", "╗", "╚", "╝"} {
 		if !strings.Contains(out, corner) {
-			t.Errorf("View() missing %q, want the input framed as a full rounded box", corner)
+			t.Errorf("View() missing %q, want the input framed as a full double-ruled box", corner)
 		}
 	}
 }

@@ -24,7 +24,15 @@ FROM ubuntu:24.04
 # internal/orchestrator's ballroomImageLabel).
 LABEL com.ballroom.app=practice-image
 
+# LANG/LC_ALL matter more than they look: docker sets TERM for a tty but
+# never a locale, and without a UTF-8 one tmux quietly falls back to
+# single-line ACS drawing -- the pane borders, the editor cards, and the
+# rest of the session's box-drawing chrome all render as plain lines
+# with no error anywhere. C.utf8 ships in the base image, so this needs
+# no locales package.
 ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.utf8 \
+    LC_ALL=C.utf8 \
     GOBIN=/usr/local/bin \
     PATH=/usr/local/go/bin:/opt/pyenv/bin:/usr/local/bin:${PATH}
 

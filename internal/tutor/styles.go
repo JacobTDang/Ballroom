@@ -8,7 +8,7 @@ import "github.com/charmbracelet/lipgloss"
 // ansiFg/ansiBg escapes instead — see statusbar.go's doc comment for
 // why lipgloss colors can vanish under `go test`.)
 
-// textareaBoxStyle frames the input as a full rounded box — the
+// textareaBoxStyle frames the input as a full double-ruled box — the
 // opencode-style anchor of the 2026-07-17 restyle, chosen explicitly
 // by the user, superseding the earlier top-rule-only design. That
 // top-rule design itself replaced an even earlier full box whose
@@ -20,7 +20,7 @@ import "github.com/charmbracelet/lipgloss"
 // the conversation's own left inset (viewportContentStyle's
 // PaddingLeft(2)).
 var textareaBoxStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
+	Border(lipgloss.DoubleBorder()).
 	BorderForeground(lipgloss.Color(paneRule)).
 	PaddingLeft(1)
 
