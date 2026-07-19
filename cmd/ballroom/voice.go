@@ -25,10 +25,6 @@ import (
 // explicit consent. macOS built-in dictation (press fn twice) remains
 // the zero-setup alternative and needs none of this.
 
-// whisperModelURL is ggerganov's official base.en model -- small
-// enough (~142 MB) to download once, accurate enough for dictation.
-const whisperModelURL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
-
 // tutorPaneTarget is the tmux pane the transcript is typed into --
 // session:window.pane per docker/entrypoint.sh's layout (pane 1 is the
 // tutor chat).
@@ -59,8 +55,12 @@ func voiceCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	modelPath := filepath.Join(cfg.DataDir, "whisper", "ggml-base.en.bin")
-	if err := ensureWhisperModel(modelPath); err != nil {
+	model, err := lookupVoiceModel(cfg.VoiceModel)
+	if err != nil {
+		return err
+	}
+	modelPath := filepath.Join(cfg.DataDir, "whisper", model.File)
+	if err := ensureWhisperModel(modelPath, model); err != nil {
 		return err
 	}
 
@@ -97,11 +97,12 @@ func voiceCmd(args []string) error {
 
 // ensureWhisperModel downloads the model on first use, with explicit
 // consent -- a 142 MB download should never happen silently.
-func ensureWhisperModel(path string) error {
+func ensureWhisperModel(path string, model voiceModel) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil
 	}
-	fmt.Printf("whisper model not found at %s\ndownload ggml-base.en.bin (~142 MB) from Hugging Face now? [y/N]: ", path)
+	fmt.Printf("whisper %s model not found\ndownload %s (~%d MB, %s) from Hugging Face now? [y/N]: ",
+		model.Name, model.File, model.MB, model.Note)
 	scanner := bufio.NewScanner(os.Stdin)
 	if !scanner.Scan() || !strings.EqualFold(strings.TrimSpace(scanner.Text()), "y") {
 		return fmt.Errorf("voice: model download declined -- nothing was downloaded")
@@ -109,7 +110,7 @@ func ensureWhisperModel(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("voice: create model dir: %w", err)
 	}
-	curl := exec.Command("curl", "-L", "--fail", "--progress-bar", "-o", path, whisperModelURL)
+	curl := exec.Command("curl", "-L", "--fail", "--progress-bar", "-o", path, model.modelURL())
 	curl.Stdout = os.Stdout
 	curl.Stderr = os.Stderr
 	if err := curl.Run(); err != nil {

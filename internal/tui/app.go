@@ -2123,15 +2123,7 @@ var (
 // the single source for "carry everything forward" saves, so adding a
 // new Settings field can't silently wipe it from one save site.
 func settingsFromConfig(cfg config.Config) config.Settings {
-	return config.Settings{
-		TutorModel:        cfg.TutorModel,
-		OrchestratorModel: cfg.OrchestratorModel,
-		GraderModel:       cfg.GraderModel,
-		OpenRouterAPIKey:  cfg.OpenRouterAPIKey,
-		DefaultLanguage:   cfg.DefaultLanguage,
-		DisableTutorNotes: cfg.DisableTutorNotes,
-		TutorModeOverride: cfg.TutorModeOverride,
-	}
+	return cfg.ToSettings()
 }
 
 func (m appModel) renderSettings() string {

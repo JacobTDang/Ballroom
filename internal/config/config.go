@@ -116,6 +116,10 @@ type Config struct {
 	// behavior). Design/behavioral problems ride coach/interviewer in
 	// the language slot, so they never match and always ask.
 	DefaultLanguage string
+	// VoiceModel selects the whisper model `ballroom voice` transcribes
+	// with -- one of tiny/base/small/medium (see cmd/ballroom's
+	// voicemodel.go). Empty means base, what existing installs have.
+	VoiceModel string
 	// DisableTutorNotes removes the tutor's highlight_lines tool, so
 	// sessions run without editor highlights/notes at all — a durable
 	// alternative to the in-session M-h rendering toggle.
@@ -156,6 +160,8 @@ type Settings struct {
 	// time). Validated on Load, not here — LoadSettings stays a dumb
 	// reader so a bad value still round-trips visibly.
 	DefaultLanguage string `json:"default_language,omitempty"`
+	// VoiceModel mirrors Config.VoiceModel.
+	VoiceModel string `json:"voice_model,omitempty"`
 	// DisableTutorNotes mirrors Config.DisableTutorNotes (issue #25's
 	// durable variant: notes off at the source, not just hidden).
 	DisableTutorNotes bool `json:"disable_tutor_notes,omitempty"`
@@ -220,6 +226,25 @@ func SaveSettings(path string, s Settings) error {
 // silently resolve ExercisesDir/TestsDir/DataDir under whatever
 // directory it happened to be launched from (e.g. $HOME) — an empty
 // picker and "couldn't load your progress", not a working boot.
+// ToSettings projects a Config back into the persistable Settings
+// struct. It exists so the many callers that save settings don't each
+// hand-copy the fields -- a copy that dropped one silently wiped it,
+// which is exactly how a set-model command once erased a saved API key.
+// Every setter goes through here now, so a new field is added in one
+// place.
+func (c Config) ToSettings() Settings {
+	return Settings{
+		TutorModel:        c.TutorModel,
+		OrchestratorModel: c.OrchestratorModel,
+		GraderModel:       c.GraderModel,
+		OpenRouterAPIKey:  c.OpenRouterAPIKey,
+		DefaultLanguage:   c.DefaultLanguage,
+		VoiceModel:        c.VoiceModel,
+		DisableTutorNotes: c.DisableTutorNotes,
+		TutorModeOverride: c.TutorModeOverride,
+	}
+}
+
 func Load() (Config, error) {
 	var root string
 	if envRoot := os.Getenv("PRACTICE_ROOT"); envRoot != "" {
@@ -280,6 +305,7 @@ func Load() (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("config: default_language %q in %s: want python, go, cpp, or empty", settings.DefaultLanguage, cfg.SettingsPath())
 	}
+	cfg.VoiceModel = settings.VoiceModel
 	cfg.DisableTutorNotes = settings.DisableTutorNotes
 	// Same fail-loud contract as default_language above: a hand-edited,
 	// unsupported value must not be silently treated as "exercise

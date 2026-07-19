@@ -90,6 +90,8 @@ Usage:
   ballroom config set-orchestrator-model <tag|none>
                                      Set the orchestrator model that routes turns to the
                                      worker model, or "none" to disable routing
+  ballroom config set-voice-model <tiny|base|small|medium>
+                                     Set the whisper model that voice dictation uses
   ballroom config set-grader-model <tag|none>
                                      Set the model that grades design submits, or "none"
                                      to grade with the worker model
@@ -535,7 +537,7 @@ const hostOllamaAddr = "http://localhost:11434"
 // you want to set.
 func configCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: ballroom config set-model <tag> | ballroom config set-orchestrator-model <tag|none> | ballroom config set-grader-model <tag|none> | ballroom config set-key <key>")
+		return fmt.Errorf("usage: ballroom config set-model <tag> | set-orchestrator-model <tag|none> | set-grader-model <tag|none> | set-voice-model <%s> | set-key <key>", voiceModelNames())
 	}
 	switch args[0] {
 	case "set-model":
@@ -558,9 +560,36 @@ func configCmd(args []string) error {
 			return fmt.Errorf("usage: ballroom config set-key <key>")
 		}
 		return setKeyCmd(args[1])
+	case "set-voice-model":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: ballroom config set-voice-model <%s>", voiceModelNames())
+		}
+		return setVoiceModelCmd(args[1])
 	default:
 		return fmt.Errorf("ballroom config: unknown subcommand %q", args[0])
 	}
+}
+
+// setVoiceModelCmd persists which whisper model `ballroom voice`
+// transcribes with. Bigger models read technical words and names more
+// accurately at the cost of size and speed; the model downloads on
+// first use of `ballroom voice`, not here, so switching is cheap until
+// you actually dictate.
+func setVoiceModelCmd(name string) error {
+	model, err := lookupVoiceModel(name)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.VoiceModel = model.Name
+	if err := config.SaveSettings(cfg.SettingsPath(), cfg.ToSettings()); err != nil {
+		return err
+	}
+	fmt.Printf("voice model set to %s (%s, ~%d MB; downloads on next `ballroom voice`)\n", model.Name, model.Note, model.MB)
+	return nil
 }
 
 // setModelCmd persists tag as the tutor model, preserving the existing
