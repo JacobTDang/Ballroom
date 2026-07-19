@@ -135,9 +135,10 @@ Goal: consistency under pressure and depth where you're weak.
 
 - Re-run Phase 2 questions in interviewer style until grades are consistently
   strong; track which rubric dimensions keep costing points.
-- Unsolved classics as pure mocks (no reference solution to lean on):
-  Dropbox, YouTube/Netflix, WhatsApp, Instagram, a rate limiter, a
-  notification system, nearby-friends/Yelp.
+- The seven that were once interviewer-only -- Dropbox, YouTube/Netflix,
+  WhatsApp, Instagram, a rate limiter, a notification system,
+  nearby-friends/Yelp -- now ship a coach variant and a reference design
+  too, so they follow the same coach-then-mock rhythm as the rest.
 - Deep dives driven by rubric weak spots — e.g. hand-waving cache
   invalidation twice in a row means a caching deep-dive study block.
 - Read real-world architectures from the primer's company-blog list and map
