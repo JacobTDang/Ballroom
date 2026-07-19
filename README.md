@@ -111,11 +111,18 @@ specificity, stakes, ownership, evidence, reflection.
 
 ## The practice loop
 
-1. Pick a problem (or press `2` for **Daily** — a date-stable pick
-   among due and unsolved problems). The picker searches as you type,
-   long categories scroll, and every row carries its `[E]`/`[M]`/`[H]`
-   difficulty badge.
-2. Work in the session; talk to the tutor as much as the mode allows
+1. Pick a problem — press `/` to search the whole catalog by title,
+   id, or track, `n` for what to work on next, or `2` for **Daily** (a
+   date-stable pick that starts easy and widens as you solve more).
+   The picker searches as you type, long categories scroll, and every
+   row carries its `[E]`/`[M]`/`[H]` difficulty badge. `?` shows the
+   keys on any screen.
+2. Work in the session. Your solution saves continuously — leaving,
+   a crash, or a killed container all keep it, and reopening the
+   problem asks whether to resume or start fresh. Stuck? `M-g` reveals
+   the reference solution and the hidden tests, recorded honestly as a
+   give-up so your stats stay true. Talk to the tutor as much as the
+   mode allows
    (coding exercises choose syntax-only / hints-first / full-assist
    per exercise; design and behavioral sessions choose coach or
    interviewer per session).
@@ -136,9 +143,11 @@ specificity, stakes, ownership, evidence, reflection.
    pass whose interviewer mock is untouched), **review due** (a
    failure ≥3 days old, or anything solved but untouched for 30
    days) — due problems float to the top.
-6. **Stats → Rubric weak spots** ranks the rubric dimensions you keep
-   losing points on; when one keeps showing up, that's your next
-   study block.
+6. **Stats** walks your history — arrow through recent activity and
+   press Enter on any problem to see every attempt it has: result,
+   time, hints used, tutor mode, model, and your notes. **Rubric weak
+   spots** ranks the dimensions you keep losing points on; when one
+   keeps showing up, that's your next study block.
 
 ## Inside a session
 
@@ -149,6 +158,8 @@ specificity, stakes, ownership, evidence, reflection.
 | `M-q` | submit (pre-types the command; Enter confirms) |
 | `M-0` | leave the session and return to the picker (y/n confirm) |
 | `M-h` | toggle tutor highlights in the editor |
+| `M-g` | show the reference solution (y/n confirm; records a give-up) |
+| `<space>?` (editor) | vim cheatsheet |
 | `Ctrl-D` (tutor pane) | exit the tutor chat |
 
 Timed sessions show a countdown clock at the right of the status bar
