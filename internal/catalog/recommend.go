@@ -9,8 +9,8 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
 
-// Recommend answers "what should I work on next" -- the question 645
-// exercises and eight roadmaps make genuinely hard to answer alone. The
+// Recommend answers "what should I work on next" -- the question a
+// catalog this size makes genuinely hard to answer alone. The
 // progress bars show where you stand but suggest nothing, and Daily is
 // one date-stable pick; this is the deliberate version.
 //

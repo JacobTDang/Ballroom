@@ -77,6 +77,13 @@ const CategoryBehavioral = "behavioral"
 // design guide and the AIPs. Its own top-level picker entry.
 const CategoryAPIDesign = "api-design"
 
+// CategoryCapitalOne holds the Capital One OA prep problems: ordinary
+// KindCoding exercises (Python only) mirroring the CodeSignal General
+// Coding Assessment's slot shape — the problem-id prefix (c1-warmup-*,
+// c1-grid-*, c1-algo-*) is the slot encoding internal/mock draws
+// sittings from. Its own top-level picker entry, like oo-design.
+const CategoryCapitalOne = "capital-one"
+
 const (
 	LanguageGo     = "go"
 	LanguageCpp    = "cpp"
@@ -148,6 +155,8 @@ var validCategories = map[string]bool{
 	CategoryAPIDesign:    true,
 	CategoryOODesign:     true,
 	CategoryBehavioral:   true,
+
+	CategoryCapitalOne: true,
 }
 
 // The language and tutor-mode vocabularies are kind-gated: a coding

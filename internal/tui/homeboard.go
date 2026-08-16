@@ -38,6 +38,7 @@ var homeTracks = []struct {
 	{exercise.CategoryAPIDesign, "API Design"},
 	{exercise.CategoryOODesign, "OO Design"},
 	{exercise.CategoryBehavioral, "Behavioral"},
+	{exercise.CategoryCapitalOne, "Capital One"},
 }
 
 const progressBarWidth = 14

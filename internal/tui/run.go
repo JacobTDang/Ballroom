@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/JacobTDang/Ballroom/internal/config"
+	"github.com/JacobTDang/Ballroom/internal/mock"
 	"github.com/JacobTDang/Ballroom/internal/orchestrator"
 	"github.com/JacobTDang/Ballroom/internal/tracker"
 )
@@ -58,6 +59,16 @@ func Run(cfg config.Config) error {
 				fmt.Fprintf(os.Stderr, "ballroom: %v\n", runErr)
 			}
 			resume = appResume{}
+		case outcomeRunMock:
+			sitting := runMockReal(cfg, final.mockPlan)
+			if err := mock.AppendSitting(cfg.DataDir, sitting); err != nil {
+				// The sitting ran but its log write failed -- surface it
+				// the same way a failed launch is surfaced (issue #230):
+				// through the resumed screen, not a doomed stderr line.
+				resume = appResume{launchErr: err}
+			} else {
+				resume = appResume{mockSitting: &sitting}
+			}
 		default:
 			resume = appResume{}
 		}

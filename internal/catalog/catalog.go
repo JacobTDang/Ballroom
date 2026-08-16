@@ -47,6 +47,8 @@ var categoryOrder = map[string]int{
 	exercise.CategoryAPIDesign:    24,
 	exercise.CategoryOODesign:     25,
 	exercise.CategoryBehavioral:   26,
+
+	exercise.CategoryCapitalOne: 27,
 }
 
 // languageOrder ranks language variants of the same problem so Python

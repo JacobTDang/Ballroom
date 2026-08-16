@@ -65,12 +65,17 @@ func TestProgressBar_Rendering(t *testing.T) {
 }
 
 func homeboardFixtureProblems() []catalog.ProblemStatus {
+	// A recent attempt date, computed relative to now: an absolute date
+	// here is a time bomb -- a solved problem crosses the 30-day review
+	// window as the wall clock moves and flips the due counts the tests
+	// assert on (which is exactly how the original "2026-07-15" broke).
+	recentDate := time.Now().AddDate(0, 0, -5).Format("2006-01-02")
 	return []catalog.ProblemStatus{
 		{ProblemID: "two-pointers-01", Title: "Two Sum II", Category: "two-pointers", Solved: true,
-			Variants: []catalog.ExerciseStatus{{Exercise: exercise.Exercise{Language: "go"}, Attempts: 1, LastResult: tracker.ResultPass, LastAttemptDate: "2026-07-15"}}},
+			Variants: []catalog.ExerciseStatus{{Exercise: exercise.Exercise{Language: "go"}, Attempts: 1, LastResult: tracker.ResultPass, LastAttemptDate: recentDate}}},
 		{ProblemID: "url-shortener-01", Title: "Design Pastebin / Bit.ly", Category: exercise.CategorySystemDesign,
 			Variants: []catalog.ExerciseStatus{
-				{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageCoach}, Attempts: 1, LastResult: tracker.ResultPass, LastAttemptDate: "2026-07-15"},
+				{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageCoach}, Attempts: 1, LastResult: tracker.ResultPass, LastAttemptDate: recentDate},
 				{Exercise: exercise.Exercise{Kind: exercise.KindDesign, Language: exercise.LanguageInterviewer}},
 			}},
 		{ProblemID: "disagreement-01", Title: "Disagreement With a Teammate", Category: exercise.CategoryBehavioral,

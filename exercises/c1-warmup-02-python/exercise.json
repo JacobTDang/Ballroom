@@ -1,0 +1,12 @@
+{
+  "id": "c1-warmup-02-python",
+  "problem_id": "c1-warmup-02",
+  "title": "Mask Account Numbers",
+  "category": "capital-one",
+  "language": "python",
+  "time_limit_min": 10,
+  "tutor_mode": "hints-first",
+  "repo_path": "./repo",
+  "test_command": "python3 -m pytest -q",
+  "difficulty": "easy"
+}

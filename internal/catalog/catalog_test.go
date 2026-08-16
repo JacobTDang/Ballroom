@@ -365,3 +365,15 @@ func TestFormatSummary_ShowsPerCategoryCounts(t *testing.T) {
 		t.Errorf("summary missing Debug 0/2:\n%s", out)
 	}
 }
+
+func TestCapitalOneCategoryRegistered(t *testing.T) {
+	if _, ok := categoryOrder[exercise.CategoryCapitalOne]; !ok {
+		t.Error("capital-one missing from categoryOrder")
+	}
+	if got := DisplayCategory(exercise.CategoryCapitalOne); got != "Capital One" {
+		t.Errorf("DisplayCategory = %q, want %q", got, "Capital One")
+	}
+	if IsGroupedCategory(exercise.CategoryCapitalOne) {
+		t.Error("capital-one must be its own top-level track, not DSA-nested")
+	}
+}

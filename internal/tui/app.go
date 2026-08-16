@@ -15,6 +15,7 @@ import (
 	"github.com/JacobTDang/Ballroom/internal/config"
 	"github.com/JacobTDang/Ballroom/internal/draft"
 	"github.com/JacobTDang/Ballroom/internal/exercise"
+	"github.com/JacobTDang/Ballroom/internal/mock"
 	"github.com/JacobTDang/Ballroom/internal/palette"
 	"github.com/JacobTDang/Ballroom/internal/preflight"
 	"github.com/JacobTDang/Ballroom/internal/tracker"
@@ -223,6 +224,15 @@ const (
 	// "?" from every stage that takes key input -- see help.go. Esc/q/?
 	// all return to appModel.helpOrigin, the stage it was opened from.
 	stageHelp
+	// stageMockStart (issue #280) is the Capital One mock's confirm
+	// screen: the drawn 4-question plan, the rules line, and the sitting
+	// history. Enter tears the program down for the sequential container
+	// loop (outcomeRunMock) the same way a single exercise launch does.
+	stageMockStart
+	// stageMockSummary shows a finished sitting's per-question results --
+	// entered via appResume.mockSitting when the mock loop's fresh
+	// program comes back up, never navigated to directly.
+	stageMockSummary
 )
 
 // settingsTarget tracks which Config field stageProviderChoice and
@@ -254,6 +264,7 @@ const (
 	outcomeNone appOutcome = iota
 	outcomeRunExercise
 	outcomeRunSandbox
+	outcomeRunMock
 )
 
 // catalogListFn and recentAttemptsFn are vars (not direct calls) so tests
@@ -279,16 +290,18 @@ type menuChoice int
 const (
 	menuPractice menuChoice = iota
 	menuDaily
+	menuMock
 	menuSandbox
 	menuStats
 	menuSettings
 )
 
-var menuLabels = []string{"Practice", "Daily", "Sandbox", "Stats", "Settings"}
+var menuLabels = []string{"Practice", "Daily", "Mock", "Sandbox", "Stats", "Settings"}
 
 var menuDescriptions = []string{
 	"Pick a category and work through exercises",
 	"Today's pick — due or unsolved, same one all day",
+	"Capital One OA mock — 4 questions, one 70-minute clock",
 	"Free practice, no grading, persists across sessions",
 	"See your progress across categories",
 	"Choose your worker and orchestrator models — local (Ollama) or API (OpenRouter)",
@@ -322,6 +335,9 @@ type appResume struct {
 	stage     appStage
 	category  string
 	launchErr error
+	// mockSitting carries a finished Capital One mock's results into the
+	// fresh program so it opens on stageMockSummary (issue #280).
+	mockSitting *mock.Sitting
 }
 
 // appModel is the single bubbletea program behind the whole menu tree:
@@ -463,6 +479,13 @@ type appModel struct {
 	// openHelp/updateHelp in help.go).
 	helpOrigin appStage
 
+	// stageMockStart / stageMockSummary (issue #280): the drawn plan the
+	// mock loop will run, the start screen's history line, and the
+	// finished sitting the summary renders.
+	mockPlan    [4]exercise.Exercise
+	mockHistory string
+	mockSitting *mock.Sitting
+
 	// outcome is read by Run() once the program exits.
 	outcome       appOutcome
 	exerciseToRun exercise.Exercise
@@ -498,6 +521,10 @@ func newAppModel(cfg config.Config, resume appResume) appModel {
 			m.problemFilter = ""
 			m.stage = stageProblems
 		}
+	}
+	if resume.mockSitting != nil {
+		m.mockSitting = resume.mockSitting
+		m.stage = stageMockSummary
 	}
 	return m
 }
@@ -610,6 +637,10 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateOpenRouterKeyEntry(msg)
 		case stageHelp:
 			return m.updateHelp(msg)
+		case stageMockStart:
+			return m.updateMockStart(msg)
+		case stageMockSummary:
+			return m.updateMockSummary(msg)
 		}
 	}
 	return m, nil
@@ -627,7 +658,7 @@ func (m appModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor < len(menuLabels)-1 {
 			m.cursor++
 		}
-	case "1", "2", "3", "4", "5":
+	case "1", "2", "3", "4", "5", "6":
 		n, _ := strconv.Atoi(msg.String())
 		m.cursor = n - 1
 	case "/":
@@ -654,6 +685,8 @@ func (m appModel) chooseMain() (tea.Model, tea.Cmd) {
 		return m.loadPractice(), nil
 	case menuDaily:
 		return m.loadDaily().resolveLanguageStage()
+	case menuMock:
+		return enterMockStart(m), nil
 	case menuSandbox:
 		m.outcome = outcomeRunSandbox
 		return m, tea.Quit
@@ -1595,7 +1628,7 @@ func (m appModel) View() string {
 	// in-body hint line.
 	footer := ""
 	if m.stage == stageMain {
-		footer = "↑/↓ or j/k move · 1-5 jump · enter select · q quit"
+		footer = "↑/↓ or j/k move · 1-6 jump · enter select · q quit"
 	}
 	panel := renderDashboardPanel(m.width, m.height, m.phase, right, layoutCentered, footer)
 	return placeBlock(m.width, m.height, panel)
@@ -1633,6 +1666,10 @@ func (m appModel) renderRight() string {
 		return m.renderOpenRouterKeyEntry()
 	case stageHelp:
 		return m.renderHelp()
+	case stageMockStart:
+		return m.renderMockStart()
+	case stageMockSummary:
+		return m.renderMockSummary()
 	default:
 		return m.renderMain()
 	}
@@ -1744,6 +1781,7 @@ var categoryRoadmapDocs = map[string]string{
 	exercise.CategoryConcurrency:    "docs/concurrency-roadmap.md",
 	exercise.CategoryDebug:          "docs/debug-roadmap.md",
 	exercise.CategoryImplementation: "docs/implementation-roadmap.md",
+	exercise.CategoryCapitalOne:     "docs/capital-one-roadmap.md",
 }
 
 func (m appModel) renderProblems() string {
