@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -47,9 +48,12 @@ func TestRunMockSitting_AllSolved(t *testing.T) {
 	attemptsFake := func(id string) ([]tracker.Attempt, error) { return attempts[id], nil }
 	promptFake := func(q, remaining int) mockChoice { return mockContinue }
 
-	s := runMockSitting(config.Config{}, mockFixturePlan(),
+	s, err := runMockSitting(config.Config{}, mockFixturePlan(),
 		scriptedClock(time.Date(2026, 8, 16, 10, 0, 0, 0, time.UTC), time.Minute),
 		runFake, attemptsFake, promptFake)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(launched) != 4 {
 		t.Fatalf("launched %d questions, want 4", len(launched))
@@ -75,7 +79,7 @@ func TestRunMockSitting_DeadlineStopsLaunches(t *testing.T) {
 
 	// 40-minute steps: the 70-minute budget is gone after the first
 	// couple of clock reads.
-	s := runMockSitting(config.Config{}, mockFixturePlan(),
+	s, _ := runMockSitting(config.Config{}, mockFixturePlan(),
 		scriptedClock(time.Date(2026, 8, 16, 10, 0, 0, 0, time.UTC), 40*time.Minute),
 		runFake, attemptsFake, promptFake)
 
@@ -101,7 +105,7 @@ func TestRunMockSitting_AbortRecordsRestSkipped(t *testing.T) {
 		}
 		return mockContinue
 	}
-	s := runMockSitting(config.Config{}, mockFixturePlan(),
+	s, _ := runMockSitting(config.Config{}, mockFixturePlan(),
 		scriptedClock(time.Date(2026, 8, 16, 10, 0, 0, 0, time.UTC), time.Minute),
 		runFake, attemptsFake, promptFake)
 	if s.Completed {
@@ -121,7 +125,7 @@ func TestRunMockSitting_SkipStillCompletes(t *testing.T) {
 		}
 		return mockContinue
 	}
-	s := runMockSitting(config.Config{}, mockFixturePlan(),
+	s, _ := runMockSitting(config.Config{}, mockFixturePlan(),
 		scriptedClock(time.Date(2026, 8, 16, 10, 0, 0, 0, time.UTC), time.Minute),
 		runFake, attemptsFake, promptFake)
 	if !s.Completed {
@@ -129,6 +133,54 @@ func TestRunMockSitting_SkipStillCompletes(t *testing.T) {
 	}
 	if s.Outcomes[2] != mock.OutcomeSkipped {
 		t.Errorf("skipped slot = %q, want skipped", s.Outcomes[2])
+	}
+}
+
+func TestRunMockSitting_LaunchErrorSurfaces(t *testing.T) {
+	boom := fmt.Errorf("docker went away")
+	calls := 0
+	runFake := func(_ config.Config, ex exercise.Exercise, _ string) error {
+		calls++
+		if calls == 2 {
+			return boom
+		}
+		return nil
+	}
+	attemptsFake := func(string) ([]tracker.Attempt, error) { return nil, nil }
+	promptFake := func(q, remaining int) mockChoice { return mockContinue }
+
+	s, err := runMockSitting(config.Config{}, mockFixturePlan(),
+		scriptedClock(time.Date(2026, 8, 16, 10, 0, 0, 0, time.UTC), time.Minute),
+		runFake, attemptsFake, promptFake)
+	if err == nil || !strings.Contains(err.Error(), "docker went away") {
+		t.Fatalf("launch error must be returned, got %v", err)
+	}
+	if s.Completed {
+		t.Error("an error-aborted sitting must not be Completed")
+	}
+	if calls != 2 {
+		t.Errorf("launches after the error: got %d calls, want 2", calls)
+	}
+}
+
+func TestMockSummaryView_ShowsError(t *testing.T) {
+	m := appModel{cfg: config.Config{}, stage: stageMockSummary, err: fmt.Errorf("docker went away")}
+	m.mockSitting = &mock.Sitting{StartedAt: "2026-08-16T10:00:00Z"}
+	got := stripAnsiTUI(m.renderMockSummary())
+	if !strings.Contains(got, "docker went away") {
+		t.Errorf("summary must surface the session error:\n%s", got)
+	}
+}
+
+func TestMockStartView_TruncatesLongTitles(t *testing.T) {
+	m := appModel{cfg: config.Config{}, stage: stageMockStart}
+	m.mockPlan = mockFixturePlan()
+	m.mockPlan[0].Title = strings.Repeat("Very Long Banking Problem Title ", 4)
+	got := stripAnsiTUI(m.renderMockStart())
+	for _, line := range strings.Split(got, "\n") {
+		if len([]rune(line)) > 76 {
+			t.Errorf("start-screen line overflows the panel (%d runes): %q", len([]rune(line)), line)
+		}
 	}
 }
 

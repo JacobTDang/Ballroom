@@ -60,15 +60,15 @@ func Run(cfg config.Config) error {
 			}
 			resume = appResume{}
 		case outcomeRunMock:
-			sitting := runMockReal(cfg, final.mockPlan)
-			if err := mock.AppendSitting(cfg.DataDir, sitting); err != nil {
-				// The sitting ran but its log write failed -- surface it
-				// the same way a failed launch is surfaced (issue #230):
-				// through the resumed screen, not a doomed stderr line.
-				resume = appResume{launchErr: err}
-			} else {
-				resume = appResume{mockSitting: &sitting}
+			sitting, runErr := runMockReal(cfg, final.mockPlan)
+			if appendErr := mock.AppendSitting(cfg.DataDir, sitting); runErr == nil {
+				runErr = appendErr
 			}
+			// Results and any error travel together: the summary screen
+			// renders both, because a stderr line here would be wiped by
+			// the alt-screen program the next loop iteration starts
+			// (issue #230).
+			resume = appResume{mockSitting: &sitting, launchErr: runErr}
 		default:
 			resume = appResume{}
 		}

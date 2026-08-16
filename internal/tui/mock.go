@@ -36,6 +36,12 @@ const (
 // wall-clock deadline. Every collaborator with a side effect (clock,
 // docker launch, tracker read, stdin prompt) is injected so the loop is
 // unit-testable; runMockReal wires the real ones.
+//
+// The first launch/tracker error aborts the rest of the sitting and is
+// RETURNED, not written to stderr: the very next thing the caller does
+// is start a fresh alt-screen program, which would wipe a stderr line
+// before anyone could read it (the issue #230 lesson) — the summary
+// screen renders it instead.
 func runMockSitting(
 	cfg config.Config,
 	plan [4]exercise.Exercise,
@@ -43,7 +49,7 @@ func runMockSitting(
 	runExercise func(config.Config, exercise.Exercise, string) error,
 	attemptsFor func(exerciseID string) ([]tracker.Attempt, error),
 	prompt func(question int, remainingMin int) mockChoice,
-) mock.Sitting {
+) (mock.Sitting, error) {
 	start := now()
 	deadline := start.Add(mock.TotalMinutes * time.Minute)
 	sitting := mock.Sitting{StartedAt: start.Format(time.RFC3339)}
@@ -52,7 +58,14 @@ func runMockSitting(
 		sitting.Outcomes[i] = mock.OutcomeSkipped
 	}
 
+	var firstErr error
 	aborted, timedOut := false, false
+	fail := func(err error) {
+		if firstErr == nil {
+			firstErr = err
+		}
+		aborted = true
+	}
 	for i, ex := range plan {
 		if aborted {
 			continue // record the rest as skipped, don't break mid-bookkeeping
@@ -72,8 +85,7 @@ func runMockSitting(
 
 		before, err := attemptsFor(ex.ID)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "ballroom: mock: read attempts: %v\n", err)
-			aborted = true
+			fail(fmt.Errorf("mock: read attempts: %w", err))
 			continue
 		}
 		baseline := mock.MaxAttemptID(before)
@@ -86,16 +98,14 @@ func runMockSitting(
 			ex.TimeLimitMin = 1
 		}
 		if runErr := runExercise(cfg, ex, ""); runErr != nil {
-			fmt.Fprintf(os.Stderr, "ballroom: mock: question %d: %v\n", i+1, runErr)
-			aborted = true
+			fail(fmt.Errorf("mock: question %d: %w", i+1, runErr))
 			continue
 		}
 		sitting.MinutesPerSlot[i] = now().Sub(questionStart).Minutes()
 
 		after, err := attemptsFor(ex.ID)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "ballroom: mock: read attempts: %v\n", err)
-			aborted = true
+			fail(fmt.Errorf("mock: read attempts: %w", err))
 			continue
 		}
 		sitting.Outcomes[i] = mock.OutcomeSince(after, baseline)
@@ -106,14 +116,14 @@ func runMockSitting(
 	// offered. A voluntary skip still completes; an abort or a deadline
 	// that cut questions off does not.
 	sitting.Completed = !aborted && !timedOut
-	return sitting
+	return sitting, firstErr
 }
 
 // runMockReal is the production wiring: real clock, real docker launch,
 // real tracker, real stdin prompt between questions (the terminal
 // belongs to the plain console between docker handoffs, same as the
 // moment RunExercise itself returns).
-func runMockReal(cfg config.Config, plan [4]exercise.Exercise) mock.Sitting {
+func runMockReal(cfg config.Config, plan [4]exercise.Exercise) (mock.Sitting, error) {
 	attempts := func(id string) ([]tracker.Attempt, error) {
 		tr, err := tracker.Open(cfg.DBPath)
 		if err != nil {
@@ -186,7 +196,7 @@ func (m appModel) renderMockStart() string {
 	b.WriteString(hintStyle.Render("Capital One mock — CodeSignal GCA format"))
 	b.WriteString("\n\n")
 	for i, ex := range m.mockPlan {
-		b.WriteString(fmt.Sprintf("  Q%d  %-6s  %s (%s)\n", i+1, mock.Slots[i], ex.Title, ex.ProblemID))
+		b.WriteString(fmt.Sprintf("  Q%d  %-6s  %-34s %s\n", i+1, mock.Slots[i], truncateTitle(ex.Title, 34), ex.ProblemID))
 	}
 	b.WriteString("\n" + fmt.Sprintf("%d minutes, forward-only — skip costs the question, the clock never pauses.", mock.TotalMinutes))
 	if m.mockHistory != "" {
@@ -238,6 +248,10 @@ func (m appModel) renderMockSummary() string {
 	b.WriteString(fmt.Sprintf("\nSolved %d/4 · %.0f min total", s.Solved(), s.MinutesTotal))
 	if !s.Completed {
 		b.WriteString(" · ended early")
+	}
+	if m.err != nil {
+		b.WriteString("\n\n")
+		b.WriteString(renderFriendlyError("the sitting hit an error", m.err))
 	}
 	b.WriteString("\n\n[enter] menu")
 	return b.String()
