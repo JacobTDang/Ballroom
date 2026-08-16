@@ -47,7 +47,7 @@ var helpSections = []helpSection{
 		title: "Host keys",
 		keys: []helpKey{
 			{"up/down · j/k", "move the cursor (j/k on menus; pickers reserve letters for search)"},
-			{"1-5", "jump straight to a main-menu item"},
+			{"1-6", "jump straight to a main-menu item"},
 			{"enter", "select"},
 			{"/", "search the whole catalog, from anywhere"},
 			{"PgUp / PgDn", "page Stats' recent-activity list and per-exercise history"},

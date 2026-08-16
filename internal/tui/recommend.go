@@ -12,7 +12,7 @@ import (
 
 // The "next up" picker turns the dashboard's recommendations into
 // something you can act on. It gets its own key ("n") rather than a
-// number because 1-5 are already the menu entries -- and it routes
+// number because 1-6 are already the menu entries -- and it routes
 // through launchExercise like every other path, so a saved draft still
 // prompts before anything is overwritten.
 
