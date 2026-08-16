@@ -109,6 +109,14 @@ implementation track. Curriculum: `docs/api-design-roadmap.md`.
 and timed interviewer mocks. Graded against STAR rubrics: situation
 specificity, stakes, ownership, evidence, reflection.
 
+**Capital One** — twenty original problems shaped like CodeSignal's
+General Coding Assessment, in three pools: eight easy array/string
+warm-ups, six implementation-heavy grid simulations, six algorithmic
+mediums. Practice them one at a time, or take a **Mock** from the main
+menu — four questions drawn across the pools against one 70-minute
+clock, the way the real assessment runs it. Curriculum:
+`docs/capital-one-roadmap.md`.
+
 ## The practice loop
 
 1. Pick a problem — press `/` to search the whole catalog by title,

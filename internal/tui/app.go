@@ -1781,6 +1781,7 @@ var categoryRoadmapDocs = map[string]string{
 	exercise.CategoryConcurrency:    "docs/concurrency-roadmap.md",
 	exercise.CategoryDebug:          "docs/debug-roadmap.md",
 	exercise.CategoryImplementation: "docs/implementation-roadmap.md",
+	exercise.CategoryCapitalOne:     "docs/capital-one-roadmap.md",
 }
 
 func (m appModel) renderProblems() string {
