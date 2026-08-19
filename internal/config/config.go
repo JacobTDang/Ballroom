@@ -11,15 +11,32 @@ import (
 
 const defaultDockerImage = "ballroom-practice"
 
+// Qwen38Model is qwen3.8:27b — the local model this project's tutor is
+// actually driven by day to day, and DefaultTutorModel's value.
+// Confirmed via tutor.CheckToolCalling against a real local Ollama on
+// 2026-08-19 to make genuine structured tool calls, which is the bar
+// every tutor model has to clear (see DefaultTutorModel). Not run
+// through the full cmd/tutor-eval suite — treat its per-mode scores as
+// unmeasured, unlike Qwen2514BModel's.
+const Qwen38Model = "qwen3.8:27b"
+
 // DefaultTutorModel is the Ollama model used when nothing has been
 // persisted to settings.json yet (first run, before the user has ever
 // picked a model). Must support Ollama's structured tool_calls response
 // field, since the tutor agent (internal/tutor) is built around real
 // tool calling — confirmed via cmd/tutor-spike and cmd/tutor-eval that
-// the previous default, qwen2.5-coder:7b, does NOT: it emits
+// an early default, qwen2.5-coder:7b, does NOT: it emits
 // tool-call-shaped JSON as plain text content instead of a real
-// structured call, so switched to llama3.1:8b, which does.
-const DefaultTutorModel = "llama3.1:8b"
+// structured call. llama3.1:8b was the stand-in that did; this is now
+// Qwen38Model, the model actually in use.
+//
+// Note the size: at 17GB this is a much heavier download than the
+// 4.9GB llama3.1:8b it replaced, and internal/tui/boot.go pulls this
+// tag as its fallback when a configured model turns out not to be
+// pulled locally. That fallback is now a long download on a fresh
+// machine, deliberately — the default should be the model this project
+// is actually tuned against, not the smallest one that works.
+const DefaultTutorModel = Qwen38Model
 
 // DeepSeekCoderV2LiteModel is a second tutor model confirmed to work
 // end-to-end (preflight check, TUTOR_MODEL wiring, and a real chat

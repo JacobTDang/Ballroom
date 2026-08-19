@@ -16,7 +16,7 @@ import (
 // (cmd/tutor-preview). Every visual state is reachable from the
 // keyboard so a tmux capture-pane can eyeball them:
 //
-//	ctrl+t  toggle a fake in-flight turn (activity region + aurora)
+//	ctrl+t  toggle a fake in-flight turn (the activity region)
 //	ctrl+s  toggle fake streaming text during the fake turn
 //	enter   echo the typed line as a user block (no model call)
 //	ctrl+d  quit
@@ -96,7 +96,6 @@ func (p previewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				p.inner.refreshViewport()
 				return p, pulseTickCmd()
 			}
-			p.inner.turnSettledAt = time.Now()
 			p.inner.activeCalls = nil
 			p.inner.streamingText = ""
 			p.inner.recomputeLayout()

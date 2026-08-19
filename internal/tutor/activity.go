@@ -274,7 +274,21 @@ var thinkingWaveGlyphs = []string{".", "o", "O"}
 const (
 	thinkingWaveDotCount    = 3
 	thinkingWaveSpreadTicks = 6
+	// thinkingWaveGapWidth is how many spaces sit between neighboring
+	// wave glyphs. Rendered flush the three glyphs read as one smeared
+	// blob rather than three dots riding a wave (real feedback: "the
+	// moving dots could have a little more space in between them"),
+	// and the widest glyph ("O") is the one that makes the crowding
+	// obvious. Every width check that budgets for the wave has to
+	// account for these (see pulsedStatusLine).
+	thinkingWaveGapWidth = 2
 )
+
+// thinkingWaveWidth is the wave's rendered cell count: one cell per
+// glyph plus the gaps between them. The single source of truth for
+// anything sizing the wave, so a gap change can't leave a width check
+// budgeting for the old, tighter render.
+const thinkingWaveWidth = thinkingWaveDotCount + thinkingWaveGapWidth*(thinkingWaveDotCount-1)
 
 // thinkingWaveLevel returns dot i's height (an index into
 // thinkingWaveGlyphs) at the given pulse phase. Pure function of
@@ -289,10 +303,17 @@ func thinkingWaveLevel(phase, i int) int {
 
 // thinkingWaveDots renders the wave for one pulse frame: each dot gets
 // its level's glyph, colored by blending base→glow with height, so a
-// crest both rises and brightens.
+// crest both rises and brightens, with thinkingWaveGapWidth spaces
+// between neighbors so the three read as separate dots. The gaps stay
+// outside every color span -- an uncolored space renders identically
+// either way, and keeping them plain means the rendered width is
+// exactly thinkingWaveWidth in printable cells.
 func thinkingWaveDots(phase int) string {
 	var b strings.Builder
 	for i := 0; i < thinkingWaveDotCount; i++ {
+		if i > 0 {
+			b.WriteString(strings.Repeat(" ", thinkingWaveGapWidth))
+		}
 		lvl := thinkingWaveLevel(phase, i)
 		frac := float64(lvl) / float64(len(thinkingWaveGlyphs)-1)
 		blended := activityPulseBaseColor.BlendLuv(activityPulseGlowColor, frac)
@@ -313,7 +334,7 @@ func pulsedStatusLine(phase, cols int) string {
 	const plain = "Thinking"
 	r, g, b := activityDotColor("running", phase)
 	line := coloredDot(r, g, b) + " " + truncateLine(plain, max(cols-2, 0))
-	if cols-2-len(plain) >= thinkingWaveDotCount {
+	if cols-2-len(plain) >= thinkingWaveWidth {
 		line += thinkingWaveDots(phase)
 	}
 	return line
