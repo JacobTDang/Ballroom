@@ -195,20 +195,9 @@ type tutorModel struct {
 	// only ever non-nil while turnInFlight; pulsePhase free-runs for the
 	// program's whole lifetime (see pulseTickMsg) rather than being
 	// started/stopped per turn, which is only visually relevant while
-	// turnInFlight (plus the aurora fade window just after -- see
-	// auroraFade) anyway and avoids any start/stop bookkeeping.
+	// turnInFlight anyway and avoids any start/stop bookkeeping.
 	activeCalls []activityCall
 	pulsePhase  int
-
-	// turnStartedAt/turnSettledAt anchor the thinking aurora's two
-	// ramps (aurora.go): the bloom-in measures from turnStartedAt, the
-	// fade-out from turnSettledAt. Both may be backdated at the
-	// transition (see submit and the turnCompleteMsg case) so the glow
-	// always continues from its current level rather than jumping.
-	// Zero turnSettledAt means no turn has ever completed, so the
-	// aurora has never had a reason to exist.
-	turnStartedAt time.Time
-	turnSettledAt time.Time
 
 	// streamingText is the in-flight turn's partial reply so far (full
 	// accumulated text, not a delta -- see pushLatestStreamText), shown
@@ -216,11 +205,7 @@ type tutorModel struct {
 	// runs (refreshViewport) and cleared when it completes; the final
 	// reply is appended through the exact same turnCompleteMsg path as a
 	// non-streamed turn, so the settled display is byte-identical.
-	// streamPainting flips true at the first painted chunk and makes the
-	// aurora begin its fade-out mid-turn (auroraFade) -- the reply is
-	// visibly arriving, so the "thinking" glow should already be dying.
-	streamingText  string
-	streamPainting bool
+	streamingText string
 
 	// transcriptWarned makes transcript-export failures warn exactly
 	// once (see the turnCompleteMsg case) instead of once per turn.
@@ -568,15 +553,6 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.seq != m.turnSeq {
 			return m, nil
 		}
-		if !m.streamPainting && msg.text != "" {
-			// First painted chunk: the reply is visibly arriving, so the
-			// thinking glow starts dying now rather than at turn
-			// completion -- backdated the same way turnCompleteMsg does,
-			// so the fade continues from the glow's current level.
-			glowLevel := m.auroraFade()
-			m.streamPainting = true
-			m.turnSettledAt = time.Now().Add(-auroraFadeOutLead(glowLevel))
-		}
 		m.streamingText = msg.text
 		m.refreshViewport()
 		return m, waitForActivityEvent(msg.seq, msg.activityCh, msg.streamCh, msg.doneCh)
@@ -616,19 +592,12 @@ func (m tutorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// at cancel time (cancelInFlightTurn).
 			return m, nil
 		}
-		// Read the glow's level before flipping turnInFlight, then
-		// backdate the settle time so the fade-out resumes from that
-		// level -- a reply landing mid-bloom must not flash the glow
-		// up to full brightness before it dies.
-		glowLevel := m.auroraFade()
 		m.turnInFlight = false
 		m.turnCancel = nil
-		m.turnSettledAt = time.Now().Add(-auroraFadeOutLead(glowLevel))
 		// The provisional streamed block (if any) is done: the final
 		// reply below replaces it on success, and a failed turn must not
 		// leave a partial reply looking like a real one.
 		m.streamingText = ""
-		m.streamPainting = false
 		calls := m.activeCalls
 		m.activeCalls = nil
 		m.helpRequestCount = msg.helpRequestCount
@@ -864,10 +833,7 @@ func (m tutorModel) cancelInFlightTurn() (tea.Model, tea.Cmd) {
 	m.turnSeq++
 	m.queuedSubmits = nil
 
-	glowLevel := m.auroraFade()
-	m.turnSettledAt = time.Now().Add(-auroraFadeOutLead(glowLevel))
 	m.streamingText = ""
-	m.streamPainting = false
 	m.activeCalls = nil
 	m.recomputeLayout()
 
@@ -930,15 +896,8 @@ func (m tutorModel) submit() (tea.Model, tea.Cmd) {
 	m.comprehensionCheckPending = false
 
 	m.textarea.Reset()
-	// Read any still-fading glow before flipping turnInFlight, then
-	// backdate the start time so the bloom resumes from that level --
-	// resubmitting during a fade-out must not blink the glow down to
-	// zero before it gathers again.
-	glowLevel := m.auroraFade()
 	m.turnInFlight = true
-	m.turnStartedAt = time.Now().Add(-auroraFadeInLead(glowLevel))
 	m.streamingText = ""
-	m.streamPainting = false
 	// A new generation starts here, whether the turn can actually start
 	// its goroutine yet or is about to be queued below -- either way
 	// this line's text is now "in flight" from the user's perspective,
@@ -1280,11 +1239,5 @@ func (m tutorModel) View() string {
 		parts = append(parts, av)
 	}
 	parts = append(parts, textareaBoxStyle.Render(m.textarea.View()), m.statusBarView())
-	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	fade := m.auroraFade()
-	if fade <= 0 {
-		return content
-	}
-	t := float64(m.pulsePhase) * activityPulseInterval.Seconds()
-	return overlayAurora(content, m.width, m.height, t, auroraBrightness*fade)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }

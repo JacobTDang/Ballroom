@@ -80,9 +80,6 @@ func TestTutorModel_WindowSizeMsg_SetsViewportAndTextareaWidth(t *testing.T) {
 	if got.width != 100 || got.height != 30 {
 		t.Errorf("width,height = %d,%d, want 100,30", got.width, got.height)
 	}
-	// The thinking aurora is a background (aurora.go), not a frame --
-	// it reserves no cells, so content sizes against the full terminal
-	// width.
 	if got.viewport.Width != 100 {
 		t.Errorf("viewport.Width = %d, want 100", got.viewport.Width)
 	}
@@ -1176,9 +1173,8 @@ func TestTutorModel_View_ShowsActivityRegionOnlyWhileTurnInFlight(t *testing.T) 
 	}
 
 	m.turnInFlight = true
-	// Strip styling first: the thinking aurora paints a background
-	// escape before every glyph (see overlayAurora), so the call name
-	// is present but never as one contiguous raw substring.
+	// Strip styling first: the call name carries its own bold escapes,
+	// so it is present but not as one contiguous raw substring.
 	if !strings.Contains(ansi.Strip(m.View()), "read_solution_file") {
 		t.Error("expected the activity region to show the active call while a turn is in flight")
 	}
@@ -2166,5 +2162,36 @@ func TestTutorModel_ContextOverflowFailureShowsDistinctNoteFromNetworkFailure(t 
 	}
 	if strings.Contains(view, "could not reach") {
 		t.Errorf("viewport view %q, want the overflow note distinct from the generic connectivity wording", view)
+	}
+}
+
+// TestTutorModel_ViewPaintsNoBackgroundBehindTheConversation is the
+// guard on the removed thinking aurora: the pane used to overlay a
+// drifting border glow while a turn was in flight, painting a truecolor
+// background escape behind every edge cell of every row. It read as
+// clutter next to the activity region's own pulsing dot and traveling
+// wave, so it's gone -- nothing paints behind the conversation anymore,
+// in any state. The status bar (the last row) is excluded deliberately:
+// its own header-bar background is real chrome, not an overlay.
+func TestTutorModel_ViewPaintsNoBackgroundBehindTheConversation(t *testing.T) {
+	base := newTutorLayoutOnly()
+	newM, _ := base.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := newM.(tutorModel)
+	m.activeCalls = []activityCall{{name: "read_solution_file", status: "running"}}
+
+	for _, tc := range []struct {
+		name     string
+		inFlight bool
+	}{
+		{"idle", false},
+		{"turn in flight", true},
+	} {
+		m.turnInFlight = tc.inFlight
+		rows := strings.Split(m.View(), "\n")
+		for i, row := range rows[:len(rows)-1] {
+			if strings.Contains(row, "\x1b[48;2;") {
+				t.Errorf("View() while %s paints a truecolor background on row %d (%q), want foreground styling only above the status bar", tc.name, i, row)
+			}
+		}
 	}
 }

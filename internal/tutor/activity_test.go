@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestActivityFeed_StartedAddsARunningCall(t *testing.T) {
@@ -741,5 +743,45 @@ func TestTruncateLine_MaxOfZeroOrLessReturnsEmpty(t *testing.T) {
 func TestTruncateLine_MaxSmallerThanEllipsisTruncatesTheEllipsisItself(t *testing.T) {
 	if got := truncateLine("anything long enough to truncate", 2); got != ".." {
 		t.Errorf("truncateLine(_, 2) = %q, want \"..\"", got)
+	}
+}
+
+// TestThinkingWaveDots_SeparatesAdjacentDots pins the gap between the
+// wave's glyphs. Rendered flush against each other the three glyphs
+// read as one smeared blob rather than three dots riding a wave (real
+// feedback: "the moving dots could have a little more space in between
+// them"), so every neighboring pair is separated by
+// thinkingWaveGapWidth spaces. Asserted on the stripped text, since
+// each glyph carries its own color span.
+func TestThinkingWaveDots_SeparatesAdjacentDots(t *testing.T) {
+	plain := ansi.Strip(thinkingWaveDots(0))
+	want := thinkingWaveDotCount + thinkingWaveGapWidth*(thinkingWaveDotCount-1)
+	if len(plain) != want {
+		t.Fatalf("thinkingWaveDots(0) plain text = %q (%d cells), want %d -- %d glyphs separated by %d spaces each", plain, len(plain), want, thinkingWaveDotCount, thinkingWaveGapWidth)
+	}
+	gap := strings.Repeat(" ", thinkingWaveGapWidth)
+	for i := 1; i < thinkingWaveDotCount; i++ {
+		at := i*(1+thinkingWaveGapWidth) - thinkingWaveGapWidth
+		if plain[at:at+thinkingWaveGapWidth] != gap {
+			t.Errorf("thinkingWaveDots(0) = %q, want a %d-space gap before dot %d", plain, thinkingWaveGapWidth, i)
+		}
+	}
+}
+
+// TestPulsedStatusLine_DropsWaveWhenTheGapsNoLongerFit guards the width
+// accounting against the gaps the wave now carries: the wave is dropped
+// whole (never sliced mid-escape) at the width that fits the bare
+// glyphs but not the spaces between them.
+func TestPulsedStatusLine_DropsWaveWhenTheGapsNoLongerFit(t *testing.T) {
+	const plain = "Thinking"
+	waveCells := thinkingWaveDotCount + thinkingWaveGapWidth*(thinkingWaveDotCount-1)
+	// One cell short of what the spaced wave needs.
+	cols := 2 + len(plain) + waveCells - 1
+	got := ansi.Strip(pulsedStatusLine(0, cols))
+	if len(got) > 2+len(plain) {
+		t.Errorf("pulsedStatusLine(0, %d) = %q (%d cells), want the wave dropped whole at %d cells", cols, got, len(got), 2+len(plain))
+	}
+	if fits := ansi.Strip(pulsedStatusLine(0, cols+1)); len(fits) != 2+len(plain)+waveCells {
+		t.Errorf("pulsedStatusLine(0, %d) = %q (%d cells), want the full spaced wave (%d cells)", cols+1, fits, len(fits), 2+len(plain)+waveCells)
 	}
 }

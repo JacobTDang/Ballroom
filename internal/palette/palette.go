@@ -54,24 +54,12 @@ const (
 	GutterFg     = "#5C5852" // line-number gutter
 )
 
-// The thinking aurora's own colors (internal/tutor/aurora.go). These
-// are deliberately not the chrome accents: the glow is a decorative
-// wash that has to read as light passing behind the frame, which wants
-// a wider, cooler range than the app's four accents. They live here so
-// there is still exactly one file to open when re-theming — not
-// because they play the same role.
-const (
-	AuroraCyan       = "#19E3F0"
-	AuroraPeriwinkle = "#6C7BE0"
-	AuroraMagenta    = "#C13FD0"
-	AuroraMint       = "#BFE8E0"
-	AuroraBase       = "#1E50A2" // the quiet blue the blobs float over
-
-	// PulseGlow is the activity dot's peak — a pale tint of Teal it
-	// brightens toward, rather than dimming toward black (a dot that
-	// dims reads as flickering off).
-	PulseGlow = "#BFFCF7"
-)
+// PulseGlow is the tutor pane's activity dot and thinking-wave peak — a
+// pale tint of Teal they brighten toward, rather than dimming toward
+// black (a dot that dims reads as flickering off). Not one of the chrome
+// accents above: it is an animation's high point, not a role color, so
+// it stays out of All() and the container drift test.
+const PulseGlow = "#BFFCF7"
 
 // Lip wraps a palette color for lipgloss styles.
 func Lip(hex string) lipgloss.Color { return lipgloss.Color(hex) }
